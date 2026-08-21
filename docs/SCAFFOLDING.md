@@ -322,16 +322,19 @@ cron (*/15)
      └─ POST /speech-to-text/job/v1/<job_id>/start       → stt_status = 'submitted'
         (job_id is a path segment; job_parameters is echoed again in the body)
 
-Sarvam → POST /webhooks/sarvam  (job_state: Completed)
+Sarvam → POST /webhooks/sarvam  ({ job_id, status: "Completed", error })
   ├─ validate X-SARVAM-JOB-CALLBACK-TOKEN
   ├─ GET  /speech-to-text/job/v1/<job_id>/status
-  │       → download_urls.<file>.json.file_url  (no separate download-files call)
+  │       → job_details[].outputs[].file_name
+  ├─ POST /speech-to-text/job/v1/download-files  → download_urls.<file>.file_url
   ├─ GET  <file_url> → { transcript, language_code, diarized_transcript }
   ├─ stt_status = 'transcribed'
   └─ ctx.waitUntil(extract(...))                         → §6
 ```
 
-Verified live against the real API on 2026-08-21 — this supersedes an earlier draft of this flow that used a two-step `/status` → `POST /download-files` fetch and `model: "saaras:v3"`. Both were wrong: `/status` alone returns `download_urls`, and the working model id is `saaras:v4`. `job_parameters` also needs `with_timestamps: true`.
+Verified live against a real completed job on 2026-08-21: `/status` does **not** return `download_urls` — the two-step `/status` → `POST /download-files` fetch is required, as originally documented. (An earlier revision of this doc briefly claimed `/status` alone was sufficient, based on a curl example that turned out not to match this job's actual response; that revision has been reverted.) The `saaras:v4` model bump and `with_timestamps: true` **are** confirmed correct — that job submitted and completed successfully with those parameters. The 0.json result payload shape (`transcript` / `language_code` / `diarized_transcript.entries`) is also now confirmed to match `SarvamResult` as coded.
+
+**The webhook body itself uses `status`, not `job_state`.** A real callback on 2026-08-21 was `{"job_id", "job_type", "status": "Completed", "completion_time", "error"}` — the earlier `job_state`-based assumption silently ate every real callback (fell through to a no-op branch, leaving `stt_status` stuck at `submitted` with no error). Fixed in `src/handlers/stt-webhook.ts`.
 
 See [`src/lib/sarvam.ts`](../src/lib/sarvam.ts) for the actual implementation — `submitRecording` (job create → upload-files → presigned PUT with the `x-ms-blob-type: BlockBlob` header Azure's SAS PUT requires → start) and `fetchResult` (status → `download_urls.<file>.json.file_url` → fetch). That file is the source of truth; this doc no longer inlines a copy to avoid the two drifting apart.
 

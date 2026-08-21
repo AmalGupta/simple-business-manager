@@ -2,10 +2,11 @@
 // in ctx.waitUntil. See docs/SCAFFOLDING.md §5 for the job flow and docs/BUILD_BRIEF.md
 // "Stop and show me the transcript before continuing" for why Task 4 is a hard gate.
 //
-// The exact webhook body field names (job_id / job_state) are inferred from
-// the pipeline diagram in §5, not from a captured real payload — that diagram
-// is the only spec given. If a live Sarvam callback doesn't match this shape,
-// that mismatch is exactly the go/no-go signal Task 4 exists to surface.
+// Body shape confirmed against a real live callback on 2026-08-21:
+// {"job_id": "...", "job_type": "SPEECH_TO_TEXT_BULK", "status": "Completed",
+//  "completion_time": "...", "error": ""} — note "status", not "job_state" as
+// an earlier draft of this file assumed (that mismatch was silently eating
+// every real callback: undefined !== "Completed" fell through to a no-op).
 
 import { ACTIVE } from "../../packages/core/prompts";
 import { extractCall } from "../../packages/core/prompts/extract";
@@ -15,7 +16,8 @@ import type { Env } from "../index";
 
 interface SarvamWebhookBody {
   job_id: string;
-  job_state: string;
+  status: string;
+  error?: string;
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -37,18 +39,21 @@ export async function handleSarvamWebhook(
     return new Response("Unauthorized", { status: 401 });
   }
 
+  const rawBody = await request.text();
+  console.log("[sarvam webhook] raw body:", rawBody);
+
   let body: SarvamWebhookBody;
   try {
-    body = await request.json();
+    body = JSON.parse(rawBody);
   } catch {
     return new Response("Invalid JSON body", { status: 400 });
   }
 
-  if (body.job_state !== "Completed") {
+  if (body.status !== "Completed") {
     // Acknowledge intermediate/failed states without processing.
-    if (body.job_state === "Failed") {
+    if (body.status === "Failed") {
       const call = await getCallByJobId(env.DB, body.job_id);
-      if (call) await setCallFailed(env.DB, call.id, `Sarvam job_state: ${body.job_state}`);
+      if (call) await setCallFailed(env.DB, call.id, `Sarvam status: ${body.status}${body.error ? ` — ${body.error}` : ""}`);
     }
     return new Response("ok", { status: 200 });
   }
