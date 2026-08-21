@@ -1,0 +1,12 @@
+# Local wrangler secrets — copy to .dev.vars (gitignored). See docs/SCAFFOLDING.md §3.
+# Generate secrets: openssl rand -hex 32
+
+# Shared secret gating POST /upload and /api/* — see docs/BUILD_BRIEF.md
+# "No Cloudflare Access on this worker". GET /upload itself is unauthenticated
+# (the worker injects this value server-side into the upload page's JS).
+SBM_API_KEY=replace-with-openssl-rand-hex-32
+
+# Not needed until Task 3 (Sarvam submit) and Task 5 (extraction).
+SARVAM_API_KEY=sk_your-sarvam-key-here
+SARVAM_WEBHOOK_TOKEN=replace-with-openssl-rand-hex-32
+ANTHROPIC_API_KEY=sk-ant-your-key-here
