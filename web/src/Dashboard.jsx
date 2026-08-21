@@ -712,30 +712,37 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
           paddingTop: "1rem",
         }}
       >
-        <button
-          onClick={() => setOpenTranscript((v) => !v)}
-          aria-expanded={openTranscript}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: 0,
-            border: "none",
-            background: "none",
-            cursor: "pointer",
-            color: t.edge2,
-            fontSize: 13,
-          }}
-        >
-          <FileText size={16} />
-          {openTranscript ? "Hide transcript" : "Read full transcript"}
-        </button>
+        {call.transcript == null ? (
+          <span style={{ display: "flex", alignItems: "center", gap: 8, color: t.edge2, fontSize: 13 }}>
+            <FileText size={16} />
+            Transcription in progress
+          </span>
+        ) : (
+          <button
+            onClick={() => setOpenTranscript((v) => !v)}
+            aria-expanded={openTranscript}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: 0,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              color: t.edge2,
+              fontSize: 13,
+            }}
+          >
+            <FileText size={16} />
+            {openTranscript ? "Hide transcript" : "Read full transcript"}
+          </button>
+        )}
         <DownloadButton calls={[call]} label={`${call.client_name.toLowerCase().replace(/\s+/g, "-")}-${dayKey(call.recorded_at)}`}>
           Call report
         </DownloadButton>
       </div>
 
-      {openTranscript && (
+      {call.transcript != null && openTranscript && (
         <p style={{ fontSize: 13, lineHeight: 1.8, color: t.edge2, marginTop: 12, whiteSpace: "pre-wrap" }}>
           {call.transcript}
         </p>

@@ -1,7 +1,7 @@
 // Types matching the D1 schema — see schema.sql and docs/SCAFFOLDING.md §4.
 
 export type CallSource = "android" | "ios";
-export type SttStatus = "pending" | "submitted" | "transcribed" | "extracted" | "failed";
+export type SttStatus = "pending" | "transcription_in_progress" | "transcribed" | "extracted" | "failed";
 export type TodoOwner = "self" | "customer";
 export type TodoStatus = "open" | "done" | "snoozed";
 export type TodoOrigin = "llm" | "manual";

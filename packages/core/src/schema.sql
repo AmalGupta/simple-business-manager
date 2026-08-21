@@ -18,7 +18,7 @@ CREATE TABLE calls (
 
   stt_job_id      TEXT,
   stt_status      TEXT NOT NULL DEFAULT 'pending',
-                  -- pending | submitted | transcribed | extracted | failed
+                  -- pending | transcription_in_progress | transcribed | extracted | failed
   stt_error       TEXT,
 
   -- the six extracted fields

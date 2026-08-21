@@ -60,10 +60,10 @@ export async function getCallByJobId(db: D1Database, jobId: string): Promise<Cal
   return row ?? null;
 }
 
-/** Task 3 — Sarvam job accepted. */
+/** Task 3 — Sarvam job accepted and transcribing. */
 export async function setCallSubmitted(db: D1Database, callId: string, jobId: string): Promise<void> {
   await db
-    .prepare(`UPDATE calls SET stt_status = 'submitted', stt_job_id = ? WHERE id = ?`)
+    .prepare(`UPDATE calls SET stt_status = 'transcription_in_progress', stt_job_id = ? WHERE id = ?`)
     .bind(jobId, callId)
     .run();
 }
