@@ -18,7 +18,8 @@ export interface Call {
   r2_key: string;
   client_id: string | null;
   source: CallSource;
-  recorded_at: string | null;
+  recorded_at: string | null; // when this row was uploaded
+  recording_date: string | null; // recorder's own filename timestamp, if parseable
   duration_s: number | null;
 
   stt_job_id: string | null;

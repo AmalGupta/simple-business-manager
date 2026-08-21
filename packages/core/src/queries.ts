@@ -6,17 +6,18 @@ export interface NewCallInput {
   id: string;
   r2Key: string;
   source: CallSource;
-  recordedAt: string | null;
+  recordedAt: string;
+  recordingDate: string | null;
   durationS: number | null;
 }
 
 export async function insertCall(db: D1Database, input: NewCallInput): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO calls (id, r2_key, source, recorded_at, duration_s, stt_status)
-       VALUES (?, ?, ?, ?, ?, 'pending')`
+      `INSERT INTO calls (id, r2_key, source, recorded_at, recording_date, duration_s, stt_status)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending')`
     )
-    .bind(input.id, input.r2Key, input.source, input.recordedAt, input.durationS)
+    .bind(input.id, input.r2Key, input.source, input.recordedAt, input.recordingDate, input.durationS)
     .run();
 }
 
@@ -154,6 +155,7 @@ export interface CallRow {
   client_name: string;
   client_phone: string | null;
   recorded_at: string | null;
+  recording_date: string | null;
   duration_s: number | null;
   source: CallSource;
   customer_waiting: 0 | 1;
@@ -179,6 +181,7 @@ interface RawCallJoinRow {
   id: string;
   duration_s: number | null;
   recorded_at: string | null;
+  recording_date: string | null;
   source: CallSource;
   summary: string | null;
   key_takeaways: string | null;
@@ -202,7 +205,7 @@ interface RawTodoRow {
 }
 
 const CALL_SELECT = `
-  SELECT calls.id, calls.duration_s, calls.recorded_at, calls.source,
+  SELECT calls.id, calls.duration_s, calls.recorded_at, calls.recording_date, calls.source,
          calls.summary, calls.key_takeaways, calls.unresolved, calls.deadline,
          transcripts.transcript AS transcript,
          COALESCE(clients.name, 'Unknown caller') AS client_name,
@@ -235,6 +238,7 @@ function toCallRow(c: RawCallJoinRow, todos: TodoRow[], customerWaiting: 0 | 1):
     client_name: c.client_name,
     client_phone: c.client_phone,
     recorded_at: c.recorded_at,
+    recording_date: c.recording_date,
     duration_s: c.duration_s,
     source: c.source,
     customer_waiting: customerWaiting,

@@ -122,9 +122,12 @@ export async function handleUploadPost(
     id: callId,
     r2Key,
     source,
-    // Prefer the timestamp encoded in the recorder's own filename (see
-    // docs/SCAFFOLDING.md §10); fall back to upload time when it doesn't match.
-    recordedAt: parseRecordedAtFromFilename(file.name) ?? new Date().toISOString(),
+    // recordedAt is always upload time. recordingDate is the recorder's own
+    // filename timestamp (see docs/SCAFFOLDING.md §10) when parseable, kept
+    // as a separate field — the two can legitimately differ by hours or
+    // days when a recording is uploaded well after the call happened.
+    recordedAt: new Date().toISOString(),
+    recordingDate: parseRecordedAtFromFilename(file.name),
     durationS: null,
   });
 

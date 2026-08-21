@@ -73,9 +73,17 @@ export async function submitRecording(
 
   const putRes = await fetch(uploadUrl, {
     method: "PUT",
-    // Azure Blob SAS PUT rejects the request with 400 MissingRequiredHeader
-    // without this — confirmed against a live presigned URL.
-    headers: { "x-ms-blob-type": "BlockBlob" },
+    headers: {
+      // Azure Blob SAS PUT rejects the request with 400 MissingRequiredHeader
+      // without this — confirmed against a live presigned URL.
+      "x-ms-blob-type": "BlockBlob",
+      // Without a Content-Type, the blob is stored untyped and Sarvam
+      // silently returns job_state: "Completed" with an EMPTY transcript —
+      // no error anywhere. Confirmed live 2026-08-21: identical audio,
+      // identical job_parameters, only difference was this header, and it
+      // was the difference between an empty result and a full transcript.
+      "Content-Type": object.httpMetadata?.contentType || "application/octet-stream",
+    },
     body: object.body, // streamed, never buffered
   });
   if (!putRes.ok) throw new Error(`Sarvam presigned PUT failed: ${putRes.status} ${await putRes.text()}`);

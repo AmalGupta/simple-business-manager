@@ -13,7 +13,8 @@ CREATE TABLE calls (
   r2_key          TEXT NOT NULL UNIQUE,
   client_id       TEXT REFERENCES clients(id),
   source          TEXT NOT NULL,        -- 'android' | 'ios'
-  recorded_at     TEXT,
+  recorded_at     TEXT,                 -- when this row was uploaded (not necessarily when the call happened)
+  recording_date  TEXT,                 -- the recorder's own filename timestamp, if the filename matched (e.g. AUDIO-2026-08-20-22-05-33.m4a); NULL otherwise
   duration_s      INTEGER,
 
   stt_job_id      TEXT,
