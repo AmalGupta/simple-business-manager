@@ -58,6 +58,7 @@ export interface Transcript {
   id: string;
   r2_key: string;
   transcript: string;
+  summary: string | null; // placeholder — not written by any code path yet, distinct from Call.summary
   language_code: string | null;
   diarized_transcript: string | null; // JSON — DiarizedEntry[]
   fetched_at: string;

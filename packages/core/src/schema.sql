@@ -64,6 +64,7 @@ CREATE TABLE transcripts (
   id                  TEXT PRIMARY KEY,
   r2_key              TEXT NOT NULL UNIQUE REFERENCES calls(r2_key),
   transcript          TEXT NOT NULL,
+  summary             TEXT,            -- placeholder: not written by any code path yet, distinct from calls.summary (the LLM six-field extraction)
   language_code       TEXT,
   diarized_transcript TEXT,            -- JSON: { entries: [{ speaker_id, transcript }] }
   fetched_at          TEXT NOT NULL DEFAULT (datetime('now'))
