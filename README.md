@@ -1,2 +1,1 @@
-# the-clerk
-The clerk for your business.
+# simple-business-manager
