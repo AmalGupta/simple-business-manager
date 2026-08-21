@@ -53,5 +53,29 @@ export async function extractCall(input: ExtractInput): Promise<CallExtraction> 
   const data = (await res.json()) as AnthropicMessageResponse;
   const block = data.content.find((b) => b.type === "tool_use");
   if (!block) throw new Error("no tool_use block returned");
-  return block.input as CallExtraction;
+  return normalizeExtraction(block.input);
+}
+
+/**
+ * Forced tool_choice makes a schema-violating response unlikely, not
+ * impossible — confirmed live 2026-08-21: a real call's tool_use.input came
+ * back with todos_customer missing/non-array, which crashed saveExtraction
+ * before its db.batch() ran, silently losing an otherwise-valid summary and
+ * key_takeaways along with it. Coerce array fields defensively so one
+ * malformed field degrades gracefully instead of losing the whole extraction.
+ */
+function normalizeExtraction(input: unknown): CallExtraction {
+  const raw = (input ?? {}) as Partial<Record<keyof CallExtraction, unknown>>;
+  const asArray = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+
+  if (typeof raw.summary !== "string") throw new Error("extraction response missing summary");
+
+  return {
+    summary: raw.summary,
+    key_takeaways: asArray(raw.key_takeaways),
+    todos_customer: asArray(raw.todos_customer),
+    todos_self: asArray(raw.todos_self),
+    unresolved: asArray(raw.unresolved),
+    deadline: typeof raw.deadline === "string" ? raw.deadline : undefined,
+  };
 }
