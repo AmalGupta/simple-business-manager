@@ -305,7 +305,7 @@ ORDER BY customer_waiting DESC,
 
 The architecture note said Saaras STT. Two things have moved since that was written and both matter:
 
-**Saaras v2.5 is deprecated.** Use `saaras:v3` on `/speech-to-text`. The old `/speech-to-text-translate` endpoint is legacy and doesn't support the `mode` parameter.
+**Saaras v2.5 is deprecated.** Use `saaras:v4` on `/speech-to-text` (bumped from the originally-planned `v3` after a live test on 2026-08-21 — see the job flow note below). The old `/speech-to-text-translate` endpoint is legacy and doesn't support the `mode` parameter.
 
 **The REST endpoint caps at 30 seconds.** Client calls are minutes long, so the pipeline must use the **Batch API** — up to 2 hours per file, up to 20 files per job, and it's the only transport offering **speaker diarization**. Diarization is not a nice-to-have here: it's what lets the extractor reliably tell "todos for customer" from "todos for self." Without it the model is guessing who committed to what.
 
@@ -316,72 +316,24 @@ Presigned URLs make this work cleanly inside a Worker — no filesystem needed, 
 ```
 cron (*/15)
   └─ list R2 under INGEST_PREFIX, skip keys already in `calls`
-     ├─ POST /speech-to-text/job/v1              → job_id
-     ├─ POST /speech-to-text/job/v1/upload-files → presigned upload_urls
+     ├─ POST /speech-to-text/job/v1                      → job_id
+     ├─ POST /speech-to-text/job/v1/upload-files         → presigned upload_urls
      ├─ PUT  <presigned url>  ← R2 object body streamed through
-     └─ POST /speech-to-text/job/v1/start        → stt_status = 'submitted'
+     └─ POST /speech-to-text/job/v1/<job_id>/start       → stt_status = 'submitted'
+        (job_id is a path segment; job_parameters is echoed again in the body)
 
 Sarvam → POST /webhooks/sarvam  (job_state: Completed)
   ├─ validate X-SARVAM-JOB-CALLBACK-TOKEN
-  ├─ POST /speech-to-text/job/v1/download-files  → presigned download urls
-  ├─ GET  <url> → 0.json  { transcript, language_code, diarized_transcript }
+  ├─ GET  /speech-to-text/job/v1/<job_id>/status
+  │       → download_urls.<file>.json.file_url  (no separate download-files call)
+  ├─ GET  <file_url> → { transcript, language_code, diarized_transcript }
   ├─ stt_status = 'transcribed'
-  └─ ctx.waitUntil(extract(...))                 → §6
+  └─ ctx.waitUntil(extract(...))                         → §6
 ```
 
-```ts
-// src/lib/sarvam.ts
-const BASE = "https://api.sarvam.ai";
+Verified live against the real API on 2026-08-21 — this supersedes an earlier draft of this flow that used a two-step `/status` → `POST /download-files` fetch and `model: "saaras:v3"`. Both were wrong: `/status` alone returns `download_urls`, and the working model id is `saaras:v4`. `job_parameters` also needs `with_timestamps: true`.
 
-const headers = (env: Env) => ({
-  "api-subscription-key": env.SARVAM_API_KEY,
-  "Content-Type": "application/json",
-});
-
-export async function submitRecording(env: Env, r2Key: string) {
-  const fileName = r2Key.split("/").pop()!;
-
-  const job = await fetch(`${BASE}/speech-to-text/job/v1`, {
-    method: "POST",
-    headers: headers(env),
-    body: JSON.stringify({
-      job_parameters: {
-        model: "saaras:v3",
-        mode: env.SARVAM_STT_MODE,
-        language_code: env.SARVAM_LANGUAGE_CODE,
-        with_diarization: true,
-        num_speakers: 2,
-      },
-      callback: {
-        url: `${env.PIPELINE_URL}/webhooks/sarvam`,
-        auth_token: env.SARVAM_WEBHOOK_TOKEN,
-      },
-    }),
-  }).then((r) => r.json<{ job_id: string }>());
-
-  const upload = await fetch(`${BASE}/speech-to-text/job/v1/upload-files`, {
-    method: "POST",
-    headers: headers(env),
-    body: JSON.stringify({ job_id: job.job_id, files: [fileName] }),
-  }).then((r) => r.json<{ upload_urls: Record<string, { url: string }> }>());
-
-  const object = await env.RECORDINGS.get(r2Key);
-  if (!object) throw new Error(`missing R2 object: ${r2Key}`);
-
-  await fetch(upload.upload_urls[fileName].url, {
-    method: "PUT",
-    body: object.body,          // streamed, never buffered
-  });
-
-  await fetch(`${BASE}/speech-to-text/job/v1/start`, {
-    method: "POST",
-    headers: headers(env),
-    body: JSON.stringify({ job_id: job.job_id }),
-  });
-
-  return job.job_id;
-}
-```
+See [`src/lib/sarvam.ts`](../src/lib/sarvam.ts) for the actual implementation — `submitRecording` (job create → upload-files → presigned PUT with the `x-ms-blob-type: BlockBlob` header Azure's SAS PUT requires → start) and `fetchResult` (status → `download_urls.<file>.json.file_url` → fetch). That file is the source of truth; this doc no longer inlines a copy to avoid the two drifting apart.
 
 ### Mode selection — the thing to actually test
 

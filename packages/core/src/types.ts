@@ -24,8 +24,6 @@ export interface Call {
   stt_job_id: string | null;
   stt_status: SttStatus;
   stt_error: string | null;
-  transcript: string | null;
-  language_code: string | null;
 
   summary: string | null;
   key_takeaways: string | null; // JSON array
@@ -52,6 +50,16 @@ export interface Todo {
 
   closed_by_call_id: string | null; // M1 placeholder — unused in M0
   created_at: string;
+}
+
+/** One row per call's fetched transcript, linked by r2_key — see schema.sql. */
+export interface Transcript {
+  id: string;
+  r2_key: string;
+  transcript: string;
+  language_code: string | null;
+  diarized_transcript: string | null; // JSON — DiarizedEntry[]
+  fetched_at: string;
 }
 
 /** Shape produced by the `record_call` tool — see docs/SCAFFOLDING.md §6. Not wired until Task 5. */

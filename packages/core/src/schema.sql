@@ -20,8 +20,6 @@ CREATE TABLE calls (
   stt_status      TEXT NOT NULL DEFAULT 'pending',
                   -- pending | submitted | transcribed | extracted | failed
   stt_error       TEXT,
-  transcript      TEXT,
-  language_code   TEXT,
 
   -- the six extracted fields
   summary         TEXT,
@@ -56,6 +54,21 @@ CREATE TABLE todos (
 
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- One row per call's fetched transcript, linked by r2_key rather than a
+-- column on `calls` — keeps raw STT output separate from the row `calls`
+-- uses for everything else. Populated the moment the webhook fetches the
+-- result (fetchResult in src/lib/sarvam.ts), so it's viewable immediately.
+CREATE TABLE transcripts (
+  id                  TEXT PRIMARY KEY,
+  r2_key              TEXT NOT NULL UNIQUE REFERENCES calls(r2_key),
+  transcript          TEXT NOT NULL,
+  language_code       TEXT,
+  diarized_transcript TEXT,            -- JSON: { entries: [{ speaker_id, transcript }] }
+  fetched_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_transcripts_r2_key ON transcripts(r2_key);
 
 CREATE TABLE missed_deadlines (
   id          TEXT PRIMARY KEY,

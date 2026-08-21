@@ -6,7 +6,9 @@
 # (the worker injects this value server-side into the upload page's JS).
 SBM_API_KEY=replace-with-openssl-rand-hex-32
 
-# Not needed until Task 3 (Sarvam submit) and Task 5 (extraction).
+# Required for local Sarvam submit (Task 3+). WEBHOOK_TOKEN is also sent as
+# callback.auth_token — generate locally; does not need to match any cloud secret.
 SARVAM_API_KEY=sk_your-sarvam-key-here
 SARVAM_WEBHOOK_TOKEN=replace-with-openssl-rand-hex-32
+# Extraction (Task 5). Optional if you only care about upload → R2 → D1.
 ANTHROPIC_API_KEY=sk-ant-your-key-here

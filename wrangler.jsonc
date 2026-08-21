@@ -37,7 +37,23 @@
 
   "d1_databases": [
     { "binding": "DB", "database_name": "sbm-dev", "database_id": "7848e837-4051-4d32-9217-bb1d8535f641" }
-  ]
+  ],
+
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  }
 
   // staging / production `env` blocks, the `*/15` cron bucket-scanner trigger,
   // and the digest-email vars are documented in docs/SCAFFOLDING.md §2-3 but

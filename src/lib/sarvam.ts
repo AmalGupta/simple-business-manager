@@ -16,6 +16,22 @@ export interface SubmitResult {
   jobId: string;
 }
 
+/**
+ * job_parameters is echoed at both job creation and job start — confirmed
+ * against a live working call (2026-08-21). model bumped to saaras:v4 (was
+ * v3) and with_timestamps added per that same verified call.
+ */
+function jobParameters(env: Env) {
+  return {
+    model: "saaras:v4",
+    mode: env.SARVAM_STT_MODE,
+    language_code: env.SARVAM_LANGUAGE_CODE,
+    with_diarization: true,
+    with_timestamps: true,
+    num_speakers: 2,
+  };
+}
+
 /** Presigned upload, R2 body streamed straight through — never buffered. */
 export async function submitRecording(
   env: Env,
@@ -31,13 +47,7 @@ export async function submitRecording(
     method: "POST",
     headers: headers(env),
     body: JSON.stringify({
-      job_parameters: {
-        model: "saaras:v3",
-        mode: env.SARVAM_STT_MODE,
-        language_code: env.SARVAM_LANGUAGE_CODE,
-        with_diarization: true,
-        num_speakers: 2,
-      },
+      job_parameters: jobParameters(env),
       callback: {
         url: callbackUrl,
         auth_token: env.SARVAM_WEBHOOK_TOKEN,
@@ -70,10 +80,12 @@ export async function submitRecording(
   });
   if (!putRes.ok) throw new Error(`Sarvam presigned PUT failed: ${putRes.status} ${await putRes.text()}`);
 
-  const startRes = await fetch(`${BASE}/speech-to-text/job/v1/start`, {
+  // job_id is a path segment here, not a body field, and callback is not
+  // repeated (it's registered once at creation) — confirmed live 2026-08-21.
+  const startRes = await fetch(`${BASE}/speech-to-text/job/v1/${job.job_id}/start`, {
     method: "POST",
     headers: headers(env),
-    body: JSON.stringify({ job_id: job.job_id }),
+    body: JSON.stringify({ job_parameters: jobParameters(env) }),
   });
   if (!startRes.ok) throw new Error(`Sarvam job start failed: ${startRes.status} ${await startRes.text()}`);
 
@@ -81,11 +93,13 @@ export async function submitRecording(
 }
 
 /**
- * Called from the webhook once job_state is Completed. The 0.json result
- * payload's own shape (transcript / language_code / diarized_transcript)
- * is per §5 and still not confirmed against a live callback — that's the
- * Task 4 checkpoint. The wrapper endpoints below (status, download-files)
- * were verified directly against the live API on 2026-08-21.
+ * Called from the webhook once job_state is Completed. /status alone returns
+ * download_urls.<file>.json.file_url — no separate /download-files call
+ * needed, confirmed against a live working call (2026-08-21), superseding
+ * the two-step status→download-files flow SCAFFOLDING.md §5 documented.
+ * The 0.json result payload's own shape (transcript / language_code /
+ * diarized_transcript) is still unconfirmed against a live callback —
+ * that's the Task 4 checkpoint.
  */
 export async function fetchResult(env: Env, jobId: string): Promise<SarvamResult> {
   if (!env.SARVAM_API_KEY) throw new Error("SARVAM_API_KEY not configured");
@@ -95,23 +109,13 @@ export async function fetchResult(env: Env, jobId: string): Promise<SarvamResult
     headers: headers(env),
   });
   if (!statusRes.ok) throw new Error(`Sarvam status failed: ${statusRes.status} ${await statusRes.text()}`);
-  const status = await statusRes.json<{ job_details: Array<{ outputs: Array<{ file_name: string }> }> }>();
+  const status = await statusRes.json<{
+    download_urls: Record<string, Record<string, { file_url: string }>>;
+  }>();
 
-  const outputFiles = status.job_details.flatMap((d) => d.outputs.map((o) => o.file_name));
-  if (outputFiles.length === 0) throw new Error("Sarvam job status returned no output files");
-
-  const downloadRes = await fetch(`${BASE}/speech-to-text/job/v1/download-files`, {
-    method: "POST",
-    headers: headers(env),
-    body: JSON.stringify({ job_id: jobId, files: outputFiles }),
-  });
-  if (!downloadRes.ok) {
-    throw new Error(`Sarvam download-files failed: ${downloadRes.status} ${await downloadRes.text()}`);
-  }
-  const download = await downloadRes.json<{ download_urls: Record<string, { file_url: string }> }>();
-
-  const firstUrl = Object.values(download.download_urls)[0]?.file_url;
-  if (!firstUrl) throw new Error("Sarvam download-files returned no URLs");
+  const firstFile = Object.values(status.download_urls)[0];
+  const firstUrl = firstFile?.json?.file_url;
+  if (!firstUrl) throw new Error("Sarvam status returned no download_urls.<file>.json.file_url");
 
   const resultRes = await fetch(firstUrl);
   if (!resultRes.ok) throw new Error(`Sarvam result download failed: ${resultRes.status}`);

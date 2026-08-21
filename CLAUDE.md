@@ -1,5 +1,6 @@
 @docs/BUILD_BRIEF.md
 @docs/SCAFFOLDING.md
+@docs/LOCAL_PROFILE.md
 
 # Simple Business Manager — project context for AI coding tools
 

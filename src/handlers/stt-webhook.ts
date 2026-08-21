@@ -58,7 +58,14 @@ export async function handleSarvamWebhook(
 
   try {
     const result = await fetchResult(env, body.job_id);
-    await setCallTranscribed(env.DB, call.id, result.transcript, result.language_code ?? null);
+    await setCallTranscribed(
+      env.DB,
+      call.id,
+      call.r2_key,
+      result.transcript,
+      result.language_code ?? null,
+      result.diarized_transcript ? JSON.stringify(result.diarized_transcript) : null
+    );
 
     ctx.waitUntil(
       (async () => {

@@ -5,14 +5,17 @@
   "type": "module",
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "wrangler dev",
+    "dev": "wrangler dev --local",
+    "dev:local": "wrangler dev --local",
     "dev:web": "pnpm --filter web dev",
     "build": "pnpm --filter web build",
+    "setup:local": "wrangler d1 migrations apply sbm-dev --local && pnpm build",
     "deploy": "pnpm build && wrangler deploy",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "eval": "tsx packages/core/prompts/evals/run.ts",
     "d1:migrate:local": "wrangler d1 migrations apply sbm-dev --local",
-    "d1:migrate:remote": "wrangler d1 migrations apply sbm-dev --remote"
+    "d1:migrate:remote": "wrangler d1 migrations apply sbm-dev --remote",
+    "d1:calls:local": "wrangler d1 execute sbm-dev --local --command \"SELECT id, stt_status, stt_job_id, stt_error FROM calls ORDER BY created_at DESC LIMIT 5\""
   },
   "dependencies": {
     "@sbm/core": "workspace:*"

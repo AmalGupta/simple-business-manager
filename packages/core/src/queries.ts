@@ -76,17 +76,24 @@ export async function setCallFailed(db: D1Database, callId: string, error: strin
     .run();
 }
 
-/** Task 4 — transcript landed. */
+/** Task 4 — transcript landed. Written the moment fetchResult returns, so it's viewable immediately. */
 export async function setCallTranscribed(
   db: D1Database,
   callId: string,
+  r2Key: string,
   transcript: string,
-  languageCode: string | null
+  languageCode: string | null,
+  diarizedTranscript: string | null
 ): Promise<void> {
-  await db
-    .prepare(`UPDATE calls SET stt_status = 'transcribed', transcript = ?, language_code = ? WHERE id = ?`)
-    .bind(transcript, languageCode, callId)
-    .run();
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO transcripts (id, r2_key, transcript, language_code, diarized_transcript)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      .bind(crypto.randomUUID(), r2Key, transcript, languageCode, diarizedTranscript),
+    db.prepare(`UPDATE calls SET stt_status = 'transcribed' WHERE id = ?`).bind(callId),
+  ]);
 }
 
 /** Task 5 — extraction landed. Writes the six fields, prompt_version, and the todos rows. */
@@ -196,11 +203,13 @@ interface RawTodoRow {
 
 const CALL_SELECT = `
   SELECT calls.id, calls.duration_s, calls.recorded_at, calls.source,
-         calls.summary, calls.key_takeaways, calls.unresolved, calls.deadline, calls.transcript,
+         calls.summary, calls.key_takeaways, calls.unresolved, calls.deadline,
+         transcripts.transcript AS transcript,
          COALESCE(clients.name, 'Unknown caller') AS client_name,
          clients.phone AS client_phone
   FROM calls
   LEFT JOIN clients ON calls.client_id = clients.id
+  LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
 `;
 
 const TODO_SELECT = `
