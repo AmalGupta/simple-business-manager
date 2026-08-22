@@ -369,7 +369,9 @@ System prompt principles worth holding: extract only what was actually said, nev
 
 ## 7. Design
 
-Grounded in his trade rather than in dashboard convention. The reference material is float glass: seen face-on it's near-colorless and cool; seen edge-on it's a deep green from the iron in the melt. That edge-green is the ink, the face is the page, and etched/frosted glass is how completion reads.
+**Revised 2026-08-22.** The original float-glass palette (cool green, near-colorless page, "frosted" completion) is retired. This was a deliberate reversal, not a drive-by restyle: the earlier reference material was his trade (glass fabrication) read as a calm, therapeutic surface; the working direction now is a "control room" for someone doing hardcore sales and customer-facing work — a tool that pushes toward the next call, not one that soothes. The retired palette is not deleted, only demoted: it ships as an inactive second theme block in `web/src/theme.css` so it can be swapped back in one line if this reversal itself gets reversed. See `docs/BUILD_BRIEF.md`'s design-canvas exploration history for the intermediate steps (a warm/glow variant was tried and rejected before landing here).
+
+**What did not change:** the behavioral acceptance criteria — four todo states, streak grid, CSV export, day drilldown (see `CLAUDE.md`) — and the rule that a saturated warning color earns its place only at genuine urgency, never decoratively. Only the palette, type, radius, and a few structural touches (a dark header bar, solid-fill badges instead of outline pills) changed.
 
 ### Frontend stack
 
@@ -377,120 +379,104 @@ Vite + React 19, built to `dist/`, served by the Worker's `ASSETS` binding.
 
 | Library | Why it's here |
 |---|---|
-| `tailwindcss` v4 + `@tailwindcss/vite` | CSS-first config. The float-glass tokens live in one `@theme` block and become utility classes automatically — no `tailwind.config.js`. |
+| `tailwindcss` v4 + `@tailwindcss/vite` | CSS-first config, once the Task 6 utility-class migration happens. Until then, `web/src/theme.css` holds the same tokens as plain CSS custom properties that `Dashboard.jsx`'s inline styles reference directly — externalized, not yet utility-classed. |
 | `motion` (`motion/react`) | The one animation library worth its weight. Layout animations and shared-element transitions are what make reordering a todo list feel considered rather than jumpy. |
 | `react-router` v7 | Real URLs for `/calls/:id` and `/day/:date`, so he can bookmark a client and the back button behaves on a phone. |
 | `lucide-react` | Icons. Consistent stroke weight, tree-shaken. |
 | `@radix-ui/react-*` | Only when a dialog, menu, or tooltip actually appears. Accessible primitives, unstyled. Do not pull in a component kit. |
 
-**No Next.js, no component library, no CSS-in-JS runtime.** Next.js was evaluated and reversed in §1 — it solves SSR, routing, and image optimization, and this dashboard needs none of them. A component kit (MUI, Chakra, shadcn defaults) would actively work against the design: those libraries carry their own visual opinions, and the whole point here is that the interface looks like his trade rather than like every other dashboard.
-
-Once Tailwind is in, migrate `Dashboard.jsx` off inline styles. Inline styles were a workaround for having no compiler; Vite removes that constraint. Keep the token names identical so the migration is mechanical.
-
-```css
-/* web/src/tokens.css */
-@import "tailwindcss";
-
-@theme {
-  --color-pane:   #F4F7F6;  /* page — glass seen face-on, cool not cream */
-  --color-edge:   #17443C;  /* primary text, structure — float-glass edge green */
-  --color-edge-2: #5F8A82;  /* secondary text, metadata */
-  --color-frost:  #DBE6E2;  /* rules, borders, the completed/etched state */
-  --color-putty:  #A89880;  /* glazing putty — the parked/snoozed state only */
-  --color-signal: #B3261E;  /* urgency ONLY — see rule */
-
-  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
-  --font-body:    "Mukta", system-ui, sans-serif;
-
-  --radius-cut: 2px;        /* glass is cut, not moulded */
-}
-```
+**No Next.js, no component library, no CSS-in-JS runtime.** Next.js was evaluated and reversed in §1 — it solves SSR, routing, and image optimization, and this dashboard needs none of them. A component kit (MUI, Chakra, shadcn defaults) would actively work against the design: those libraries carry their own visual opinions.
 
 ### Tokens
 
+Source of truth: [`web/src/theme.css`](../web/src/theme.css) — this doc's copy is illustrative and can drift; check the file for current values. Colors and fonts are CSS custom properties on `:root`, consumed by `Dashboard.jsx`'s `t` object (`t.ink = 'var(--color-ink)'`, etc.) rather than hardcoded hex — that indirection is what makes the theme swappable and is what "externalize the CSS" meant in practice: nothing about component structure changed, only where the values live.
+
 ```css
-/* web/src/tokens.css */
+/* web/src/theme.css */
 :root {
-  /* Colour — four neutrals and one signal */
-  --pane:    #F4F7F6;  /* page — glass seen face-on, cool not cream */
-  --edge:    #17443C;  /* primary text, structure — float-glass edge green */
-  --edge-2:  #5F8A82;  /* secondary text, metadata */
-  --frost:   #DBE6E2;  /* rules, borders, the completed/etched state */
-  --putty:   #A89880;  /* glazing putty — the parked/snoozed state only */
-  --signal:  #B3261E;  /* urgency ONLY — see rule */
+  /* Colour — ink/slate/line neutrals, one accent, one warn, one danger */
+  --color-canvas: #F6F7F9;  /* page background — cool light gray */
+  --color-surface:#FFFFFF;  /* card background */
+  --color-ink:    #14181F;  /* primary text, structure, dark header bar */
+  --color-slate:  #5B6472;  /* secondary text, metadata */
+  --color-line:   #E4E7EC;  /* hairline borders, dividers */
+  --color-accent: #2E5AF7;  /* the one working accent — CTAs, selected state, links */
+  --color-warn:   #B8600A;  /* escalation / customer-waiting / parked — text on --color-warn-bg */
+  --color-warn-bg:#FEF3E6;
+  --color-danger: #DC3B30;  /* urgency ONLY — see rule below, unchanged from the old --signal */
 
-  /* Type */
-  --display: "Bricolage Grotesque", system-ui, sans-serif;
-  --body:    "Mukta", system-ui, sans-serif;
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body:    "Mukta", system-ui, sans-serif;
 
-  --step--1: 0.833rem;
-  --step-0:  1rem;
-  --step-1:  1.383rem;
-  --step-2:  1.917rem;
-  --step-5:  5.61rem;   /* the streak number, and nothing else */
+  --radius-card:  10px;
+  --radius-badge: 6px;
+  --radius-button:8px;
+}
 
-  --gap:     1.5rem;
-  --radius:  2px;       /* glass is cut, not moulded */
+/* Retired float-glass theme, kept for a one-line revert — not currently applied. */
+[data-theme="float-glass"] {
+  --color-canvas: #F4F7F6;
+  --color-surface:#FFFFFF;
+  --color-ink:    #17443C;
+  --color-slate:  #5F8A82;
+  --color-line:   #DBE6E2;
+  --color-accent: #17443C;
+  --color-warn:   #A89880;
+  --color-warn-bg:transparent;
+  --color-danger: #B3261E;
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-body:    "Mukta", system-ui, sans-serif;
+  --radius-card:  4px;
+  --radius-badge: 2px;
+  --radius-button:2px;
 }
 ```
 
-`--putty` is a warm neutral against four cool ones, and it does exactly one job: the parked/snoozed state. Parked then reads as neither done nor urgent — its own category, which matters because parking something is a decision he makes, not a failure.
-
-**The colour rule, which is the whole point:** `--signal` appears only when a deadline is inside 24 hours or already missed. Everywhere else the interface is neutral. If red starts showing up on a normal Tuesday the rule has been broken and the tool has become another source of anxiety — which is the specific failure mode to avoid.
+**The colour rule, unchanged across the theme swap:** `--color-danger` appears only when a deadline is inside 24 hours or already missed. Everywhere else the interface stays neutral plus the one accent. If danger-red starts showing up on a normal Tuesday the rule has been broken.
 
 ### Typography
 
-**Bricolage Grotesque** for display — variable width, slightly odd, gives the streak number real presence without reaching for a serif.
+**Space Grotesk** for display — geometric, confident, reads as a working tool rather than a diary. Replaces Bricolage Grotesque, which is preserved only in the retired `[data-theme="float-glass"]` block above.
 
-**Mukta** for body and transcripts. This is a functional requirement, not taste: transcripts are code-mixed Hindi-English and `transcribe` mode returns Devanagari. Mukta covers Devanagari and Latin in one family and was designed for exactly this pairing. A Latin-only body face will produce tofu boxes the first time a transcript comes back in Hindi.
+**Mukta** for body and transcripts, unchanged — this one was never a taste choice. Transcripts are code-mixed Hindi-English and `transcribe` mode returns Devanagari; Mukta covers Devanagari and Latin in one family. A Latin-only body face will produce tofu boxes the first time a transcript comes back in Hindi, regardless of which theme is active.
 
 ### Layout
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  Simple Business Manager                        Thu 20 Aug     │
-│                                                  │
-│   ▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢▢       │  ← the wall
-│   ▢▢▢▢▢▢▢▢▢▢▢▢▢▢▨▢▢▢▢▢▢▢▢▢▢▢       │
-│                                                  │
-│   41                        7 open · 128 closed  │
-│   days nothing slipped                           │
+│▓ Simple Business Manager             Thu 20 Aug  ▓│  ← dark header bar
+│▓  ┌──────────────┐  ┌──────────────┐            ▓│
+│▓  │ 7   open     │  │ 128  closed  │            ▓│
+│▓  └──────────────┘  └──────────────┘            ▓│
 ├──────────────────────────────────────────────────┤
 │  ┌────────────────────────────────────────────┐  │
-│  │ Sharma Glass Works      ● customer waiting │  │
-│  │ Tue 18 Aug · 6 min                         │  │
-│  │ ─────────────────────────────────────────  │  │
-│  │ ○ Send revised quote for toughened 12mm    │  │
-│  │ ○ Confirm delivery date          21 Aug ▲  │  │
-│  │ ⊘ Site measurement            parked       │  │
-│  │ ▨ Share IS 2553 certificate                │  │
+│  │▐ Sharma Glass Works    customer waiting     │  │
+│  │▐ Tue 18 Aug · 6 min                         │  │
+│  │▐ ─────────────────────────────────────────  │  │
+│  │▐ ○ Send revised quote for toughened 12mm    │  │
+│  │▐ ○ Confirm delivery date          21 Aug ▲  │  │
+│  │▐ ⊘ Site measurement            parked       │  │
+│  │▐ ▪ Share IS 2553 certificate                │  │
 │  └────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────┘
 ```
 
-The streak leads, above everything. Counts sit beside it, quiet. Call cards follow, grouped by client — the current working assumption, and the thing to watch him use, because if his instinct each morning turns out to be "what do I need to do today" rather than "who do I owe," this becomes a flat queue instead.
-
-### Signature element — the wall
-
-The streak renders as a wall of glass panes, one per day, filling left to right. A held day is a clear pane. A missed day is etched. The wall accumulates and never resets visually even when the number does — his progress stays on screen.
-
-This is also where completion lives. A finished todo **frosts over** — background shifts to `--frost`, text to `--edge-2` — rather than striking through. It's the same principle as strikethrough (progress stays visible, nothing vanishes) expressed in the material his business actually works in. Flagging it as a change from the literal strikethrough decision: if he prefers the plainer version, it's a one-line change, but frosting is what makes the interface feel like his trade rather than a generic task app.
+The streak/counts lead inside the dark header bar rather than on the light canvas below it — the same information, restated as a readout rather than a diary entry. Call cards follow, grouped by client, each with a left accent spine (`▐` above) that color-codes client vs. internal.
 
 ### Motion
 
-Restraint is the design. Every animation below earns its place by carrying information; anything that only decorates is a bug, because this tool exists to lower his stress, not to perform at him.
+Restraint is still the design; only the emotional target changed from "calm" to "confident." Every animation below earns its place by carrying information.
 
 | Moment | Behaviour | What it communicates |
 |---|---|---|
-| Todo checked | Row frosts over, 400ms ease | The satisfying beat. This is the payoff moment — give it the most weight. |
+| Todo checked | Row fills to `--color-line`, 300ms ease | The satisfying beat — give it the most weight. |
 | List reorders | `motion` layout animation, 250ms | Where the item went. Without it, closing a todo makes the list jump and he loses his place. |
 | Card enters | Fade + 8px rise, 40ms stagger | Order of urgency, read top to bottom. |
-| Streak increments | Pane draws in, 300ms | Progress accumulating — the emotional core. |
 | Route change | View Transitions API, 200ms cross-fade | Depth. Free in modern browsers, no library. |
 
-Nothing loops, nothing pulses, nothing bounces. Spring physics are wrong here — glass doesn't bounce, and a task tracker that springs at you reads as urgent when the whole point is calm.
+Nothing loops, nothing bounces without reason — but unlike the retired theme, a single deliberate pulse (e.g. an unread-count badge) is now allowed where it flags something genuinely waiting on him; it must stop the moment that thing is resolved, never run indefinitely as ambient decoration.
 
-Wrap the lot in `prefers-reduced-motion`, and make it a real branch rather than a global `transition: none`: the frost still needs to change state instantly so completion is unambiguous.
+Wrap the lot in `prefers-reduced-motion`, and make it a real branch rather than a global `transition: none`: state changes (checked, selected) still need to happen instantly so they stay unambiguous.
 
 ---
 

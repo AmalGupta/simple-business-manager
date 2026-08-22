@@ -32,44 +32,71 @@ function uploadPageHtml(sbmKey: string, summary: InsightsSummary): string {
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Simple Business Manager — Upload</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Mukta:wght@400;500;600&display=swap">
 <style>
-  body { font-family: system-ui, sans-serif; background: #F4F7F6; color: #17443C; max-width: 480px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
-  h1 { font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-size: 1.25rem; margin: 0 0 1.5rem; font-weight: 500; }
-  h2 { font-size: 0.75rem; color: #5F8A82; text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 0.75rem; font-weight: 500; }
-  form { display: flex; flex-direction: column; gap: 1rem; margin-bottom: 2.5rem; }
-  input[type="file"] { padding: 0.75rem; border: 1px solid #DBE6E2; border-radius: 2px; background: #fff; }
-  button { padding: 0.875rem; min-height: 44px; border: none; border-radius: 2px; background: #17443C; color: #fff; font-size: 1rem; }
-  #status { font-size: 0.875rem; color: #5F8A82; min-height: 1.25em; }
+  /* Same "control room" tokens as web/src/theme.css — duplicated here, not
+     imported, because this page is server-rendered HTML with no build step. */
+  :root {
+    --color-canvas: #F6F7F9;
+    --color-surface: #FFFFFF;
+    --color-ink: #14181F;
+    --color-slate: #5B6472;
+    --color-line: #E4E7EC;
+    --color-accent: #2E5AF7;
+    --color-warn: #B8600A;
+    --color-warn-bg: #FEF3E6;
+    --color-danger: #DC3B30;
+    --font-display: "Space Grotesk", system-ui, sans-serif;
+    --font-body: "Mukta", system-ui, sans-serif;
+    --radius-card: 10px;
+    --radius-button: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: var(--font-body); background: var(--color-canvas); color: var(--color-ink); margin: 0; padding: 0 0 4rem; }
+  .header-bar { background: var(--color-ink); padding: 1.5rem 1.25rem 1.75rem; margin-bottom: 1.75rem; }
+  .header-bar h1 { font-family: var(--font-display); font-size: 1.25rem; font-weight: 700; color: #fff; margin: 0; max-width: 480px; margin-inline: auto; }
+  main { max-width: 480px; margin: 0 auto; padding: 0 1.25rem; }
+  h2 { font-size: 0.75rem; color: var(--color-slate); text-transform: uppercase; letter-spacing: 0.06em; margin: 0 0 0.75rem; font-weight: 600; }
+  form { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 2.5rem; }
+  input[type="file"] { padding: 0.75rem; border: 1px solid var(--color-line); border-radius: var(--radius-button); background: var(--color-surface); font-family: var(--font-body); }
+  button { padding: 0.875rem; min-height: 44px; border: none; border-radius: var(--radius-button); background: var(--color-accent); color: #fff; font-size: 1rem; font-weight: 700; font-family: var(--font-body); cursor: pointer; }
+  button:active { transform: scale(0.99); }
+  #status { font-size: 0.875rem; color: var(--color-slate); min-height: 1.25em; font-weight: 600; }
+  #status.ok { color: var(--color-ink); }
+  #status.err { color: var(--color-danger); }
   .stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
-  .stat { background: #fff; border: 1px solid #DBE6E2; border-radius: 4px; padding: 1rem; }
-  .stat-n { font-family: 'Bricolage Grotesque', system-ui, sans-serif; font-size: 1.917rem; font-weight: 500; line-height: 1; }
-  .stat-label { font-size: 0.8125rem; color: #5F8A82; margin-top: 0.375rem; }
-  .dashboard-link { display: inline-block; margin-top: 2.5rem; font-size: 0.8125rem; color: #5F8A82; }
+  .stat { background: var(--color-surface); border: 1px solid var(--color-line); border-radius: var(--radius-card); padding: 1rem; }
+  .stat-n { font-family: var(--font-display); font-size: 1.917rem; font-weight: 700; line-height: 1; }
+  .stat-label { font-size: 0.8125rem; color: var(--color-slate); margin-top: 0.375rem; }
+  .dashboard-link { display: inline-block; margin-top: 2.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--color-accent); text-decoration: none; }
 </style>
 </head>
 <body>
-  <h1>Upload a call recording</h1>
-  <form id="f">
-    <input type="file" name="recording" accept="audio/*,.wav,.m4a,.mp3,.aac,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/mpeg,audio/aac" required />
-    <button type="submit">Upload</button>
-  </form>
-  <p id="status"></p>
+  <div class="header-bar"><h1>Upload a call recording</h1></div>
+  <main>
+    <form id="f">
+      <input type="file" name="recording" accept="audio/*,.wav,.m4a,.mp3,.aac,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/mpeg,audio/aac" required />
+      <button type="submit">Upload</button>
+    </form>
+    <p id="status"></p>
 
-  <h2>Total insights</h2>
-  <div class="stats">
-    ${statTile(summary.totalCalls, summary.totalCalls === 1 ? "call captured" : "calls captured")}
-    ${statTile(summary.openTodos, summary.openTodos === 1 ? "todo open" : "todos open")}
-    ${statTile(summary.doneTodos, summary.doneTodos === 1 ? "todo closed" : "todos closed")}
-    ${statTile(summary.callsWaitingOnCustomer, summary.callsWaitingOnCustomer === 1 ? "call waiting on customer" : "calls waiting on customer")}
-  </div>
+    <h2>Total insights</h2>
+    <div class="stats">
+      ${statTile(summary.totalCalls, summary.totalCalls === 1 ? "call captured" : "calls captured")}
+      ${statTile(summary.openTodos, summary.openTodos === 1 ? "todo open" : "todos open")}
+      ${statTile(summary.doneTodos, summary.doneTodos === 1 ? "todo closed" : "todos closed")}
+      ${statTile(summary.callsWaitingOnCustomer, summary.callsWaitingOnCustomer === 1 ? "call waiting on customer" : "calls waiting on customer")}
+    </div>
 
-  <a class="dashboard-link" href="/">View the full dashboard →</a>
+    <a class="dashboard-link" href="/">View the full dashboard →</a>
+  </main>
 
   <script>
     var SBM_KEY = ${JSON.stringify(sbmKey)};
     document.getElementById("f").addEventListener("submit", function (e) {
       e.preventDefault();
       var status = document.getElementById("status");
+      status.className = "";
       status.textContent = "Uploading…";
       var fd = new FormData(e.target);
       fetch("/upload", { method: "POST", headers: { "X-SBM-Key": SBM_KEY }, body: fd })
@@ -78,11 +105,15 @@ function uploadPageHtml(sbmKey: string, summary: InsightsSummary): string {
           return res.json();
         })
         .then(function (data) {
+          status.className = "ok";
           status.textContent = "Uploaded — call " + data.callId;
           // Totals above are server-rendered on load; reload to pick up the new call.
           setTimeout(function () { location.reload(); }, 1200);
         })
-        .catch(function (err) { status.textContent = "Failed: " + err.message; });
+        .catch(function (err) {
+          status.className = "err";
+          status.textContent = "Failed: " + err.message;
+        });
     });
   </script>
 </body>

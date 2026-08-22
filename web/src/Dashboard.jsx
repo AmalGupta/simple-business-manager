@@ -4,6 +4,7 @@ import {
   Check,
   CircleDashed,
   ChevronLeft,
+  ChevronRight,
   FileText,
   Clock,
   Download,
@@ -11,25 +12,28 @@ import {
 } from "lucide-react";
 
 /* ------------------------------------------------------------------
-   Design tokens — see SCAFFOLDING.md §7
-   Inline styles rather than Tailwind: the palette is custom, and
-   arbitrary-value classes need a compiler pass we don't have here.
+   Design tokens — see SCAFFOLDING.md §7 and web/src/theme.css.
+   Values live in theme.css as CSS custom properties; this object is
+   just the mapping inline styles read, so swapping the whole theme
+   (see the retired [data-theme="float-glass"] block) touches one file.
    ------------------------------------------------------------------ */
 const t = {
-  pane: "#F4F7F6",
-  edge: "#17443C",
-  edge2: "#5F8A82",
-  frost: "#DBE6E2",
-  putty: "#A89880",
-  signal: "#B3261E",
-  white: "#FFFFFF",
-  display: "'Bricolage Grotesque', system-ui, sans-serif",
-  body: "'Mukta', system-ui, sans-serif",
-  radius: 2,
+  pane: "var(--color-canvas)",
+  edge: "var(--color-ink)",
+  edge2: "var(--color-slate)",
+  frost: "var(--color-line)",
+  frostSoft: "var(--color-line-soft)",
+  putty: "var(--color-warn)",
+  puttyBg: "var(--color-warn-bg)",
+  accent: "var(--color-accent)",
+  signal: "var(--color-danger)",
+  white: "var(--color-surface)",
+  display: "var(--font-display)",
+  body: "var(--font-body)",
+  radius: "var(--radius-badge)",
+  radiusCard: "var(--radius-card)",
+  radiusButton: "var(--radius-button)",
 };
-
-const FONTS =
-  "@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=Mukta:wght@400;500;600&display=swap');";
 
 /* Same-origin API, gated by the X-SBM-Key shared secret — see
    docs/BUILD_BRIEF.md "No Cloudflare Access on this worker". Baked in at
@@ -47,6 +51,11 @@ const today = () => {
   return d;
 };
 const dayKey = (iso) => (iso ? String(iso).slice(0, 10) : null);
+/* Local Y/M/D -> "yyyy-mm-dd" without a toISOString() round trip — that
+   round trip goes through UTC and silently shifts the date by a day in
+   any timezone that isn't UTC itself (bit us for the calendar grid). */
+const isoDate = (year, month, day) =>
+  `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 const daysUntil = (iso) => (iso ? Math.round((new Date(iso) - today()) / DAY) : null);
 const fmtDate = (iso) =>
   iso
@@ -179,7 +188,7 @@ function DownloadButton({ calls, label, children }) {
         fontSize: 13,
         padding: "6px 12px",
         border: `1px solid ${t.frost}`,
-        borderRadius: t.radius,
+        borderRadius: t.radiusButton,
         background: t.white,
         color: empty ? t.edge2 : t.edge,
         cursor: empty ? "not-allowed" : "pointer",
@@ -192,11 +201,47 @@ function DownloadButton({ calls, label, children }) {
   );
 }
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function iconButtonStyle(disabled) {
+  return {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 36,
+    height: 36,
+    flexShrink: 0,
+    border: `1px solid ${t.frost}`,
+    borderRadius: t.radiusButton,
+    background: t.white,
+    color: disabled ? t.frost : t.edge2,
+    cursor: disabled ? "default" : "pointer",
+    padding: 0,
+  };
+}
+
+const selectStyle = {
+  font: "inherit",
+  fontSize: 13,
+  fontWeight: 600,
+  padding: "8px 10px",
+  border: `1px solid ${t.frost}`,
+  borderRadius: t.radiusButton,
+  background: t.white,
+  color: t.edge,
+};
+
 /* ------------------------------------------------------------------
-   Streak wall — the signature element, now the entry point to a day.
-   A held day is a clear pane; a missed day is etched.
+   Calendar — the signature element, now the entry point to a day.
+   Shows a full month at a time (not a rolling 28-day window), with
+   controls to jump to any month/year. A held day is a clear pane; a
+   missed day is etched. Days after today in the displayed month have
+   no data yet and render as empty, unclickable cells.
    ------------------------------------------------------------------ */
-function StreakWall({ days, onSelectDay, selected }) {
+function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, onChangeMonth, onPrevMonth, onNextMonth, yearOptions }) {
   const labels = ["S", "M", "T", "W", "T", "F", "S"];
   /* Pad the first row so columns line up with real weekdays. */
   const lead = new Date(days[0].date).getDay();
@@ -204,6 +249,43 @@ function StreakWall({ days, onSelectDay, selected }) {
 
   return (
     <div style={{ marginBottom: "1.25rem" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+        <button aria-label="Previous month" onClick={onPrevMonth} style={iconButtonStyle(false)}>
+          <ChevronLeft size={16} />
+        </button>
+
+        <div style={{ display: "flex", gap: 6 }}>
+          <select
+            aria-label="Month"
+            value={month}
+            onChange={(e) => onChangeMonth(Number(e.target.value))}
+            style={selectStyle}
+          >
+            {MONTH_NAMES.map((name, i) => (
+              <option key={name} value={i}>
+                {name}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Year"
+            value={year}
+            onChange={(e) => onChangeYear(Number(e.target.value))}
+            style={selectStyle}
+          >
+            {yearOptions.map((y) => (
+              <option key={y} value={y}>
+                {y}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button aria-label="Next month" onClick={onNextMonth} style={iconButtonStyle(false)}>
+          <ChevronRight size={16} />
+        </button>
+      </div>
+
       <div
         aria-hidden="true"
         style={{
@@ -229,6 +311,22 @@ function StreakWall({ days, onSelectDay, selected }) {
         {cells.map((d, i) =>
           d === null ? (
             <span key={"pad-" + i} />
+          ) : d.future ? (
+            <span
+              key={d.date}
+              aria-hidden="true"
+              style={{
+                minHeight: 44,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 12,
+                fontVariantNumeric: "tabular-nums",
+                color: t.frost,
+              }}
+            >
+              {new Date(d.date).getDate()}
+            </span>
           ) : (
             <button
               key={d.date}
@@ -249,8 +347,8 @@ function StreakWall({ days, onSelectDay, selected }) {
                 fontSize: 12,
                 fontVariantNumeric: "tabular-nums",
                 color: d.held ? t.edge2 : t.edge,
-                border: `1px solid ${d.date === selected ? t.edge : d.held ? t.frost : "transparent"}`,
-                background: d.held ? "transparent" : t.frost,
+                border: `1px solid ${d.date === selected ? t.accent : d.held ? t.frost : "transparent"}`,
+                background: d.held ? "transparent" : t.frostSoft,
               }}
             >
               {new Date(d.date).getDate()}
@@ -332,6 +430,21 @@ function TodoRow({ todo, onToggle, onPark, busy }) {
         {todo.text}
       </span>
 
+      <span
+        style={{
+          flexShrink: 0,
+          fontSize: 11,
+          fontWeight: 600,
+          padding: "2px 8px",
+          borderRadius: t.radius,
+          background: t.frostSoft,
+          color: t.edge2,
+          whiteSpace: "nowrap",
+        }}
+      >
+        {todo.owner === "self" ? "him" : "customer"}
+      </span>
+
       {!done && todo.due_date && (
         <span
           style={{
@@ -376,9 +489,10 @@ function WaitingTag() {
     <span
       style={{
         fontSize: 12,
-        padding: "3px 10px",
+        fontWeight: 700,
+        padding: "4px 10px",
         borderRadius: t.radius,
-        border: `1px solid ${t.putty}`,
+        background: t.puttyBg,
         color: t.putty,
         whiteSpace: "nowrap",
       }}
@@ -395,7 +509,7 @@ function Card({ children, style, className }) {
       style={{
         background: t.white,
         border: `1px solid ${t.frost}`,
-        borderRadius: 4,
+        borderRadius: t.radiusCard,
         padding: "1rem 1.25rem",
         ...style,
       }}
@@ -437,12 +551,16 @@ function PhoneLink({ phone }) {
         alignItems: "center",
         gap: 6,
         fontSize: 13,
-        color: t.edge2,
+        fontWeight: 700,
+        padding: "7px 12px",
+        borderRadius: t.radiusButton,
+        background: t.accent,
+        color: t.white,
         textDecoration: "none",
       }}
     >
       <Phone size={14} />
-      {phone}
+      Call {phone}
     </a>
   );
 }
@@ -592,8 +710,8 @@ function DayView({ date, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
 
 /* ------------------------------------------------------------------ */
 function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
-  const mine = call.todos.filter((td) => td.owner === "self");
-  const theirs = call.todos.filter((td) => td.owner === "customer");
+  const openTodos = call.todos.filter((td) => td.status !== "done");
+  const doneTodos = call.todos.filter((td) => td.status === "done");
   const [openTranscript, setOpenTranscript] = useState(false);
 
   const Section = ({ label, children }) => (
@@ -644,27 +762,12 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
         </ul>
       </Section>
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-          gap: 12,
-          marginBottom: "1.5rem",
-        }}
-      >
-        <Card>
-          <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>His todos</div>
-          {mine.map((td) => (
-            <TodoRow key={td.id} todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds.has(td.id)} />
-          ))}
-        </Card>
-        <Card>
-          <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Customer todos</div>
-          {theirs.map((td) => (
-            <TodoRow key={td.id} todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds.has(td.id)} />
-          ))}
-        </Card>
-      </div>
+      <Card style={{ marginBottom: "1.5rem" }}>
+        <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Todos</div>
+        {[...openTodos, ...doneTodos].map((td) => (
+          <TodoRow key={td.id} todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds.has(td.id)} />
+        ))}
+      </Card>
 
       {/* Unresolved is LLM output, never actionable — deliberately not checkboxes */}
       {call.unresolved.length > 0 && (
@@ -804,22 +907,69 @@ export default function SimpleBusinessManager() {
     // Missed-day detection reads missed_deadlines, which nothing populates
     // yet — that requires the cron scanner, explicitly out of scope for this
     // milestone (see docs/BUILD_BRIEF.md "Not in this milestone"). Every day
-    // reads as held until that lands.
+    // reads as held until that lands. Trailing 28 days ending today, kept
+    // independent of whichever month the calendar below is browsing.
     const missed = new Set();
+    const days = [];
+    for (let i = 27; i >= 0; i--) {
+      const ref = new Date(today().getTime() - i * DAY);
+      const d = isoDate(ref.getFullYear(), ref.getMonth(), ref.getDate());
+      days.push({ date: d, held: !missed.has(d) });
+    }
+    let run = 0;
+    for (let i = days.length - 1; i >= 0 && days[i].held; i--) run++;
+    return { run };
+  }, [calls]);
+
+  /* Calendar month currently browsed — defaults to this month, independent
+     of the streak run above. Full month, not a rolling window (BUG: the
+     rolling 28-day window didn't show a complete month, and gave no way to
+     look at an earlier one). */
+  const [calMonth, setCalMonth] = useState(() => {
+    const d = today();
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+
+  const monthDays = useMemo(() => {
     const byDay = {};
     for (const c of calls) {
       const k = dayKey(c.recorded_at);
       byDay[k] = (byDay[k] ?? 0) + 1;
     }
+    const now = today();
+    const todayIso = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
+    const { year, month } = calMonth;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
     const days = [];
-    for (let i = 27; i >= 0; i--) {
-      const d = new Date(today().getTime() - i * DAY).toISOString().slice(0, 10);
-      days.push({ date: d, held: !missed.has(d), calls: byDay[d] ?? 0 });
+    for (let day = 1; day <= daysInMonth; day++) {
+      const iso = isoDate(year, month, day);
+      const future = iso > todayIso;
+      days.push({ date: iso, held: future ? null : true, calls: byDay[iso] ?? 0, future });
     }
-    let run = 0;
-    for (let i = days.length - 1; i >= 0 && days[i].held; i--) run++;
-    return { days, run };
+    return days;
+  }, [calls, calMonth]);
+
+  const yearOptions = useMemo(() => {
+    const current = today().getFullYear();
+    const earliest = calls.reduce((min, c) => {
+      const y = c.recorded_at ? new Date(c.recorded_at).getFullYear() : current;
+      return Math.min(min, y);
+    }, current);
+    const out = [];
+    for (let y = Math.min(earliest, current - 1); y <= current + 1; y++) out.push(y);
+    return out;
   }, [calls]);
+
+  const goToMonth = useCallback((year, month) => {
+    if (month < 0) {
+      year -= 1;
+      month = 11;
+    } else if (month > 11) {
+      year += 1;
+      month = 0;
+    }
+    setCalMonth({ year, month });
+  }, []);
 
   /* Optimistic write, rolled back if D1 rejects it. */
   const mutate = useCallback(async (todo, patch) => {
@@ -864,7 +1014,7 @@ export default function SimpleBusinessManager() {
 
   const shell = (children) => (
     <div style={{ background: t.pane, minHeight: "100vh", fontFamily: t.body, color: t.edge }}>
-      <style>{`${FONTS}
+      <style>{`
         *{box-sizing:border-box}
         button:focus-visible,a:focus-visible{outline:2px solid ${t.edge};outline-offset:2px}
 
@@ -919,41 +1069,59 @@ export default function SimpleBusinessManager() {
 
   return shell(
     <>
-      <header
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "baseline",
-          marginBottom: "1.25rem",
-        }}
-      >
-        <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 500 }}>Simple Business Manager</span>
-        <span style={{ fontSize: 13, color: t.edge2 }}>{fmtDate(new Date().toISOString())}</span>
-      </header>
+      <div style={{ background: t.edge, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
+        <header
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "baseline",
+            marginBottom: "1rem",
+          }}
+        >
+          <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
+            Simple Business Manager
+          </span>
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
+        </header>
 
-      <StreakWall days={streak.days} onSelectDay={(date) => setView({ name: "day", date })} selected={null} />
-
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-end",
-          paddingBottom: "1.25rem",
-          marginBottom: "1.5rem",
-          borderBottom: `1px solid ${t.frost}`,
-        }}
-      >
-        <div>
-          <div style={{ fontFamily: t.display, fontSize: 56, fontWeight: 500, lineHeight: 1 }}>
-            {streak.run}
+        <div style={{ display: "flex", gap: 10 }}>
+          <div style={{ flex: 1, background: "rgba(255,255,255,0.07)", borderRadius: t.radiusCard, padding: "12px 14px" }}>
+            <div style={{ fontFamily: t.display, fontSize: 30, fontWeight: 700, lineHeight: 1, color: t.white }}>
+              {streak.run}
+            </div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>days nothing slipped</div>
           </div>
-          <div style={{ fontSize: 13, color: t.edge2, marginTop: 6 }}>days nothing slipped</div>
-        </div>
-        <div style={{ textAlign: "right", fontSize: 13, color: t.edge2, lineHeight: 1.9 }}>
-          <div>{counts.open} open</div>
-          <div>{counts.closed} closed</div>
+          <div
+            style={{
+              flex: 1,
+              background: "rgba(255,255,255,0.07)",
+              borderRadius: t.radiusCard,
+              padding: "12px 14px",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "center",
+              gap: 4,
+              fontSize: 13,
+            }}
+          >
+            <div style={{ color: t.white }}>{counts.open} open</div>
+            <div style={{ color: "rgba(255,255,255,0.6)" }}>{counts.closed} closed</div>
+          </div>
         </div>
       </div>
+
+      <StreakWall
+        days={monthDays}
+        onSelectDay={(date) => setView({ name: "day", date })}
+        selected={null}
+        year={calMonth.year}
+        month={calMonth.month}
+        yearOptions={yearOptions}
+        onChangeYear={(y) => goToMonth(y, calMonth.month)}
+        onChangeMonth={(m) => goToMonth(calMonth.year, m)}
+        onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
+        onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
+      />
 
       {ordered.length === 0 ? (
         <EmptyState />

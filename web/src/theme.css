@@ -1,0 +1,48 @@
+/* Design tokens — see docs/SCAFFOLDING.md §7.
+   Externalized so the theme is swappable: components read var(--color-*),
+   not hardcoded hex. To revert to the retired float-glass palette, set
+   data-theme="float-glass" on <html> — nothing else needs to change. */
+
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=Mukta:wght@400;500;600&display=swap");
+
+:root {
+  /* Colour — ink/slate/line neutrals, one accent, one warn, one danger */
+  --color-canvas: #F6F7F9;
+  --color-surface: #FFFFFF;
+  --color-ink: #14181F;
+  --color-slate: #5B6472;
+  --color-line: #E4E7EC;
+  --color-line-soft: #EEF0F3;
+  --color-accent: #2E5AF7;
+  --color-warn: #B8600A;
+  --color-warn-bg: #FEF3E6;
+  --color-danger: #DC3B30;
+
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Mukta", system-ui, sans-serif;
+
+  --radius-card: 10px;
+  --radius-badge: 6px;
+  --radius-button: 8px;
+}
+
+/* Retired float-glass theme — kept for a one-line revert, not currently applied. */
+:root[data-theme="float-glass"] {
+  --color-canvas: #F4F7F6;
+  --color-surface: #FFFFFF;
+  --color-ink: #17443C;
+  --color-slate: #5F8A82;
+  --color-line: #DBE6E2;
+  --color-line-soft: #DBE6E2;
+  --color-accent: #17443C;
+  --color-warn: #A89880;
+  --color-warn-bg: transparent;
+  --color-danger: #B3261E;
+
+  --font-display: "Bricolage Grotesque", system-ui, sans-serif;
+  --font-body: "Mukta", system-ui, sans-serif;
+
+  --radius-card: 4px;
+  --radius-badge: 2px;
+  --radius-button: 2px;
+}
