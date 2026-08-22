@@ -618,6 +618,31 @@ export interface EscalationRow {
   closed_at: string | null;
 }
 
+export interface CallForSiteScan {
+  id: string;
+  diarized_transcript: string;
+}
+
+/**
+ * Calls with a transcript but no site scan result yet — for backfilling
+ * `sites` from real historical calls that predate the Haiku site scan
+ * (packages/core/prompts/site-scan.ts), which only runs automatically on
+ * new calls going forward. `force` rescans every transcribed call instead,
+ * including ones already linked to a site.
+ */
+export async function listCallsForSiteScan(db: D1Database, force = false): Promise<CallForSiteScan[]> {
+  const scoped = force ? "" : "AND calls.id NOT IN (SELECT call_id FROM call_sites)";
+  const { results } = await db
+    .prepare(
+      `SELECT calls.id AS id, transcripts.diarized_transcript AS diarized_transcript
+       FROM calls
+       JOIN transcripts ON transcripts.r2_key = calls.r2_key
+       WHERE transcripts.diarized_transcript IS NOT NULL ${scoped}`
+    )
+    .all<CallForSiteScan>();
+  return results;
+}
+
 export async function listOpenEscalations(db: D1Database): Promise<EscalationRow[]> {
   const { results } = await db
     .prepare(

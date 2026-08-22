@@ -1,19 +1,23 @@
 // GET /api/calls, GET /api/calls/:id, PATCH /api/todos/:id — Tasks 6-7.
 // GET/POST /api/escalations, PATCH /api/escalations/:id, GET /api/sites,
-// GET /api/sites/attention, PATCH /api/sites/:id — docs/ADDITIONAL_FEATURES_M0.md
-// "Phase 1 home page" and the site confirmation workflow.
+// GET /api/sites/attention, PATCH /api/sites/:id, POST /api/sites/backfill —
+// docs/ADDITIONAL_FEATURES_M0.md "Phase 1 home page" and the site
+// confirmation workflow.
 
 import {
   closeEscalation,
   createEscalation,
   getCallWithTodos,
   getSitesNeedingAttention,
+  linkCallToSites,
+  listCallsForSiteScan,
   listCallsWithTodos,
   listOpenEscalations,
   listSites,
   updateSiteConfirmation,
   updateTodo,
 } from "@sbm/core";
+import { scanCallForSites } from "../../packages/core/prompts/site-scan";
 import type { Env } from "../index";
 
 function json(data: unknown, status = 200): Response {
@@ -62,6 +66,47 @@ export async function handleGetSites(env: Env): Promise<Response> {
 
 export async function handleGetSitesAttention(env: Env): Promise<Response> {
   return json(await getSitesNeedingAttention(env.DB));
+}
+
+/**
+ * Backfill — runs the same Haiku site scan the webhook now runs
+ * automatically on new calls (site-scan.ts), but over calls that already
+ * have a transcript and predate that pipeline step. Manual trigger only,
+ * synchronous: the caller sees exactly what was found, which matters for a
+ * one-off admin action more than fire-and-forget would. `force: true`
+ * rescans every transcribed call, including ones already linked to a site.
+ */
+export async function handlePostSitesBackfill(request: Request, env: Env): Promise<Response> {
+  if (!env.ANTHROPIC_API_KEY) return json({ error: "ANTHROPIC_API_KEY not configured" }, 500);
+
+  let force = false;
+  try {
+    const body = (await request.json()) as { force?: unknown };
+    force = body?.force === true;
+  } catch {
+    // no body / not JSON — force stays false
+  }
+
+  const calls = await listCallsForSiteScan(env.DB, force);
+
+  const results = await Promise.all(
+    calls.map(async (call) => {
+      try {
+        const entries = (JSON.parse(call.diarized_transcript).entries ?? []) as { speaker_id: string; transcript: string }[];
+        const sites = await scanCallForSites({ apiKey: env.ANTHROPIC_API_KEY!, model: env.ANTHROPIC_HAIKU_MODEL, entries });
+        if (sites.length > 0) await linkCallToSites(env.DB, call.id, sites);
+        return { call_id: call.id, sites, error: null as string | null };
+      } catch (err) {
+        return { call_id: call.id, sites: [] as string[], error: String(err) };
+      }
+    })
+  );
+
+  return json({
+    scanned: results.length,
+    sitesFound: [...new Set(results.flatMap((r) => r.sites))],
+    results,
+  });
 }
 
 export async function handlePatchSite(request: Request, env: Env, id: string): Promise<Response> {

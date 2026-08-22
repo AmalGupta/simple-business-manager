@@ -18,6 +18,7 @@ import {
   handlePatchSite,
   handlePatchTodo,
   handlePostEscalation,
+  handlePostSitesBackfill,
 } from "./handlers/api";
 
 export interface Env {
@@ -97,6 +98,11 @@ export default {
     if (url.pathname === "/api/sites/attention" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetSitesAttention(env);
+    }
+
+    if (url.pathname === "/api/sites/backfill" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostSitesBackfill(request, env);
     }
 
     const siteMatch = url.pathname.match(/^\/api\/sites\/([^/]+)$/);

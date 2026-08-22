@@ -125,6 +125,18 @@ async function patchSite(id, isConfirmed) {
   return res.json();
 }
 
+/* Backfill — scans calls that already have a transcript but predate the
+   automatic per-call site scan. Manual only; see src/handlers/api.ts. */
+async function postSitesBackfill() {
+  const res = await fetch("/api/sites/backfill", {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({}),
+  });
+  if (!res.ok) throw new Error(`POST /api/sites/backfill → ${res.status}`);
+  return res.json();
+}
+
 async function postEscalation(text, siteId) {
   const res = await fetch("/api/escalations", {
     method: "POST",
@@ -1268,6 +1280,27 @@ function SitesReviewView({ sites, onBack, onSaved }) {
   const [pending, setPending] = useState(() => Object.fromEntries(sites.map((s) => [s.id, s.is_confirmed])));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+
+  const runBackfill = async () => {
+    setScanning(true);
+    setScanResult(null);
+    try {
+      const result = await postSitesBackfill();
+      await onSaved();
+      setScanResult(
+        result.scanned === 0
+          ? "No untouched calls to scan."
+          : `Scanned ${result.scanned} call${result.scanned === 1 ? "" : "s"} — found ${result.sitesFound.length ? result.sitesFound.join(", ") : "no sites"}.`
+      );
+    } catch (err) {
+      console.error("[sbm] site backfill failed", err);
+      setScanResult("Scan failed — see console.");
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const dirty = sites.some((s) => pending[s.id] !== s.is_confirmed);
 
@@ -1306,9 +1339,28 @@ function SitesReviewView({ sites, onBack, onSaved }) {
     <div>
       <BackLink onClick={onBack}>Back</BackLink>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.75rem", gap: 12 }}>
         <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>Review sites</h1>
+        <button
+          onClick={runBackfill}
+          disabled={scanning}
+          style={{
+            flexShrink: 0,
+            padding: "7px 12px",
+            border: `1px solid ${t.frost}`,
+            borderRadius: t.radiusButton,
+            background: t.white,
+            color: t.edge2,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: scanning ? "wait" : "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {scanning ? "Scanning…" : "Scan existing calls"}
+        </button>
       </div>
+      {scanResult && <p style={{ fontSize: 13, color: t.edge2, margin: "0 0 1rem" }}>{scanResult}</p>}
 
       {sites.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
