@@ -1028,13 +1028,35 @@ function EmptyState() {
 
 /* ================================================================== */
 /* Tiles 1 & 2 — a plain number readout, same card language as tiles 3 & 4. */
+/* Shared header row for all four home-panel tiles — one label style, one
+   optional right-aligned action, so the tiles read as one family rather
+   than four separately-styled cards. */
+function TileLabel({ children, action }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+      <span style={{ fontSize: 12, color: t.edge2 }}>{children}</span>
+      {action}
+    </div>
+  );
+}
+
+/* Same row rhythm as the list tiles (10px vertical padding, hairline top
+   border) so a stat card sitting next to a list card doesn't feel like a
+   different template. */
+const TILE_ROW_STYLE = {
+  padding: "10px 0",
+  borderTop: `1px solid ${t.frost}`,
+};
+
 function StatCard({ value, label }) {
   return (
     <Card>
-      <div style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-        {value}
+      <TileLabel>{label}</TileLabel>
+      <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
+        <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
+          {value}
+        </span>
       </div>
-      <div style={{ fontSize: 13, color: t.edge2, marginTop: 6 }}>{label}</div>
     </Card>
   );
 }
@@ -1048,11 +1070,17 @@ function StatCard({ value, label }) {
    attention" is itself useful information, same principle as the
    escalations empty state.
    ------------------------------------------------------------------ */
-function SitesAttentionTile({ sites, onOpenSite, onReviewSites, onViewDirectory, unconfirmedCount, confirmedCount }) {
+function SitesAttentionTile({ sites, onOpenSite, onReviewSites, onViewDirectory, hasAnySites, unconfirmedCount, confirmedCount }) {
+  /* "Nothing needs attention" means the triage list is empty AND there's no
+     site data at all elsewhere — showing it next to a confirmed-sites or
+     unconfirmed-sites link (both proof there IS site data) read as a
+     contradiction. */
+  const showEmptyState = sites.length === 0 && !hasAnySites;
+
   return (
     <Card>
-      <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Sites needing attention</div>
-      {sites.length === 0 && <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing needs attention.</p>}
+      <TileLabel>Sites needing attention</TileLabel>
+      {showEmptyState && <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing needs attention.</p>}
       {sites.map((s) => (
         <button
           key={s.id}
@@ -1063,7 +1091,7 @@ function SitesAttentionTile({ sites, onOpenSite, onReviewSites, onViewDirectory,
             justifyContent: "space-between",
             alignItems: "center",
             gap: 10,
-            padding: "10px 0",
+            ...TILE_ROW_STYLE,
             margin: 0,
             border: "none",
             borderTop: `1px solid ${t.frost}`,
@@ -1149,33 +1177,34 @@ function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
     }
   };
 
+  const addButton = (
+    <button
+      onClick={() => setAdding((v) => !v)}
+      aria-label={adding ? "Cancel" : "Add escalation"}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 28,
+        height: 28,
+        border: `1px solid ${t.frost}`,
+        borderRadius: t.radiusButton,
+        background: t.white,
+        color: t.edge,
+        cursor: "pointer",
+        padding: 0,
+      }}
+    >
+      {adding ? <span style={{ fontSize: 16, lineHeight: 1 }}>×</span> : <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>}
+    </button>
+  );
+
   return (
     <Card>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <span style={{ fontSize: 12, color: t.edge2 }}>Escalations</span>
-        <button
-          onClick={() => setAdding((v) => !v)}
-          aria-label={adding ? "Cancel" : "Add escalation"}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 28,
-            height: 28,
-            border: `1px solid ${t.frost}`,
-            borderRadius: t.radiusButton,
-            background: t.white,
-            color: t.edge,
-            cursor: "pointer",
-            padding: 0,
-          }}
-        >
-          {adding ? <span style={{ fontSize: 16, lineHeight: 1 }}>×</span> : <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>}
-        </button>
-      </div>
+      <TileLabel action={addButton}>Escalations</TileLabel>
 
       {adding && (
-        <div style={{ display: "flex", gap: 8, padding: "10px 0", borderTop: `1px solid ${t.frost}` }}>
+        <div style={{ display: "flex", gap: 8, ...TILE_ROW_STYLE }}>
           <input
             autoFocus
             value={text}
@@ -1219,10 +1248,7 @@ function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
         <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing escalated.</p>
       ) : (
         escalations.map((e) => (
-          <div
-            key={e.id}
-            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${t.frost}` }}
-          >
+          <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, ...TILE_ROW_STYLE }}>
             <button
               onClick={() => onClose(e.id)}
               disabled={busyIds.has(e.id)}
@@ -1743,8 +1769,8 @@ export default function SimpleBusinessManager() {
       <SiteView
         site={view.site}
         calls={calls}
-        onBack={() => setView({ name: "home" })}
-        onOpen={(id) => setView({ name: "call", id, from: { name: "site", site: view.site } })}
+        onBack={() => setView(view.from ?? { name: "home" })}
+        onOpen={(id) => setView({ name: "call", id, from: { name: "site", site: view.site, from: view.from } })}
         onToggle={onToggle}
         onPark={onPark}
         busyIds={busyIds}
@@ -1756,7 +1782,10 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "sites-directory")
     return shell(
-      <SitesDirectoryView onBack={() => setView({ name: "home" })} onOpenSite={(site) => setView({ name: "site", site })} />
+      <SitesDirectoryView
+        onBack={() => setView({ name: "home" })}
+        onOpenSite={(site) => setView({ name: "site", site, from: { name: "sites-directory" } })}
+      />
     );
 
   return shell(
@@ -1808,9 +1837,10 @@ export default function SimpleBusinessManager() {
         <StatCard value={todayCounts.closed} label="closed today" />
         <SitesAttentionTile
           sites={sitesAttention}
-          onOpenSite={(site) => setView({ name: "site", site })}
+          onOpenSite={(site) => setView({ name: "site", site, from: { name: "home" } })}
           onReviewSites={() => setView({ name: "sites-review" })}
           onViewDirectory={() => setView({ name: "sites-directory" })}
+          hasAnySites={allSites.length > 0}
           unconfirmedCount={allSites.filter((s) => s.is_confirmed === null).length}
           confirmedCount={allSites.filter((s) => s.is_confirmed === "Y").length}
         />
