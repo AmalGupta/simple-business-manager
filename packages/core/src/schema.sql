@@ -40,9 +40,10 @@ CREATE TABLE calls (
 -- commonly touches several sites, so this is many-to-many rather than a
 -- column on `calls`. See docs/ADDITIONAL_FEATURES_M0.md.
 CREATE TABLE sites (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL UNIQUE,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  id            TEXT PRIMARY KEY,
+  name          TEXT NOT NULL UNIQUE,
+  is_confirmed  TEXT,          -- NULL = unreviewed, 'Y' = confirmed valid, 'N' = confirmed not a real site
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE call_sites (

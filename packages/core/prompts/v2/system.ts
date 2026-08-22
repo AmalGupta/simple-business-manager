@@ -3,15 +3,7 @@
 // docs/ADDITIONAL_FEATURES_M0.md. Never edit a shipped version in place —
 // changes create v3/.
 
-const STAFF_ROSTER = [
-  "Mishra", "Gaurav", "Neeraj", "Shubham", "Shivam", "Anand", "Azeem",
-  "Tanzeem", "Manglesh", "Ravi", "Rupam", "Vishal", "Manjeet", "Harisharan", "Jaskaran",
-];
-
-const SITE_ROSTER = [
-  "Sector 35", "Sector 70", "Sector 106", "Sector 241", "123/125",
-  "Regalia", "Eco City / Mullanpur", "Dera Bassi", "Homeland",
-];
+import { STAFF_ROSTER, SITE_ROSTER } from "../roster";
 
 export const SYSTEM_PROMPT = `You turn a transcript of a business phone call into a structured record for the business owner, using the record_call tool.
 

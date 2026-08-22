@@ -10,7 +10,8 @@
 
 import { ACTIVE } from "../../packages/core/prompts";
 import { extractCall } from "../../packages/core/prompts/extract";
-import { getCallByJobId, saveExtraction, setCallFailed, setCallTranscribed } from "@sbm/core";
+import { scanCallForSites } from "../../packages/core/prompts/site-scan";
+import { getCallByJobId, linkCallToSites, saveExtraction, setCallFailed, setCallTranscribed } from "@sbm/core";
 import { fetchResult } from "../lib/sarvam";
 import type { Env } from "../index";
 
@@ -72,11 +73,12 @@ export async function handleSarvamWebhook(
       result.diarized_transcript ? JSON.stringify(result.diarized_transcript) : null
     );
 
+    const entries = result.diarized_transcript?.entries ?? [];
+
     ctx.waitUntil(
       (async () => {
         try {
           if (!env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
-          const entries = result.diarized_transcript?.entries ?? [];
           const extraction = await extractCall({
             apiKey: env.ANTHROPIC_API_KEY,
             model: env.ANTHROPIC_MODEL,
@@ -87,6 +89,26 @@ export async function handleSarvamWebhook(
           await saveExtraction(env.DB, call.id, extraction, ACTIVE.version);
         } catch (err) {
           await setCallFailed(env.DB, call.id, `extraction: ${String(err)}`);
+        }
+      })()
+    );
+
+    // Separate, cheap Haiku pass dedicated to site discovery — see
+    // packages/core/prompts/site-scan.ts. Runs independently of the main
+    // extraction above: a scan failure must never mark the call failed or
+    // block the extraction that actually produces the dashboard card.
+    ctx.waitUntil(
+      (async () => {
+        try {
+          if (!env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+          const sites = await scanCallForSites({
+            apiKey: env.ANTHROPIC_API_KEY,
+            model: env.ANTHROPIC_HAIKU_MODEL,
+            entries,
+          });
+          if (sites.length > 0) await linkCallToSites(env.DB, call.id, sites);
+        } catch (err) {
+          console.error("[site scan] failed for call", call.id, err);
         }
       })()
     );

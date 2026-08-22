@@ -1,6 +1,7 @@
 // GET /api/calls, GET /api/calls/:id, PATCH /api/todos/:id — Tasks 6-7.
 // GET/POST /api/escalations, PATCH /api/escalations/:id, GET /api/sites,
-// GET /api/sites/attention — docs/ADDITIONAL_FEATURES_M0.md "Phase 1 home page".
+// GET /api/sites/attention, PATCH /api/sites/:id — docs/ADDITIONAL_FEATURES_M0.md
+// "Phase 1 home page" and the site confirmation workflow.
 
 import {
   closeEscalation,
@@ -10,6 +11,7 @@ import {
   listCallsWithTodos,
   listOpenEscalations,
   listSites,
+  updateSiteConfirmation,
   updateTodo,
 } from "@sbm/core";
 import type { Env } from "../index";
@@ -60,6 +62,23 @@ export async function handleGetSites(env: Env): Promise<Response> {
 
 export async function handleGetSitesAttention(env: Env): Promise<Response> {
   return json(await getSitesNeedingAttention(env.DB));
+}
+
+export async function handlePatchSite(request: Request, env: Env, id: string): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const isConfirmed = typeof body === "object" && body !== null ? (body as Record<string, unknown>).is_confirmed : undefined;
+  if (isConfirmed !== "Y" && isConfirmed !== "N" && isConfirmed !== null) {
+    return json({ error: "is_confirmed must be 'Y', 'N', or null" }, 400);
+  }
+
+  const updated = await updateSiteConfirmation(env.DB, id, isConfirmed);
+  if (!updated) return json({ error: "not found" }, 404);
+  return json(updated);
 }
 
 export async function handleGetEscalations(env: Env): Promise<Response> {

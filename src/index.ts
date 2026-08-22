@@ -15,6 +15,7 @@ import {
   handleGetEscalations,
   handleGetSites,
   handleGetSitesAttention,
+  handlePatchSite,
   handlePatchTodo,
   handlePostEscalation,
 } from "./handlers/api";
@@ -24,6 +25,7 @@ export interface Env {
   SARVAM_STT_MODE: string;
   SARVAM_LANGUAGE_CODE: string;
   ANTHROPIC_MODEL: string;
+  ANTHROPIC_HAIKU_MODEL: string;
   INGEST_PREFIX: string;
 
   RECORDINGS: R2Bucket;
@@ -95,6 +97,12 @@ export default {
     if (url.pathname === "/api/sites/attention" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetSitesAttention(env);
+    }
+
+    const siteMatch = url.pathname.match(/^\/api\/sites\/([^/]+)$/);
+    if (siteMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePatchSite(request, env, siteMatch[1]);
     }
 
     if (url.pathname === "/api/escalations" && request.method === "GET") {

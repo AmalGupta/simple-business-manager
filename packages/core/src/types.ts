@@ -41,9 +41,13 @@ export interface Call {
   created_at: string;
 }
 
+/** NULL = unreviewed, 'Y' = confirmed valid, 'N' = confirmed not a real site. */
+export type SiteConfirmation = "Y" | "N" | null;
+
 export interface Site {
   id: string;
   name: string;
+  is_confirmed: SiteConfirmation;
   created_at: string;
 }
 

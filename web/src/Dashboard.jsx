@@ -111,6 +111,20 @@ async function fetchSitesAttention() {
   return fetchJSON("/api/sites/attention");
 }
 
+async function fetchSites() {
+  return fetchJSON("/api/sites");
+}
+
+async function patchSite(id, isConfirmed) {
+  const res = await fetch(`/api/sites/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ is_confirmed: isConfirmed }),
+  });
+  if (!res.ok) throw new Error(`PATCH /api/sites/${id} → ${res.status}`);
+  return res.json();
+}
+
 async function postEscalation(text, siteId) {
   const res = await fetch("/api/escalations", {
     method: "POST",
@@ -1018,7 +1032,7 @@ function StatCard({ value, label }) {
    attention" is itself useful information, same principle as the
    escalations empty state.
    ------------------------------------------------------------------ */
-function SitesAttentionTile({ sites, onOpenSite }) {
+function SitesAttentionTile({ sites, onOpenSite, onReviewSites, unconfirmedCount }) {
   return (
     <Card>
       <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Sites needing attention</div>
@@ -1051,6 +1065,25 @@ function SitesAttentionTile({ sites, onOpenSite }) {
           </span>
         </button>
       ))}
+      <button
+        onClick={onReviewSites}
+        style={{
+          display: "block",
+          width: "100%",
+          textAlign: "left",
+          padding: "10px 0 0",
+          margin: 0,
+          border: "none",
+          background: "none",
+          cursor: "pointer",
+          fontFamily: t.body,
+          fontSize: 12,
+          fontWeight: 600,
+          color: t.accent,
+        }}
+      >
+        Show unconfirmed sites{unconfirmedCount > 0 ? ` (${unconfirmedCount})` : ""}
+      </button>
     </Card>
   );
 }
@@ -1224,10 +1257,119 @@ function SiteView({ site, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
   );
 }
 
+/* ------------------------------------------------------------------
+   Site review — reached via "Show unconfirmed sites" below Tile 3.
+   Every site (discovered by the main extraction or the Haiku site scan),
+   with a Valid / Not valid toggle. Changes are local until "Update
+   confirmed sites" — deliberately batched rather than saving per-toggle,
+   so reviewing a dozen sites is a dozen taps, not a dozen round trips.
+   ------------------------------------------------------------------ */
+function SitesReviewView({ sites, onBack, onSaved }) {
+  const [pending, setPending] = useState(() => Object.fromEntries(sites.map((s) => [s.id, s.is_confirmed])));
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  const dirty = sites.some((s) => pending[s.id] !== s.is_confirmed);
+
+  const setChoice = (id, value) => {
+    setSaved(false);
+    setPending((p) => ({ ...p, [id]: p[id] === value ? null : value }));
+  };
+
+  const update = async () => {
+    setSaving(true);
+    try {
+      const changed = sites.filter((s) => pending[s.id] !== s.is_confirmed);
+      await Promise.all(changed.map((s) => patchSite(s.id, pending[s.id])));
+      await onSaved();
+      setSaved(true);
+    } catch (err) {
+      console.error("[sbm] failed to update site confirmations", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const choiceButtonStyle = (active, kind) => ({
+    flex: 1,
+    padding: "8px 0",
+    border: `1px solid ${active ? (kind === "Y" ? t.accent : t.putty) : t.frost}`,
+    borderRadius: t.radiusButton,
+    background: active ? (kind === "Y" ? t.accent : t.puttyBg) : t.white,
+    color: active ? (kind === "Y" ? t.white : t.putty) : t.edge2,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  });
+
+  return (
+    <div>
+      <BackLink onClick={onBack}>Back</BackLink>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem" }}>
+        <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>Review sites</h1>
+      </div>
+
+      {sites.length === 0 ? (
+        <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
+          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No sites yet.</p>
+        </Card>
+      ) : (
+        <Card style={{ marginBottom: 12 }}>
+          {sites.map((s) => (
+            <div
+              key={s.id}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 0",
+                borderTop: `1px solid ${t.frost}`,
+              }}
+            >
+              <span style={{ flex: 1, fontSize: 14, color: t.edge }}>{s.name}</span>
+              <div style={{ display: "flex", gap: 6, width: 160 }}>
+                <button onClick={() => setChoice(s.id, "Y")} style={choiceButtonStyle(pending[s.id] === "Y", "Y")}>
+                  Valid
+                </button>
+                <button onClick={() => setChoice(s.id, "N")} style={choiceButtonStyle(pending[s.id] === "N", "N")}>
+                  Not valid
+                </button>
+              </div>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          onClick={update}
+          disabled={!dirty || saving}
+          style={{
+            padding: "10px 18px",
+            border: "none",
+            borderRadius: t.radiusButton,
+            background: t.accent,
+            color: t.white,
+            fontSize: 14,
+            fontWeight: 700,
+            cursor: !dirty || saving ? "not-allowed" : "pointer",
+            opacity: !dirty || saving ? 0.5 : 1,
+          }}
+        >
+          {saving ? "Updating…" : "Update confirmed sites"}
+        </button>
+        {saved && !dirty && <span style={{ fontSize: 13, color: t.edge2 }}>Updated.</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function SimpleBusinessManager() {
   const [calls, setCalls] = useState([]);
   const [escalations, setEscalations] = useState([]);
   const [sitesAttention, setSitesAttention] = useState([]);
+  const [allSites, setAllSites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState({ name: "home" });
@@ -1235,12 +1377,13 @@ export default function SimpleBusinessManager() {
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchCalls(), fetchEscalations(), fetchSitesAttention()])
-      .then(([callsData, escalationsData, attentionData]) => {
+    Promise.all([fetchCalls(), fetchEscalations(), fetchSitesAttention(), fetchSites()])
+      .then(([callsData, escalationsData, attentionData, sitesData]) => {
         if (cancelled) return;
         setCalls(callsData);
         setEscalations(escalationsData);
         setSitesAttention(attentionData);
+        setAllSites(sitesData);
       })
       .catch((err) => {
         console.error("[sbm] failed to load calls", err);
@@ -1252,6 +1395,12 @@ export default function SimpleBusinessManager() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const refreshSites = useCallback(async () => {
+    const [sitesData, attentionData] = await Promise.all([fetchSites(), fetchSitesAttention()]);
+    setAllSites(sitesData);
+    setSitesAttention(attentionData);
   }, []);
 
   const onAddEscalation = useCallback(async (text) => {
@@ -1454,6 +1603,9 @@ export default function SimpleBusinessManager() {
       />
     );
 
+  if (view.name === "sites-review")
+    return shell(<SitesReviewView sites={allSites} onBack={() => setView({ name: "home" })} onSaved={refreshSites} />);
+
   return shell(
     <>
       <div style={{ background: t.edge, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
@@ -1501,7 +1653,12 @@ export default function SimpleBusinessManager() {
       >
         <StatCard value={todayCounts.open} label="open today" />
         <StatCard value={todayCounts.closed} label="closed today" />
-        <SitesAttentionTile sites={sitesAttention} onOpenSite={(site) => setView({ name: "site", site })} />
+        <SitesAttentionTile
+          sites={sitesAttention}
+          onOpenSite={(site) => setView({ name: "site", site })}
+          onReviewSites={() => setView({ name: "sites-review" })}
+          unconfirmedCount={allSites.filter((s) => s.is_confirmed === null).length}
+        />
         <EscalationsTile
           escalations={escalations}
           onAdd={onAddEscalation}

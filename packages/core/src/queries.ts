@@ -100,9 +100,11 @@ export async function setCallTranscribed(
 /**
  * Find-or-create a site by name. Sequential/parallel-safe: `sites.name` is
  * UNIQUE, so a concurrent upsert of the same name resolves to the same row
- * via ON CONFLICT rather than erroring.
+ * via ON CONFLICT rather than erroring. The ON CONFLICT branch only touches
+ * `name` (a no-op — it's the conflict key), so an existing site's
+ * is_confirmed is never reset by a later scan finding it again.
  */
-async function upsertSite(db: D1Database, name: string): Promise<string> {
+export async function upsertSite(db: D1Database, name: string): Promise<string> {
   const trimmed = name.trim();
   const row = await db
     .prepare(
@@ -113,6 +115,23 @@ async function upsertSite(db: D1Database, name: string): Promise<string> {
     .bind(crypto.randomUUID(), trimmed)
     .first<{ id: string }>();
   return row!.id;
+}
+
+/**
+ * Upserts each name into `sites` and links it to the call. Used by both the
+ * main extraction (saveExtraction, inline) and the Haiku site scan
+ * (packages/core/prompts/site-scan.ts) — the latter calls this directly
+ * since it has no other fields to write alongside it.
+ */
+export async function linkCallToSites(db: D1Database, callId: string, siteNames: string[]): Promise<void> {
+  const names = [...new Set(siteNames.map((s) => s.trim()).filter(Boolean))];
+  if (names.length === 0) return;
+  const siteIds = await Promise.all(names.map((name) => upsertSite(db, name)));
+  await db.batch(
+    siteIds.map((siteId) =>
+      db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId)
+    )
+  );
 }
 
 /** Task 5 — extraction landed. Writes the extracted fields, prompt_version, sites, todos, and commitments. */
@@ -312,10 +331,13 @@ const COMMITMENT_SELECT = `
   FROM commitments
 `;
 
+/* Rejected sites (is_confirmed = 'N') are hidden from call chips — unreviewed
+   (NULL) still show, only an explicit rejection hides one. */
 const SITE_SELECT = `
   SELECT call_sites.call_id AS call_id, sites.name AS name
   FROM call_sites
   JOIN sites ON sites.id = call_sites.site_id
+  WHERE sites.is_confirmed IS NOT 'N'
 `;
 
 function toTodoRow(t: RawTodoRow): TodoRow {
@@ -381,7 +403,7 @@ export async function listCallsWithTodos(db: D1Database): Promise<CallRow[]> {
   const [{ results: todos }, { results: commitments }, { results: siteRows }] = await Promise.all([
     db.prepare(`${TODO_SELECT} WHERE call_id IN (${placeholders}) ORDER BY created_at ASC`).bind(...callIds).all<RawTodoRow>(),
     db.prepare(`${COMMITMENT_SELECT} WHERE call_id IN (${placeholders}) ORDER BY created_at ASC`).bind(...callIds).all<RawCommitmentRow>(),
-    db.prepare(`${SITE_SELECT} WHERE call_sites.call_id IN (${placeholders})`).bind(...callIds).all<RawSiteRow>(),
+    db.prepare(`${SITE_SELECT} AND call_sites.call_id IN (${placeholders})`).bind(...callIds).all<RawSiteRow>(),
   ]);
 
   const todosByCall = new Map<string, TodoRow[]>();
@@ -425,7 +447,7 @@ export async function getCallWithTodos(db: D1Database, id: string): Promise<Call
   const [{ results: rawTodos }, { results: rawCommitments }, { results: rawSites }] = await Promise.all([
     db.prepare(`${TODO_SELECT} WHERE call_id = ? ORDER BY created_at ASC`).bind(id).all<RawTodoRow>(),
     db.prepare(`${COMMITMENT_SELECT} WHERE call_id = ? ORDER BY created_at ASC`).bind(id).all<RawCommitmentRow>(),
-    db.prepare(`${SITE_SELECT} WHERE call_sites.call_id = ?`).bind(id).all<RawSiteRow>(),
+    db.prepare(`${SITE_SELECT} AND call_sites.call_id = ?`).bind(id).all<RawSiteRow>(),
   ]);
 
   let customerWaiting: 0 | 1 = 0;
@@ -474,9 +496,24 @@ export async function updateTodo(
 // Sites, escalations — docs/ADDITIONAL_FEATURES_M0.md "Phase 1 home page".
 // ---------------------------------------------------------------------------
 
-export async function listSites(db: D1Database): Promise<Array<{ id: string; name: string }>> {
-  const { results } = await db.prepare(`SELECT id, name FROM sites ORDER BY name ASC`).all<{ id: string; name: string }>();
+export interface SiteRow {
+  id: string;
+  name: string;
+  is_confirmed: "Y" | "N" | null;
+}
+
+/** All sites regardless of confirmation state — the review screen needs to see everything. */
+export async function listSites(db: D1Database): Promise<SiteRow[]> {
+  const { results } = await db
+    .prepare(`SELECT id, name, is_confirmed FROM sites ORDER BY (is_confirmed IS NOT NULL), name ASC`)
+    .all<SiteRow>();
   return results;
+}
+
+export async function updateSiteConfirmation(db: D1Database, id: string, isConfirmed: "Y" | "N" | null): Promise<SiteRow | null> {
+  await db.prepare(`UPDATE sites SET is_confirmed = ? WHERE id = ?`).bind(isConfirmed, id).run();
+  const row = await db.prepare(`SELECT id, name, is_confirmed FROM sites WHERE id = ?`).bind(id).first<SiteRow>();
+  return row ?? null;
 }
 
 export interface SiteAttentionRow {
@@ -499,7 +536,8 @@ export async function getSitesNeedingAttention(db: D1Database, limit = 4): Promi
               calls.recorded_at AS recorded_at, calls.unresolved AS unresolved
        FROM sites
        JOIN call_sites ON call_sites.site_id = sites.id
-       JOIN calls ON calls.id = call_sites.call_id`
+       JOIN calls ON calls.id = call_sites.call_id
+       WHERE sites.is_confirmed IS NOT 'N'`
     )
     .all<{ site_id: string; site_name: string; call_id: string; recorded_at: string | null; unresolved: string | null }>();
   if (siteCalls.length === 0) return [];
