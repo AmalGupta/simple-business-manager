@@ -8,6 +8,7 @@ import {
   closeEscalation,
   createEscalation,
   getCallWithTodos,
+  getConfirmedSitesSummary,
   getSitesNeedingAttention,
   linkCallToSites,
   listCallsForSiteScan,
@@ -66,6 +67,10 @@ export async function handleGetSites(env: Env): Promise<Response> {
 
 export async function handleGetSitesAttention(env: Env): Promise<Response> {
   return json(await getSitesNeedingAttention(env.DB));
+}
+
+export async function handleGetConfirmedSites(env: Env): Promise<Response> {
+  return json(await getConfirmedSitesSummary(env.DB));
 }
 
 /**

@@ -608,6 +608,36 @@ export async function getSitesNeedingAttention(db: D1Database, limit = 4): Promi
     .slice(0, limit);
 }
 
+export interface ConfirmedSiteRow {
+  id: string;
+  name: string;
+  open_count: number;
+}
+
+/**
+ * Every confirmed (is_confirmed = 'Y') site with its current open-item
+ * count — the directory reached from the sites tile's "N confirmed sites"
+ * rollup, distinct from getSitesNeedingAttention: this lists ALL confirmed
+ * sites regardless of whether anything's overdue or blocked, sites with
+ * zero calls included. Alphabetical — it's a reference list, not a triage
+ * queue.
+ */
+export async function getConfirmedSitesSummary(db: D1Database): Promise<ConfirmedSiteRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT sites.id AS id, sites.name AS name,
+              COALESCE(SUM(CASE WHEN todos.status = 'open' THEN 1 ELSE 0 END), 0) AS open_count
+       FROM sites
+       LEFT JOIN call_sites ON call_sites.site_id = sites.id
+       LEFT JOIN todos ON todos.call_id = call_sites.call_id
+       WHERE sites.is_confirmed = 'Y'
+       GROUP BY sites.id, sites.name
+       ORDER BY sites.name ASC`
+    )
+    .all<ConfirmedSiteRow>();
+  return results;
+}
+
 export interface EscalationRow {
   id: string;
   text: string;

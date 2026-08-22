@@ -115,6 +115,10 @@ async function fetchSites() {
   return fetchJSON("/api/sites");
 }
 
+async function fetchConfirmedSites() {
+  return fetchJSON("/api/sites/confirmed");
+}
+
 async function patchSite(id, isConfirmed) {
   const res = await fetch(`/api/sites/${id}`, {
     method: "PATCH",
@@ -1044,7 +1048,7 @@ function StatCard({ value, label }) {
    attention" is itself useful information, same principle as the
    escalations empty state.
    ------------------------------------------------------------------ */
-function SitesAttentionTile({ sites, onOpenSite, onReviewSites, unconfirmedCount }) {
+function SitesAttentionTile({ sites, onOpenSite, onReviewSites, onViewDirectory, unconfirmedCount, confirmedCount }) {
   return (
     <Card>
       <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Sites needing attention</div>
@@ -1077,6 +1081,27 @@ function SitesAttentionTile({ sites, onOpenSite, onReviewSites, unconfirmedCount
           </span>
         </button>
       ))}
+      {confirmedCount > 0 && (
+        <button
+          onClick={onViewDirectory}
+          style={{
+            display: "block",
+            width: "100%",
+            textAlign: "left",
+            padding: "10px 0 0",
+            margin: 0,
+            border: "none",
+            background: "none",
+            cursor: "pointer",
+            fontFamily: t.body,
+            fontSize: 12,
+            fontWeight: 600,
+            color: t.edge,
+          }}
+        >
+          {confirmedCount} confirmed site{confirmedCount === 1 ? "" : "s"} →
+        </button>
+      )}
       <button
         onClick={onReviewSites}
         style={{
@@ -1264,6 +1289,77 @@ function SiteView({ site, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
             busyIds={busyIds}
           />
         ))
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Sites directory — reached via the "N confirmed sites" rollup on Tile 3.
+   Every confirmed site with its current open-item count, alphabetical — a
+   reference list, unlike Tile 3 itself which only shows sites that need
+   triage. Tapping a row reuses the same per-site drilldown (SiteView) Tile
+   3's own rows link to.
+   ------------------------------------------------------------------ */
+function SitesDirectoryView({ onBack, onOpenSite }) {
+  const [sites, setSites] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchConfirmedSites()
+      .then((data) => {
+        if (!cancelled) setSites(data);
+      })
+      .catch((err) => {
+        console.error("[sbm] failed to load confirmed sites", err);
+        if (!cancelled) setSites([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <div>
+      <BackLink onClick={onBack}>Back</BackLink>
+
+      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
+        Sites
+      </h1>
+
+      {sites === null ? (
+        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+      ) : sites.length === 0 ? (
+        <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
+          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No confirmed sites yet.</p>
+        </Card>
+      ) : (
+        <Card>
+          {sites.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => onOpenSite(s.name)}
+              style={{
+                display: "flex",
+                width: "100%",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 10,
+                padding: "12px 0",
+                margin: 0,
+                border: "none",
+                borderTop: `1px solid ${t.frost}`,
+                background: "none",
+                cursor: "pointer",
+                textAlign: "left",
+                fontFamily: t.body,
+              }}
+            >
+              <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
+              <span style={{ fontSize: 12, color: t.edge2 }}>{s.open_count} open</span>
+            </button>
+          ))}
+        </Card>
       )}
     </div>
   );
@@ -1658,6 +1754,11 @@ export default function SimpleBusinessManager() {
   if (view.name === "sites-review")
     return shell(<SitesReviewView sites={allSites} onBack={() => setView({ name: "home" })} onSaved={refreshSites} />);
 
+  if (view.name === "sites-directory")
+    return shell(
+      <SitesDirectoryView onBack={() => setView({ name: "home" })} onOpenSite={(site) => setView({ name: "site", site })} />
+    );
+
   return shell(
     <>
       <div style={{ background: t.edge, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
@@ -1709,7 +1810,9 @@ export default function SimpleBusinessManager() {
           sites={sitesAttention}
           onOpenSite={(site) => setView({ name: "site", site })}
           onReviewSites={() => setView({ name: "sites-review" })}
+          onViewDirectory={() => setView({ name: "sites-directory" })}
           unconfirmedCount={allSites.filter((s) => s.is_confirmed === null).length}
+          confirmedCount={allSites.filter((s) => s.is_confirmed === "Y").length}
         />
         <EscalationsTile
           escalations={escalations}
