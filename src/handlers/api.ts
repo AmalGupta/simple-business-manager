@@ -1,10 +1,11 @@
 // GET /api/calls, GET /api/calls/:id, PATCH /api/todos/:id — Tasks 6-7.
 // GET/POST /api/escalations, PATCH /api/escalations/:id, GET /api/sites,
-// GET /api/sites/attention, PATCH /api/sites/:id, POST /api/sites/backfill —
-// docs/ADDITIONAL_FEATURES_M0.md "Phase 1 home page" and the site
-// confirmation workflow.
+// GET /api/sites/attention, PATCH /api/sites/:id, POST /api/sites/backfill,
+// GET/POST /api/sites/:id/team — docs/ADDITIONAL_FEATURES_M0.md "Phase 1
+// home page", the site confirmation workflow, and site details/team.
 
 import {
+  addSiteTeamMember,
   closeEscalation,
   createEscalation,
   getCallWithTodos,
@@ -14,8 +15,9 @@ import {
   listCallsForSiteScan,
   listCallsWithTodos,
   listOpenEscalations,
+  listSiteTeamMembers,
   listSites,
-  updateSiteConfirmation,
+  updateSite,
   updateTodo,
 } from "@sbm/core";
 import { scanCallForSites } from "../../packages/core/prompts/site-scan";
@@ -114,6 +116,8 @@ export async function handlePostSitesBackfill(request: Request, env: Env): Promi
   });
 }
 
+const SITE_PATCH_KEYS = ["is_confirmed", "address", "poc_name"] as const;
+
 export async function handlePatchSite(request: Request, env: Env, id: string): Promise<Response> {
   let body: unknown;
   try {
@@ -121,14 +125,41 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
   } catch {
     return json({ error: "invalid JSON body" }, 400);
   }
-  const isConfirmed = typeof body === "object" && body !== null ? (body as Record<string, unknown>).is_confirmed : undefined;
-  if (isConfirmed !== "Y" && isConfirmed !== "N" && isConfirmed !== null) {
+  if (typeof body !== "object" || body === null) return json({ error: "invalid body" }, 400);
+  const record = body as Record<string, unknown>;
+
+  if ("is_confirmed" in record && record.is_confirmed !== "Y" && record.is_confirmed !== "N" && record.is_confirmed !== null) {
     return json({ error: "is_confirmed must be 'Y', 'N', or null" }, 400);
   }
 
-  const updated = await updateSiteConfirmation(env.DB, id, isConfirmed);
+  const patch: Partial<Record<(typeof SITE_PATCH_KEYS)[number], string | null>> = {};
+  for (const key of SITE_PATCH_KEYS) {
+    if (key in record) patch[key] = record[key] as string | null;
+  }
+
+  const updated = await updateSite(env.DB, id, patch);
   if (!updated) return json({ error: "not found" }, 404);
   return json(updated);
+}
+
+export async function handleGetSiteTeam(env: Env, siteId: string): Promise<Response> {
+  return json(await listSiteTeamMembers(env.DB, siteId));
+}
+
+export async function handlePostSiteTeamMember(request: Request, env: Env, siteId: string): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const contactNumber = typeof record.contact_number === "string" ? record.contact_number.trim() : "";
+  if (!name || !contactNumber) return json({ error: "name and contact_number are required" }, 400);
+
+  const member = await addSiteTeamMember(env.DB, siteId, name, contactNumber);
+  return json(member, 201);
 }
 
 export async function handleGetEscalations(env: Env): Promise<Response> {

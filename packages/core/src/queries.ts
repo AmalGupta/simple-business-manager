@@ -500,20 +500,66 @@ export interface SiteRow {
   id: string;
   name: string;
   is_confirmed: "Y" | "N" | null;
+  address: string | null;
+  poc_name: string | null;
 }
+
+const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name FROM sites`;
 
 /** All sites regardless of confirmation state — the review screen needs to see everything. */
 export async function listSites(db: D1Database): Promise<SiteRow[]> {
   const { results } = await db
-    .prepare(`SELECT id, name, is_confirmed FROM sites ORDER BY (is_confirmed IS NOT NULL), name ASC`)
+    .prepare(`${SITE_ROW_SELECT} ORDER BY (is_confirmed IS NOT NULL), name ASC`)
     .all<SiteRow>();
   return results;
 }
 
-export async function updateSiteConfirmation(db: D1Database, id: string, isConfirmed: "Y" | "N" | null): Promise<SiteRow | null> {
-  await db.prepare(`UPDATE sites SET is_confirmed = ? WHERE id = ?`).bind(isConfirmed, id).run();
-  const row = await db.prepare(`SELECT id, name, is_confirmed FROM sites WHERE id = ?`).bind(id).first<SiteRow>();
+const SITE_PATCH_FIELDS = ["is_confirmed", "address", "poc_name"] as const;
+type SitePatchField = (typeof SITE_PATCH_FIELDS)[number];
+
+/**
+ * One dynamic patch for everything editable on a site: confirmation status
+ * (SitesReviewView) and address/point-of-contact (SiteView — always
+ * editable, not gated on the site having any calls or open items). Only
+ * the fields present in `patch` are touched, same pattern as updateTodo.
+ */
+export async function updateSite(db: D1Database, id: string, patch: Partial<Record<SitePatchField, string | null>>): Promise<SiteRow | null> {
+  const fields = SITE_PATCH_FIELDS.filter((f) => f in patch);
+  if (fields.length > 0) {
+    const setClause = fields.map((f) => `${f} = ?`).join(", ");
+    const values = fields.map((f) => patch[f] ?? null);
+    await db.prepare(`UPDATE sites SET ${setClause} WHERE id = ?`).bind(...values, id).run();
+  }
+  const row = await db.prepare(`${SITE_ROW_SELECT} WHERE id = ?`).bind(id).first<SiteRow>();
   return row ?? null;
+}
+
+export interface SiteTeamMemberRow {
+  id: string;
+  name: string;
+  contact_number: string;
+}
+
+export async function listSiteTeamMembers(db: D1Database, siteId: string): Promise<SiteTeamMemberRow[]> {
+  const { results } = await db
+    .prepare(`SELECT id, name, contact_number FROM site_team_members WHERE site_id = ? ORDER BY created_at ASC`)
+    .bind(siteId)
+    .all<SiteTeamMemberRow>();
+  return results;
+}
+
+export async function addSiteTeamMember(
+  db: D1Database,
+  siteId: string,
+  name: string,
+  contactNumber: string
+): Promise<SiteTeamMemberRow> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(`INSERT INTO site_team_members (id, site_id, name, contact_number) VALUES (?, ?, ?, ?)`)
+    .bind(id, siteId, name, contactNumber)
+    .run();
+  return { id, name, contact_number: contactNumber };
 }
 
 export interface SiteAttentionRow {

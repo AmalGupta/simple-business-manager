@@ -16,10 +16,12 @@ import {
   handleGetSites,
   handleGetConfirmedSites,
   handleGetSitesAttention,
+  handleGetSiteTeam,
   handlePatchSite,
   handlePatchTodo,
   handlePostEscalation,
   handlePostSitesBackfill,
+  handlePostSiteTeamMember,
 } from "./handlers/api";
 
 export interface Env {
@@ -115,6 +117,16 @@ export default {
     if (siteMatch && request.method === "PATCH") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handlePatchSite(request, env, siteMatch[1]);
+    }
+
+    const siteTeamMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/team$/);
+    if (siteTeamMatch && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetSiteTeam(env, siteTeamMatch[1]);
+    }
+    if (siteTeamMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostSiteTeamMember(request, env, siteTeamMatch[1]);
     }
 
     if (url.pathname === "/api/escalations" && request.method === "GET") {

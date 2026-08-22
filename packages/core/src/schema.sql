@@ -43,7 +43,19 @@ CREATE TABLE sites (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL UNIQUE,
   is_confirmed  TEXT,          -- NULL = unreviewed, 'Y' = confirmed valid, 'N' = confirmed not a real site
+  address       TEXT,
+  poc_name      TEXT,          -- point of contact
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Always-editable roster of people assigned to a site — see
+-- docs/ADDITIONAL_FEATURES_M0.md and the SiteView "Assign team" popup.
+CREATE TABLE site_team_members (
+  id              TEXT PRIMARY KEY,
+  site_id         TEXT NOT NULL REFERENCES sites(id),
+  name            TEXT NOT NULL,
+  contact_number  TEXT NOT NULL,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE call_sites (
@@ -127,3 +139,4 @@ CREATE INDEX idx_calls_client ON calls(client_id, created_at DESC);
 CREATE INDEX idx_call_sites_site ON call_sites(site_id);
 CREATE INDEX idx_commitments_call ON commitments(call_id);
 CREATE INDEX idx_escalations_status ON escalations(status, created_at DESC);
+CREATE INDEX idx_site_team_members_site ON site_team_members(site_id);

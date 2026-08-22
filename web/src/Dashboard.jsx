@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   Circle,
   Check,
@@ -119,13 +119,27 @@ async function fetchConfirmedSites() {
   return fetchJSON("/api/sites/confirmed");
 }
 
-async function patchSite(id, isConfirmed) {
+async function patchSite(id, patch) {
   const res = await fetch(`/api/sites/${id}`, {
     method: "PATCH",
     headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
-    body: JSON.stringify({ is_confirmed: isConfirmed }),
+    body: JSON.stringify(patch),
   });
   if (!res.ok) throw new Error(`PATCH /api/sites/${id} → ${res.status}`);
+  return res.json();
+}
+
+async function fetchSiteTeam(siteId) {
+  return fetchJSON(`/api/sites/${siteId}/team`);
+}
+
+async function postSiteTeamMember(siteId, name, contactNumber) {
+  const res = await fetch(`/api/sites/${siteId}/team`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ name, contact_number: contactNumber }),
+  });
+  if (!res.ok) throw new Error(`POST /api/sites/${siteId}/team → ${res.status}`);
   return res.json();
 }
 
@@ -307,7 +321,15 @@ const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 /* Horizontal, scrollable — one row for the whole month, day-of-week
    stacked above the date so a column no longer has to line up visually.
    Each day carries a hover/focus tooltip with the date and call count. */
-function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, onChangeMonth, onPrevMonth, onNextMonth, yearOptions }) {
+function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, onChangeMonth, onPrevMonth, onNextMonth, yearOptions, todayIso }) {
+  const todayRef = useRef(null);
+
+  /* Auto-scroll today into view — a horizontal bar that opens scrolled to
+     day 1 with today off-screen defeats "the focus date should be today." */
+  useEffect(() => {
+    todayRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [year, month, days]);
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
@@ -384,13 +406,16 @@ function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, on
             );
           }
 
+          const isToday = d.date === todayIso;
+
           return (
             <button
               key={d.date}
+              ref={isToday ? todayRef : undefined}
               className="sbm-pane sbm-day sbm-tip"
               onClick={() => onSelectDay(d.date)}
-              aria-label={`${fmtLong(d.date)}, ${d.held ? "held" : "missed"}, ${d.calls} calls`}
-              aria-current={d.date === selected ? "date" : undefined}
+              aria-label={`${fmtLong(d.date)}${isToday ? ", today" : ""}, ${d.held ? "held" : "missed"}, ${d.calls} calls`}
+              aria-current={isToday ? "date" : undefined}
               style={{
                 animationDelay: `${Math.min(i, 27) * 12}ms`,
                 position: "relative",
@@ -405,12 +430,15 @@ function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, on
                 borderRadius: t.radius,
                 cursor: "pointer",
                 fontVariantNumeric: "tabular-nums",
-                color: d.held ? "rgba(255,255,255,0.85)" : t.white,
-                border: `1px solid ${d.date === selected ? t.accent : "rgba(255,255,255,0.15)"}`,
-                background: d.held ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.16)",
+                fontWeight: isToday ? 700 : 400,
+                color: isToday ? t.edge : d.held ? "rgba(255,255,255,0.85)" : t.white,
+                border: `1px solid ${d.date === selected ? t.white : isToday ? t.white : "rgba(255,255,255,0.15)"}`,
+                background: isToday ? t.white : d.held ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.16)",
               }}
             >
-              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)" }}>{WEEKDAY_LABELS[dow]}</span>
+              <span style={{ fontSize: 10, color: isToday ? t.edge2 : "rgba(255,255,255,0.5)" }}>
+                {WEEKDAY_LABELS[dow]}
+              </span>
               <span style={{ fontSize: 14 }}>{dayNum}</span>
               {d.calls > 0 && (
                 <span
@@ -422,7 +450,7 @@ function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, on
                     height: 4,
                     marginLeft: -2,
                     borderRadius: "50%",
-                    background: "rgba(255,255,255,0.85)",
+                    background: isToday ? t.edge2 : "rgba(255,255,255,0.85)",
                   }}
                 />
               )}
@@ -1048,6 +1076,29 @@ const TILE_ROW_STYLE = {
   borderTop: `1px solid ${t.frost}`,
 };
 
+const TEXT_INPUT_STYLE = {
+  minHeight: 40,
+  padding: "0 10px",
+  border: `1px solid ${t.frost}`,
+  borderRadius: t.radiusButton,
+  fontFamily: t.body,
+  fontSize: 14,
+  color: t.edge,
+  background: t.white,
+};
+
+const PRIMARY_BUTTON_STYLE = {
+  minHeight: 40,
+  padding: "0 16px",
+  border: "none",
+  borderRadius: t.radiusButton,
+  background: t.accent,
+  color: t.white,
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: "pointer",
+};
+
 function StatCard({ value, label }) {
   return (
     <Card>
@@ -1211,33 +1262,12 @@ function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
             placeholder="What needs attention?"
-            style={{
-              flex: 1,
-              minHeight: 40,
-              padding: "0 10px",
-              border: `1px solid ${t.frost}`,
-              borderRadius: t.radiusButton,
-              fontFamily: t.body,
-              fontSize: 14,
-              color: t.edge,
-              background: t.white,
-            }}
+            style={{ ...TEXT_INPUT_STYLE, flex: 1 }}
           />
           <button
             onClick={submit}
             disabled={saving || !text.trim()}
-            style={{
-              minHeight: 40,
-              padding: "0 14px",
-              border: "none",
-              borderRadius: t.radiusButton,
-              background: t.accent,
-              color: t.white,
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: saving ? "wait" : "pointer",
-              opacity: saving || !text.trim() ? 0.6 : 1,
-            }}
+            style={{ ...PRIMARY_BUTTON_STYLE, cursor: saving ? "wait" : "pointer", opacity: saving || !text.trim() ? 0.6 : 1 }}
           >
             Add
           </button>
@@ -1281,15 +1311,164 @@ function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
   );
 }
 
+/* Popup for "Assign team" — see docs/ADDITIONAL_FEATURES_M0.md follow-up.
+   Two fields, add-or-cancel — deliberately not a full contact form. */
+function AssignTeamModal({ onClose, onAdd }) {
+  const [name, setName] = useState("");
+  const [contact, setContact] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    const trimmedName = name.trim();
+    const trimmedContact = contact.trim();
+    if (!trimmedName || !trimmedContact) {
+      setError("Enter both a name and contact number.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onAdd(trimmedName, trimmedContact);
+      onClose();
+    } catch (err) {
+      console.error("[sbm] failed to add team member", err);
+      setError("Failed to add — try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Assign team member"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,24,31,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.25rem",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          background: t.white,
+          borderRadius: t.radiusCard,
+          padding: "1.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Assign team member</span>
+        <input
+          autoFocus
+          placeholder="Employee name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        <input
+          placeholder="Contact number"
+          value={contact}
+          onChange={(e) => setContact(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          <button
+            onClick={onClose}
+            style={{
+              minHeight: 40,
+              padding: "0 16px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              background: t.white,
+              color: t.edge2,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button onClick={submit} disabled={saving} style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Adding…" : "Add"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------
-   Site view — drilldown from Tile 3. Same shape as DayView, filtered by
-   site instead of date.
+   Site view — drilldown from Tile 3, the sites directory, or the
+   review screen. Calls tagged to this site (same shape as DayView,
+   filtered by site instead of date), plus always-editable site details
+   and an always-editable team roster — see the conversation that added
+   this: "Always available, not conditional" on call/item count.
    ------------------------------------------------------------------ */
-function SiteView({ site, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
+function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, busyIds, onSiteUpdated }) {
   const siteCalls = useMemo(
     () => sortCalls(calls.filter((c) => c.sites?.includes(site))),
     [calls, site]
   );
+
+  const [address, setAddress] = useState(siteRecord?.address ?? "");
+  const [pocName, setPocName] = useState(siteRecord?.poc_name ?? "");
+  const [savingDetails, setSavingDetails] = useState(false);
+  const [detailsSaved, setDetailsSaved] = useState(false);
+
+  const [team, setTeam] = useState(null);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+
+  useEffect(() => {
+    if (!siteRecord?.id) {
+      setTeam([]);
+      return;
+    }
+    let cancelled = false;
+    fetchSiteTeam(siteRecord.id)
+      .then((data) => {
+        if (!cancelled) setTeam(data);
+      })
+      .catch((err) => {
+        console.error("[sbm] failed to load site team", err);
+        if (!cancelled) setTeam([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [siteRecord?.id]);
+
+  const saveDetails = async () => {
+    if (!siteRecord?.id) return;
+    setSavingDetails(true);
+    setDetailsSaved(false);
+    try {
+      await patchSite(siteRecord.id, { address, poc_name: pocName });
+      await onSiteUpdated?.();
+      setDetailsSaved(true);
+    } catch (err) {
+      console.error("[sbm] failed to save site details", err);
+    } finally {
+      setSavingDetails(false);
+    }
+  };
+
+  const addTeamMember = async (name, contactNumber) => {
+    const member = await postSiteTeamMember(siteRecord.id, name, contactNumber);
+    setTeam((current) => [...(current ?? []), member]);
+  };
 
   return (
     <div>
@@ -1298,6 +1477,70 @@ function SiteView({ site, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
       <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
         {site}
       </h1>
+
+      {siteRecord?.id && (
+        <Card style={{ marginBottom: 12 }}>
+          <TileLabel>Site details</TileLabel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+            <input
+              placeholder="Address"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              style={TEXT_INPUT_STYLE}
+            />
+            <input
+              placeholder="Point of contact name"
+              value={pocName}
+              onChange={(e) => setPocName(e.target.value)}
+              style={TEXT_INPUT_STYLE}
+            />
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
+            <button onClick={saveDetails} disabled={savingDetails} style={{ ...PRIMARY_BUTTON_STYLE, opacity: savingDetails ? 0.6 : 1 }}>
+              {savingDetails ? "Saving…" : "Save details"}
+            </button>
+            {detailsSaved && <span style={{ fontSize: 12, color: t.edge2 }}>Saved.</span>}
+          </div>
+        </Card>
+      )}
+
+      {siteRecord?.id && (
+        <Card style={{ marginBottom: 12 }}>
+          <TileLabel
+            action={
+              <button
+                onClick={() => setShowAssignModal(true)}
+                style={{
+                  padding: "6px 12px",
+                  border: `1px solid ${t.frost}`,
+                  borderRadius: t.radiusButton,
+                  background: t.white,
+                  color: t.edge,
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Assign team
+              </button>
+            }
+          >
+            Team
+          </TileLabel>
+          {team === null ? (
+            <p style={{ fontSize: 13, color: t.edge2, margin: "6px 0 0" }}>Loading…</p>
+          ) : team.length === 0 ? (
+            <p style={{ fontSize: 13, color: t.edge2, margin: "6px 0 0" }}>No one assigned yet.</p>
+          ) : (
+            team.map((m) => (
+              <div key={m.id} style={{ display: "flex", justifyContent: "space-between", ...TILE_ROW_STYLE }}>
+                <span style={{ fontSize: 14, color: t.edge }}>{m.name}</span>
+                <span style={{ fontSize: 13, color: t.edge2 }}>{m.contact_number}</span>
+              </div>
+            ))
+          )}
+        </Card>
+      )}
 
       {siteCalls.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
@@ -1316,6 +1559,8 @@ function SiteView({ site, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
           />
         ))
       )}
+
+      {showAssignModal && <AssignTeamModal onClose={() => setShowAssignModal(false)} onAdd={addTeamMember} />}
     </div>
   );
 }
@@ -1435,7 +1680,7 @@ function SitesReviewView({ sites, onBack, onSaved }) {
     setSaving(true);
     try {
       const changed = sites.filter((s) => pending[s.id] !== s.is_confirmed);
-      await Promise.all(changed.map((s) => patchSite(s.id, pending[s.id])));
+      await Promise.all(changed.map((s) => patchSite(s.id, { is_confirmed: pending[s.id] })));
       await onSaved();
       setSaved(true);
     } catch (err) {
@@ -1768,12 +2013,14 @@ export default function SimpleBusinessManager() {
     return shell(
       <SiteView
         site={view.site}
+        siteRecord={allSites.find((s) => s.name === view.site)}
         calls={calls}
         onBack={() => setView(view.from ?? { name: "home" })}
         onOpen={(id) => setView({ name: "call", id, from: { name: "site", site: view.site, from: view.from } })}
         onToggle={onToggle}
         onPark={onPark}
         busyIds={busyIds}
+        onSiteUpdated={refreshSites}
       />
     );
 
@@ -1790,7 +2037,7 @@ export default function SimpleBusinessManager() {
 
   return shell(
     <>
-      <div style={{ background: t.edge, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
+      <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
         <header
           style={{
             display: "flex",
@@ -1816,6 +2063,7 @@ export default function SimpleBusinessManager() {
           onChangeMonth={(m) => goToMonth(calMonth.year, m)}
           onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
           onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
+          todayIso={isoDate(today().getFullYear(), today().getMonth(), today().getDate())}
         />
       </div>
 

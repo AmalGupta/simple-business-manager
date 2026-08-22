@@ -48,6 +48,16 @@ export interface Site {
   id: string;
   name: string;
   is_confirmed: SiteConfirmation;
+  address: string | null;
+  poc_name: string | null;
+  created_at: string;
+}
+
+export interface SiteTeamMember {
+  id: string;
+  site_id: string;
+  name: string;
+  contact_number: string;
   created_at: string;
 }
 
