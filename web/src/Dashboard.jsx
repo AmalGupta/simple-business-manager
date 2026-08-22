@@ -1423,10 +1423,17 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
     [calls, site]
   );
 
+  /* "Assign new site" only for a genuinely blank site — no details AND no
+     call history yet. Anything with either already shows "Add more site
+     details" instead, since it's not really a fresh/untouched site. */
+  const hasDetails = Boolean(siteRecord?.address?.trim() || siteRecord?.poc_name?.trim());
+  const isBlankSite = !hasDetails && siteCalls.length === 0;
+
   const [address, setAddress] = useState(siteRecord?.address ?? "");
   const [pocName, setPocName] = useState(siteRecord?.poc_name ?? "");
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsSaved, setDetailsSaved] = useState(false);
+  const [editingDetails, setEditingDetails] = useState(false);
 
   const [team, setTeam] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -1458,6 +1465,7 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
       await patchSite(siteRecord.id, { address, poc_name: pocName });
       await onSiteUpdated?.();
       setDetailsSaved(true);
+      setEditingDetails(false);
     } catch (err) {
       console.error("[sbm] failed to save site details", err);
     } finally {
@@ -1480,27 +1488,58 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
 
       {siteRecord?.id && (
         <Card style={{ marginBottom: 12 }}>
-          <TileLabel>Site details</TileLabel>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
-            <input
-              placeholder="Address"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              style={TEXT_INPUT_STYLE}
-            />
-            <input
-              placeholder="Point of contact name"
-              value={pocName}
-              onChange={(e) => setPocName(e.target.value)}
-              style={TEXT_INPUT_STYLE}
-            />
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
-            <button onClick={saveDetails} disabled={savingDetails} style={{ ...PRIMARY_BUTTON_STYLE, opacity: savingDetails ? 0.6 : 1 }}>
-              {savingDetails ? "Saving…" : "Save details"}
-            </button>
-            {detailsSaved && <span style={{ fontSize: 12, color: t.edge2 }}>Saved.</span>}
-          </div>
+          <TileLabel
+            action={
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                {detailsSaved && !editingDetails && <span style={{ fontSize: 12, color: t.edge2 }}>Saved.</span>}
+                <button
+                  onClick={() => {
+                    setDetailsSaved(false);
+                    setEditingDetails((v) => !v);
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    border: `1px solid ${t.frost}`,
+                    borderRadius: t.radiusButton,
+                    background: t.white,
+                    color: t.edge,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {editingDetails ? "Cancel" : isBlankSite ? "Assign new site" : "Add more site details"}
+                </button>
+              </div>
+            }
+          >
+            Site details
+          </TileLabel>
+
+          {editingDetails && (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+                <input
+                  placeholder="Address"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  style={TEXT_INPUT_STYLE}
+                />
+                <input
+                  placeholder="Point of contact name"
+                  value={pocName}
+                  onChange={(e) => setPocName(e.target.value)}
+                  style={TEXT_INPUT_STYLE}
+                />
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <button onClick={saveDetails} disabled={savingDetails} style={{ ...PRIMARY_BUTTON_STYLE, opacity: savingDetails ? 0.6 : 1 }}>
+                  {savingDetails ? "Saving…" : "Save details"}
+                </button>
+              </div>
+            </>
+          )}
         </Card>
       )}
 
@@ -1519,9 +1558,10 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
                   fontSize: 12,
                   fontWeight: 600,
                   cursor: "pointer",
+                  whiteSpace: "nowrap",
                 }}
               >
-                Assign team
+                {team && team.length > 0 ? "Add more members" : "Assign team"}
               </button>
             }
           >
