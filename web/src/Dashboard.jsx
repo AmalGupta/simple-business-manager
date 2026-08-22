@@ -245,10 +245,10 @@ function iconButtonStyle(disabled) {
     width: 36,
     height: 36,
     flexShrink: 0,
-    border: `1px solid ${t.frost}`,
+    border: "1px solid rgba(255,255,255,0.15)",
     borderRadius: t.radiusButton,
-    background: t.white,
-    color: disabled ? t.frost : t.edge2,
+    background: "rgba(255,255,255,0.07)",
+    color: disabled ? "rgba(255,255,255,0.3)" : "rgba(255,255,255,0.85)",
     cursor: disabled ? "default" : "pointer",
     padding: 0,
   };
@@ -259,10 +259,10 @@ const selectStyle = {
   fontSize: 13,
   fontWeight: 600,
   padding: "8px 10px",
-  border: `1px solid ${t.frost}`,
+  border: "1px solid rgba(255,255,255,0.15)",
   borderRadius: t.radiusButton,
-  background: t.white,
-  color: t.edge,
+  background: "rgba(255,255,255,0.07)",
+  color: t.white,
 };
 
 /* ------------------------------------------------------------------
@@ -272,14 +272,14 @@ const selectStyle = {
    missed day is etched. Days after today in the displayed month have
    no data yet and render as empty, unclickable cells.
    ------------------------------------------------------------------ */
-function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, onChangeMonth, onPrevMonth, onNextMonth, yearOptions }) {
-  const labels = ["S", "M", "T", "W", "T", "F", "S"];
-  /* Pad the first row so columns line up with real weekdays. */
-  const lead = new Date(days[0].date).getDay();
-  const cells = [...Array(lead).fill(null), ...days];
+const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
 
+/* Horizontal, scrollable — one row for the whole month, day-of-week
+   stacked above the date so a column no longer has to line up visually.
+   Each day carries a hover/focus tooltip with the date and call count. */
+function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, onChangeMonth, onPrevMonth, onNextMonth, yearOptions }) {
   return (
-    <div style={{ marginBottom: "1.25rem" }}>
+    <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
         <button aria-label="Previous month" onClick={onPrevMonth} style={iconButtonStyle(false)}>
           <ChevronLeft size={16} />
@@ -318,88 +318,90 @@ function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, on
       </div>
 
       <div
-        aria-hidden="true"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(7, 1fr)",
-          gap: 4,
-          marginBottom: 4,
-          fontSize: 11,
-          color: t.edge2,
-          textAlign: "center",
-        }}
-      >
-        {labels.map((l, i) => (
-          <span key={i}>{l}</span>
-        ))}
-      </div>
-
-      <div
         role="group"
         aria-label="Daily record. Select a day to see its calls."
-        style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4 }}
+        style={{
+          display: "flex",
+          gap: 6,
+          overflowX: "auto",
+          paddingTop: 26,
+          paddingBottom: 4,
+        }}
       >
-        {cells.map((d, i) =>
-          d === null ? (
-            <span key={"pad-" + i} />
-          ) : d.future ? (
-            <span
-              key={d.date}
-              aria-hidden="true"
-              style={{
-                minHeight: 44,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 12,
-                fontVariantNumeric: "tabular-nums",
-                color: t.frost,
-              }}
-            >
-              {new Date(d.date).getDate()}
-            </span>
-          ) : (
+        {days.map((d, i) => {
+          const dayNum = Number(d.date.slice(8, 10));
+          const dow = new Date(year, month, dayNum).getDay();
+
+          if (d.future) {
+            return (
+              <span
+                key={d.date}
+                aria-hidden="true"
+                style={{
+                  flex: "0 0 40px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 2,
+                  minHeight: 52,
+                  color: "rgba(255,255,255,0.25)",
+                }}
+              >
+                <span style={{ fontSize: 10 }}>{WEEKDAY_LABELS[dow]}</span>
+                <span style={{ fontSize: 14, fontVariantNumeric: "tabular-nums" }}>{dayNum}</span>
+              </span>
+            );
+          }
+
+          return (
             <button
               key={d.date}
-              className="sbm-pane sbm-day"
+              className="sbm-pane sbm-day sbm-tip"
               onClick={() => onSelectDay(d.date)}
               aria-label={`${fmtLong(d.date)}, ${d.held ? "held" : "missed"}, ${d.calls} calls`}
               aria-current={d.date === selected ? "date" : undefined}
               style={{
                 animationDelay: `${Math.min(i, 27) * 12}ms`,
                 position: "relative",
+                flex: "0 0 40px",
                 display: "flex",
+                flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                minHeight: 44,
+                gap: 2,
+                minHeight: 52,
                 padding: 0,
                 borderRadius: t.radius,
                 cursor: "pointer",
-                fontSize: 12,
                 fontVariantNumeric: "tabular-nums",
-                color: d.held ? t.edge2 : t.edge,
-                border: `1px solid ${d.date === selected ? t.accent : d.held ? t.frost : "transparent"}`,
-                background: d.held ? "transparent" : t.frostSoft,
+                color: d.held ? "rgba(255,255,255,0.85)" : t.white,
+                border: `1px solid ${d.date === selected ? t.accent : "rgba(255,255,255,0.15)"}`,
+                background: d.held ? "rgba(255,255,255,0.05)" : "rgba(255,255,255,0.16)",
               }}
             >
-              {new Date(d.date).getDate()}
+              <span style={{ fontSize: 10, color: "rgba(255,255,255,0.5)" }}>{WEEKDAY_LABELS[dow]}</span>
+              <span style={{ fontSize: 14 }}>{dayNum}</span>
               {d.calls > 0 && (
                 <span
                   style={{
                     position: "absolute",
                     left: "50%",
-                    bottom: 6,
+                    bottom: 4,
                     width: 4,
                     height: 4,
                     marginLeft: -2,
                     borderRadius: "50%",
-                    background: t.edge2,
+                    background: "rgba(255,255,255,0.85)",
                   }}
                 />
               )}
+              <span className="sbm-tooltip" role="tooltip">
+                {fmtShort(d.date)} · {d.calls} {d.calls === 1 ? "call" : "calls"}
+              </span>
             </button>
-          )
-        )}
+          );
+        })}
       </div>
     </div>
   );
@@ -995,16 +997,32 @@ function EmptyState() {
 }
 
 /* ================================================================== */
+/* Tiles 1 & 2 — a plain number readout, same card language as tiles 3 & 4. */
+function StatCard({ value, label }) {
+  return (
+    <Card>
+      <div style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
+        {value}
+      </div>
+      <div style={{ fontSize: 13, color: t.edge2, marginTop: 6 }}>{label}</div>
+    </Card>
+  );
+}
+
 /* ------------------------------------------------------------------
    Tile 3 — sites needing attention. See docs/ADDITIONAL_FEATURES_M0.md
    "Phase 1 home page". Inclusion/sort/age is computed server-side
-   (packages/core/src/queries.ts getSitesNeedingAttention).
+   (packages/core/src/queries.ts getSitesNeedingAttention). Always
+   rendered, with an empty state — a tile that disappears when there's
+   nothing to show made the 4-card panel jump around; "nothing needs
+   attention" is itself useful information, same principle as the
+   escalations empty state.
    ------------------------------------------------------------------ */
 function SitesAttentionTile({ sites, onOpenSite }) {
-  if (sites.length === 0) return null;
   return (
-    <Card style={{ marginBottom: 12 }}>
+    <Card>
       <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Sites needing attention</div>
+      {sites.length === 0 && <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing needs attention.</p>}
       {sites.map((s) => (
         <button
           key={s.id}
@@ -1062,7 +1080,7 @@ function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
   };
 
   return (
-    <Card style={{ marginBottom: 12 }}>
+    <Card>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <span style={{ fontSize: 12, color: t.edge2 }}>Escalations</span>
         <button
@@ -1251,36 +1269,22 @@ export default function SimpleBusinessManager() {
     }
   }, []);
 
-  const counts = useMemo(() => {
+  /* Tiles 1 & 2 — docs/ADDITIONAL_FEATURES_M0.md "Phase 1 home page".
+     "Open" is a live snapshot (open items don't have a single day); "closed"
+     is scoped to today specifically, via completed_at. */
+  const todayCounts = useMemo(() => {
     const all = calls.flatMap((c) => c.todos);
+    const now = today();
+    const todayKey = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
     return {
       open: all.filter((td) => td.status === "open").length,
-      closed: all.filter((td) => td.status === "done").length,
+      closed: all.filter((td) => td.status === "done" && dayKey(td.completed_at) === todayKey).length,
     };
   }, [calls]);
 
-  const streak = useMemo(() => {
-    // Missed-day detection reads missed_deadlines, which nothing populates
-    // yet — that requires the cron scanner, explicitly out of scope for this
-    // milestone (see docs/BUILD_BRIEF.md "Not in this milestone"). Every day
-    // reads as held until that lands. Trailing 28 days ending today, kept
-    // independent of whichever month the calendar below is browsing.
-    const missed = new Set();
-    const days = [];
-    for (let i = 27; i >= 0; i--) {
-      const ref = new Date(today().getTime() - i * DAY);
-      const d = isoDate(ref.getFullYear(), ref.getMonth(), ref.getDate());
-      days.push({ date: d, held: !missed.has(d) });
-    }
-    let run = 0;
-    for (let i = days.length - 1; i >= 0 && days[i].held; i--) run++;
-    return { run };
-  }, [calls]);
-
-  /* Calendar month currently browsed — defaults to this month, independent
-     of the streak run above. Full month, not a rolling window (BUG: the
-     rolling 28-day window didn't show a complete month, and gave no way to
-     look at an earlier one). */
+  /* Calendar month currently browsed — defaults to this month. Full month,
+     not a rolling window: a fixed 28-day window didn't show a complete
+     month and gave no way to look at an earlier one. */
   const [calMonth, setCalMonth] = useState(() => {
     const d = today();
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -1378,12 +1382,26 @@ export default function SimpleBusinessManager() {
         @keyframes sbm-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
         .sbm-rise{animation:sbm-rise 260ms cubic-bezier(.22,.61,.36,1) both}
 
-        /* A pane drawing in is the streak incrementing. */
+        /* Calendar days drawing in, staggered left to right. */
         @keyframes sbm-pane{from{opacity:0;transform:scale(.86)}to{opacity:1;transform:none}}
         .sbm-pane{animation:sbm-pane 300ms cubic-bezier(.22,.61,.36,1) both}
 
         .sbm-day{transition:border-color 140ms ease,background 140ms ease}
-        @media (hover:hover){.sbm-day:hover{border-color:${t.edge2}}}
+        @media (hover:hover){.sbm-day:hover{border-color:rgba(255,255,255,0.4)}}
+
+        .sbm-tooltip{
+          position:absolute;bottom:100%;left:50%;
+          transform:translateX(-50%) translateY(-4px);
+          margin-bottom:2px;padding:4px 8px;border-radius:4px;
+          background:${t.white};color:${t.edge};
+          font-size:11px;font-weight:500;white-space:nowrap;
+          opacity:0;pointer-events:none;transition:opacity 120ms ease;z-index:10;
+          box-shadow:0 2px 8px rgba(0,0,0,0.25);
+        }
+        @media (hover:hover){
+          .sbm-tip:hover .sbm-tooltip{opacity:1}
+        }
+        .sbm-tip:focus-visible .sbm-tooltip{opacity:1}
 
         /* Not a blanket kill: the frost must still change instantly, or
            completion becomes ambiguous. Only entrances are dropped. */
@@ -1444,7 +1462,7 @@ export default function SimpleBusinessManager() {
             display: "flex",
             justifyContent: "space-between",
             alignItems: "baseline",
-            marginBottom: "1rem",
+            marginBottom: "1.25rem",
           }}
         >
           <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
@@ -1453,52 +1471,44 @@ export default function SimpleBusinessManager() {
           <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
         </header>
 
-        <div style={{ display: "flex", gap: 10 }}>
-          <div style={{ flex: 1, background: "rgba(255,255,255,0.07)", borderRadius: t.radiusCard, padding: "12px 14px" }}>
-            <div style={{ fontFamily: t.display, fontSize: 30, fontWeight: 700, lineHeight: 1, color: t.white }}>
-              {streak.run}
-            </div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.6)", marginTop: 4 }}>days nothing slipped</div>
-          </div>
-          <div
-            style={{
-              flex: 1,
-              background: "rgba(255,255,255,0.07)",
-              borderRadius: t.radiusCard,
-              padding: "12px 14px",
-              display: "flex",
-              flexDirection: "column",
-              justifyContent: "center",
-              gap: 4,
-              fontSize: 13,
-            }}
-          >
-            <div style={{ color: t.white }}>{counts.open} open</div>
-            <div style={{ color: "rgba(255,255,255,0.6)" }}>{counts.closed} closed</div>
-          </div>
-        </div>
+        <StreakWall
+          days={monthDays}
+          onSelectDay={(date) => setView({ name: "day", date })}
+          selected={null}
+          year={calMonth.year}
+          month={calMonth.month}
+          yearOptions={yearOptions}
+          onChangeYear={(y) => goToMonth(y, calMonth.month)}
+          onChangeMonth={(m) => goToMonth(calMonth.year, m)}
+          onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
+          onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
+        />
       </div>
 
-      <StreakWall
-        days={monthDays}
-        onSelectDay={(date) => setView({ name: "day", date })}
-        selected={null}
-        year={calMonth.year}
-        month={calMonth.month}
-        yearOptions={yearOptions}
-        onChangeYear={(y) => goToMonth(y, calMonth.month)}
-        onChangeMonth={(m) => goToMonth(calMonth.year, m)}
-        onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
-        onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
-      />
-
-      <SitesAttentionTile sites={sitesAttention} onOpenSite={(site) => setView({ name: "site", site })} />
-      <EscalationsTile
-        escalations={escalations}
-        onAdd={onAddEscalation}
-        onClose={onCloseEscalation}
-        busyIds={busyIds}
-      />
+      {/* The 4-tile panel — docs/ADDITIONAL_FEATURES_M0.md "Phase 1 home page".
+          2 columns on a phone; auto-widens toward one row as space allows,
+          so desktop gets a single row without a separate breakpoint.
+          align-items:start keeps each card its own natural height instead of
+          stretching short stat cards to match the taller list cards. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          gap: 12,
+          alignItems: "start",
+          marginBottom: "1.5rem",
+        }}
+      >
+        <StatCard value={todayCounts.open} label="open today" />
+        <StatCard value={todayCounts.closed} label="closed today" />
+        <SitesAttentionTile sites={sitesAttention} onOpenSite={(site) => setView({ name: "site", site })} />
+        <EscalationsTile
+          escalations={escalations}
+          onAdd={onAddEscalation}
+          onClose={onCloseEscalation}
+          busyIds={busyIds}
+        />
+      </div>
 
       {ordered.length === 0 ? (
         <EmptyState />
