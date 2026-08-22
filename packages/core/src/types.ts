@@ -2,9 +2,13 @@
 
 export type CallSource = "android" | "ios";
 export type SttStatus = "pending" | "transcription_in_progress" | "transcribed" | "extracted" | "failed";
-export type TodoOwner = "self" | "customer";
+/** Free text — a staff name, or the literal "self" for the business owner's own commitments. */
+export type TodoOwner = string;
 export type TodoStatus = "open" | "done" | "snoozed";
 export type TodoOrigin = "llm" | "manual";
+/** See docs/ADDITIONAL_FEATURES_M0.md "Revised extraction schema". low_signal calls get no dashboard card. */
+export type CallType = "client" | "internal" | "low_signal";
+export type EscalationStatus = "open" | "done";
 
 export interface Client {
   id: string;
@@ -26,13 +30,40 @@ export interface Call {
   stt_status: SttStatus;
   stt_error: string | null;
 
+  call_type: CallType | null;
   summary: string | null;
   key_takeaways: string | null; // JSON array
-  unresolved: string | null; // JSON array — LLM output, never edited manually
+  unresolved: string | null; // JSON array of { item, blocked_on } — LLM output, never edited manually
+  material_needs: string | null; // JSON array of strings
   deadline: string | null;
 
   prompt_version: string | null;
   created_at: string;
+}
+
+export interface Site {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+export interface Commitment {
+  id: string;
+  call_id: string;
+  raw_phrase: string;
+  resolved_datetime: string | null;
+  promised_to: string | null;
+  created_at: string;
+}
+
+/** Manual only — see docs/ADDITIONAL_FEATURES_M0.md "Tile 4 — Escalations". */
+export interface Escalation {
+  id: string;
+  text: string;
+  site_id: string | null;
+  status: EscalationStatus;
+  created_at: string;
+  closed_at: string | null;
 }
 
 export interface Todo {
@@ -64,13 +95,25 @@ export interface Transcript {
   fetched_at: string;
 }
 
-/** Shape produced by the `record_call` tool — see docs/SCAFFOLDING.md §6. Not wired until Task 5. */
+export interface UnresolvedItem {
+  item: string;
+  blocked_on?: string;
+}
+
+/** Shape produced by the `record_call` tool — see docs/ADDITIONAL_FEATURES_M0.md
+    "Revised extraction schema" (supersedes the original six-field shape in
+    docs/SCAFFOLDING.md §6 — todos_customer/todos_self dropped in favor of one
+    owner-tagged todos[] array; call_type, sites[], commitments[], and
+    material_needs[] added; unresolved[] gained blocked_on). */
 export interface CallExtraction {
   summary: string;
   key_takeaways: string[];
-  todos_customer: Array<{ text: string; due_date?: string }>;
-  todos_self: Array<{ text: string; due_date?: string }>;
-  unresolved: string[];
+  call_type: CallType;
+  sites: string[];
+  todos: Array<{ text: string; owner: string; due_date?: string }>;
+  commitments: Array<{ raw_phrase: string; resolved_datetime?: string; promised_to?: string }>;
+  unresolved: UnresolvedItem[];
+  material_needs: string[];
   deadline?: string;
 }
 

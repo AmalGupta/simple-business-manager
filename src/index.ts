@@ -8,7 +8,16 @@
 
 import { handleUploadPage, handleUploadPost } from "./handlers/upload";
 import { handleSarvamWebhook } from "./handlers/stt-webhook";
-import { handleGetCall, handleGetCalls, handlePatchTodo } from "./handlers/api";
+import {
+  handleCloseEscalation,
+  handleGetCall,
+  handleGetCalls,
+  handleGetEscalations,
+  handleGetSites,
+  handleGetSitesAttention,
+  handlePatchTodo,
+  handlePostEscalation,
+} from "./handlers/api";
 
 export interface Env {
   ENVIRONMENT: string;
@@ -76,6 +85,32 @@ export default {
     if (todoMatch && request.method === "PATCH") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handlePatchTodo(request, env, todoMatch[1]);
+    }
+
+    if (url.pathname === "/api/sites" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetSites(env);
+    }
+
+    if (url.pathname === "/api/sites/attention" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetSitesAttention(env);
+    }
+
+    if (url.pathname === "/api/escalations" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetEscalations(env);
+    }
+
+    if (url.pathname === "/api/escalations" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostEscalation(request, env);
+    }
+
+    const escalationMatch = url.pathname.match(/^\/api\/escalations\/([^/]+)$/);
+    if (escalationMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleCloseEscalation(env, escalationMatch[1]);
     }
 
     return env.ASSETS.fetch(request);

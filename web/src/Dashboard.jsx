@@ -93,9 +93,40 @@ const sortCalls = (calls) =>
 /* ------------------------------------------------------------------
    API.
    ------------------------------------------------------------------ */
+async function fetchJSON(path) {
+  const res = await fetch(path, { headers: { "X-SBM-Key": SBM_KEY } });
+  if (!res.ok) throw new Error(`GET ${path} → ${res.status}`);
+  return res.json();
+}
+
 async function fetchCalls() {
-  const res = await fetch("/api/calls", { headers: { "X-SBM-Key": SBM_KEY } });
-  if (!res.ok) throw new Error(`GET /api/calls → ${res.status}`);
+  return fetchJSON("/api/calls");
+}
+
+async function fetchEscalations() {
+  return fetchJSON("/api/escalations");
+}
+
+async function fetchSitesAttention() {
+  return fetchJSON("/api/sites/attention");
+}
+
+async function postEscalation(text, siteId) {
+  const res = await fetch("/api/escalations", {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ text, site_id: siteId || null }),
+  });
+  if (!res.ok) throw new Error(`POST /api/escalations → ${res.status}`);
+  return res.json();
+}
+
+async function closeEscalationApi(id) {
+  const res = await fetch(`/api/escalations/${id}`, {
+    method: "PATCH",
+    headers: { "X-SBM-Key": SBM_KEY },
+  });
+  if (!res.ok) throw new Error(`PATCH /api/escalations/${id} → ${res.status}`);
   return res.json();
 }
 
@@ -149,7 +180,7 @@ function buildReportRows(calls) {
         dayKey(call.recorded_at),
         call.client_name,
         call.client_phone ?? "",
-        todo.owner === "self" ? "him" : "customer",
+        todo.owner === "self" ? "him" : todo.owner,
         todo.text,
         todo.due_date ?? "",
         todo.status,
@@ -442,7 +473,7 @@ function TodoRow({ todo, onToggle, onPark, busy }) {
           whiteSpace: "nowrap",
         }}
       >
-        {todo.owner === "self" ? "him" : "customer"}
+        {todo.owner === "self" ? "him" : todo.owner}
       </span>
 
       {!done && todo.due_date && (
@@ -565,6 +596,60 @@ function PhoneLink({ phone }) {
   );
 }
 
+/* Site chips for internal calls, client name for client calls — the
+   organising unit in speech is the site, not the client, for the 9-of-11
+   internal-ops majority. Falls back to client_name for legacy rows
+   recorded before call_type existed. See docs/ADDITIONAL_FEATURES_M0.md. */
+function CallHeading({ call }) {
+  const showSites = call.call_type === "internal" && call.sites?.length > 0;
+  if (!showSites) {
+    return (
+      <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>
+        {call.client_name}
+      </span>
+    );
+  }
+  return (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      {call.sites.map((site) => (
+        <span
+          key={site}
+          style={{
+            fontFamily: t.display,
+            fontSize: 14,
+            fontWeight: 500,
+            padding: "3px 9px",
+            border: `1px solid ${t.frost}`,
+            borderRadius: t.radius,
+            color: t.edge,
+          }}
+        >
+          {site}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function CommitmentsList({ commitments }) {
+  if (!commitments || commitments.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {commitments.map((c) => (
+        <div key={c.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13 }}>
+          <span style={{ color: t.edge2, fontStyle: "italic" }}>{c.raw_phrase}</span>
+          {c.resolved_datetime && (
+            <>
+              <span style={{ color: t.edge2 }}>→</span>
+              <span style={{ color: t.edge }}>{fmtShort(c.resolved_datetime)}</span>
+            </>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0 }) {
   const visible = call.todos.filter((td) => td.status !== "done");
@@ -589,9 +674,7 @@ function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0 }) {
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>
-            {call.client_name}
-          </span>
+          <CallHeading call={call} />
           {call.customer_waiting ? <WaitingTag /> : null}
         </div>
         <div style={{ fontSize: 13, color: t.edge2, marginTop: 2 }}>
@@ -599,9 +682,17 @@ function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0 }) {
         </div>
       </button>
 
+      {call.summary && <p style={{ fontSize: 13, lineHeight: 1.6, color: t.edge2, margin: "0 0 10px" }}>{call.summary}</p>}
+
       {[...visible, ...done].map((todo) => (
         <TodoRow key={todo.id} todo={todo} onToggle={onToggle} onPark={onPark} busy={busyIds.has(todo.id)} />
       ))}
+
+      {call.commitments?.length > 0 && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.frost}` }}>
+          <CommitmentsList commitments={call.commitments} />
+        </div>
+      )}
     </Card>
   );
 }
@@ -727,9 +818,13 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
 
       <div style={{ paddingBottom: "1rem", borderBottom: `1px solid ${t.frost}`, marginBottom: "1.25rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>
-            {call.client_name}
-          </h1>
+          {call.call_type === "internal" && call.sites?.length > 0 ? (
+            <CallHeading call={call} />
+          ) : (
+            <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>
+              {call.client_name}
+            </h1>
+          )}
           {call.customer_waiting ? <WaitingTag /> : null}
         </div>
         <div
@@ -769,15 +864,45 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
         ))}
       </Card>
 
+      {call.commitments?.length > 0 && (
+        <Section label="Commitments">
+          <CommitmentsList commitments={call.commitments} />
+        </Section>
+      )}
+
       {/* Unresolved is LLM output, never actionable — deliberately not checkboxes */}
       {call.unresolved.length > 0 && (
         <div style={{ borderLeft: `2px solid ${t.frost}`, paddingLeft: 14, marginBottom: "1.5rem" }}>
           <div style={{ fontSize: 12, color: t.edge2, marginBottom: 6 }}>Left unresolved on the call</div>
-          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14, lineHeight: 1.8, color: t.edge2 }}>
+          <ul style={{ margin: 0, paddingLeft: 18, fontSize: 14, lineHeight: 1.8, color: t.edge2, display: "flex", flexDirection: "column", gap: 6 }}>
             {call.unresolved.map((u, i) => (
-              <li key={i}>{u}</li>
+              <li key={i} style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+                <span>{u.item}</span>
+                {u.blocked_on && (
+                  <span style={{ fontSize: 11, color: t.putty, whiteSpace: "nowrap" }}>blocked on {u.blocked_on}</span>
+                )}
+              </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {call.material_needs?.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: "1.5rem" }}>
+          {call.material_needs.map((m, i) => (
+            <span
+              key={i}
+              style={{
+                fontSize: 12,
+                padding: "4px 10px",
+                border: `1px solid ${t.frost}`,
+                borderRadius: t.radius,
+                color: t.edge2,
+              }}
+            >
+              {m}
+            </span>
+          ))}
         </div>
       )}
 
@@ -870,8 +995,221 @@ function EmptyState() {
 }
 
 /* ================================================================== */
+/* ------------------------------------------------------------------
+   Tile 3 — sites needing attention. See docs/ADDITIONAL_FEATURES_M0.md
+   "Phase 1 home page". Inclusion/sort/age is computed server-side
+   (packages/core/src/queries.ts getSitesNeedingAttention).
+   ------------------------------------------------------------------ */
+function SitesAttentionTile({ sites, onOpenSite }) {
+  if (sites.length === 0) return null;
+  return (
+    <Card style={{ marginBottom: 12 }}>
+      <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Sites needing attention</div>
+      {sites.map((s) => (
+        <button
+          key={s.id}
+          onClick={() => onOpenSite(s.name)}
+          style={{
+            display: "flex",
+            width: "100%",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 0",
+            margin: 0,
+            border: "none",
+            borderTop: `1px solid ${t.frost}`,
+            background: "none",
+            cursor: "pointer",
+            textAlign: "left",
+            fontFamily: t.body,
+          }}
+        >
+          <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: t.edge2 }}>
+            <span>
+              {s.open_count} open · {s.oldest_age_days}d
+            </span>
+          </span>
+        </button>
+      ))}
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Tile 4 — escalations. Manual only, the pipeline never writes here —
+   see docs/ADDITIONAL_FEATURES_M0.md "Tile 4 — Escalations".
+   ------------------------------------------------------------------ */
+function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
+  const [adding, setAdding] = useState(false);
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    const trimmed = text.trim();
+    if (!trimmed || saving) return;
+    setSaving(true);
+    try {
+      await onAdd(trimmed);
+      setText("");
+      setAdding(false);
+    } catch (err) {
+      console.error("[sbm] failed to add escalation", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Card style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+        <span style={{ fontSize: 12, color: t.edge2 }}>Escalations</span>
+        <button
+          onClick={() => setAdding((v) => !v)}
+          aria-label={adding ? "Cancel" : "Add escalation"}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: 28,
+            height: 28,
+            border: `1px solid ${t.frost}`,
+            borderRadius: t.radiusButton,
+            background: t.white,
+            color: t.edge,
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          {adding ? <span style={{ fontSize: 16, lineHeight: 1 }}>×</span> : <span style={{ fontSize: 16, lineHeight: 1 }}>+</span>}
+        </button>
+      </div>
+
+      {adding && (
+        <div style={{ display: "flex", gap: 8, padding: "10px 0", borderTop: `1px solid ${t.frost}` }}>
+          <input
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder="What needs attention?"
+            style={{
+              flex: 1,
+              minHeight: 40,
+              padding: "0 10px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              fontFamily: t.body,
+              fontSize: 14,
+              color: t.edge,
+              background: t.white,
+            }}
+          />
+          <button
+            onClick={submit}
+            disabled={saving || !text.trim()}
+            style={{
+              minHeight: 40,
+              padding: "0 14px",
+              border: "none",
+              borderRadius: t.radiusButton,
+              background: t.accent,
+              color: t.white,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: saving ? "wait" : "pointer",
+              opacity: saving || !text.trim() ? 0.6 : 1,
+            }}
+          >
+            Add
+          </button>
+        </div>
+      )}
+
+      {escalations.length === 0 ? (
+        <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing escalated.</p>
+      ) : (
+        escalations.map((e) => (
+          <div
+            key={e.id}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 0", borderTop: `1px solid ${t.frost}` }}
+          >
+            <button
+              onClick={() => onClose(e.id)}
+              disabled={busyIds.has(e.id)}
+              aria-label={`Close: ${e.text}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 44,
+                height: 44,
+                margin: "-11px 0 -11px -11px",
+                flexShrink: 0,
+                padding: 0,
+                border: "none",
+                background: "none",
+                cursor: busyIds.has(e.id) ? "wait" : "pointer",
+                color: t.edge2,
+              }}
+            >
+              <Circle size={17} strokeWidth={1.75} />
+            </button>
+            <div style={{ flex: 1, fontSize: 14, lineHeight: 1.5, color: t.edge }}>
+              {e.text}
+              {e.site_name && <span style={{ display: "block", fontSize: 11, color: t.edge2, marginTop: 2 }}>{e.site_name}</span>}
+            </div>
+          </div>
+        ))
+      )}
+    </Card>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Site view — drilldown from Tile 3. Same shape as DayView, filtered by
+   site instead of date.
+   ------------------------------------------------------------------ */
+function SiteView({ site, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
+  const siteCalls = useMemo(
+    () => sortCalls(calls.filter((c) => c.sites?.includes(site))),
+    [calls, site]
+  );
+
+  return (
+    <div>
+      <BackLink onClick={onBack}>Back</BackLink>
+
+      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
+        {site}
+      </h1>
+
+      {siteCalls.length === 0 ? (
+        <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
+          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No calls recorded for this site.</p>
+        </Card>
+      ) : (
+        siteCalls.map((call, i) => (
+          <CallCard
+            key={call.id}
+            index={i}
+            call={call}
+            onOpen={onOpen}
+            onToggle={onToggle}
+            onPark={onPark}
+            busyIds={busyIds}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
 export default function SimpleBusinessManager() {
   const [calls, setCalls] = useState([]);
+  const [escalations, setEscalations] = useState([]);
+  const [sitesAttention, setSitesAttention] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState({ name: "home" });
@@ -879,9 +1217,12 @@ export default function SimpleBusinessManager() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchCalls()
-      .then((data) => {
-        if (!cancelled) setCalls(data);
+    Promise.all([fetchCalls(), fetchEscalations(), fetchSitesAttention()])
+      .then(([callsData, escalationsData, attentionData]) => {
+        if (cancelled) return;
+        setCalls(callsData);
+        setEscalations(escalationsData);
+        setSitesAttention(attentionData);
       })
       .catch((err) => {
         console.error("[sbm] failed to load calls", err);
@@ -893,6 +1234,21 @@ export default function SimpleBusinessManager() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  const onAddEscalation = useCallback(async (text) => {
+    const created = await postEscalation(text, null);
+    setEscalations((es) => [...es, created]);
+  }, []);
+
+  const onCloseEscalation = useCallback(async (id) => {
+    setEscalations((es) => es.filter((e) => e.id !== id));
+    try {
+      await closeEscalationApi(id);
+    } catch (err) {
+      console.error("[sbm] failed to close escalation", err);
+      fetchEscalations().then(setEscalations).catch(() => {});
+    }
   }, []);
 
   const counts = useMemo(() => {
@@ -1067,6 +1423,19 @@ export default function SimpleBusinessManager() {
       />
     );
 
+  if (view.name === "site")
+    return shell(
+      <SiteView
+        site={view.site}
+        calls={calls}
+        onBack={() => setView({ name: "home" })}
+        onOpen={(id) => setView({ name: "call", id, from: { name: "site", site: view.site } })}
+        onToggle={onToggle}
+        onPark={onPark}
+        busyIds={busyIds}
+      />
+    );
+
   return shell(
     <>
       <div style={{ background: t.edge, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
@@ -1121,6 +1490,14 @@ export default function SimpleBusinessManager() {
         onChangeMonth={(m) => goToMonth(calMonth.year, m)}
         onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
         onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
+      />
+
+      <SitesAttentionTile sites={sitesAttention} onOpenSite={(site) => setView({ name: "site", site })} />
+      <EscalationsTile
+        escalations={escalations}
+        onAdd={onAddEscalation}
+        onClose={onCloseEscalation}
+        busyIds={busyIds}
       />
 
       {ordered.length === 0 ? (

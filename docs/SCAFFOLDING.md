@@ -291,7 +291,9 @@ Numbers, names, and dates carry the most risk because they feed deadline extract
 
 ## 6. Claude connectivity
 
-One call per transcript, six fields out. Forced tool use rather than "reply in JSON" — the schema is validated by the API, so a malformed response is impossible rather than merely unlikely.
+**Superseded 2026-08-22.** The six-field shape below (`todos_customer`/`todos_self`, no sites/commitments/material_needs) is what v1 of the prompt shipped. `docs/ADDITIONAL_FEATURES_M0.md` "Revised extraction schema" is now the active shape (prompt v2, `packages/core/prompts/v2/`) — it drops the customer/self split for one owner-tagged `todos[]` array and adds `call_type`, `sites[]`, `commitments[]`, and `material_needs[]`. Left here for the mechanics (forced tool use, the request shape, the `temperature`/`top_p` gotcha), which are unchanged; the field list itself is not.
+
+One call per transcript. Forced tool use rather than "reply in JSON" — the schema is validated by the API, so a malformed response is impossible rather than merely unlikely.
 
 ```ts
 // packages/core/prompt.ts

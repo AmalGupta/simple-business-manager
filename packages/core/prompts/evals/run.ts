@@ -27,7 +27,7 @@ interface GoldenCase {
   expected: Partial<CallExtraction>;
 }
 
-/** Only what SCAFFOLDING.md §"The prompt layer" says is worth scoring. */
+/** Only what docs/ADDITIONAL_FEATURES_M0.md "The prompt layer"-equivalent scoring says is worth scoring: deadlines, quantities, names, amounts. */
 function scoreFields(expected: Partial<CallExtraction>, actual: CallExtraction) {
   const results: Array<{ field: string; pass: boolean; expected: unknown; actual: unknown }> = [];
 
@@ -40,17 +40,44 @@ function scoreFields(expected: Partial<CallExtraction>, actual: CallExtraction) 
     });
   }
 
-  for (const key of ["todos_self", "todos_customer"] as const) {
-    const exp = expected[key];
-    if (!exp) continue;
-    const act = actual[key] ?? [];
-    exp.forEach((expTodo, i) => {
-      const actTodo = act[i];
+  if (expected.todos) {
+    expected.todos.forEach((expTodo, i) => {
+      const actTodo = actual.todos[i];
       results.push({
-        field: `${key}[${i}].due_date`,
+        field: `todos[${i}].owner`,
+        pass: expTodo.owner === actTodo?.owner,
+        expected: expTodo.owner,
+        actual: actTodo?.owner,
+      });
+      results.push({
+        field: `todos[${i}].due_date`,
         pass: (expTodo.due_date || "") === (actTodo?.due_date || ""),
         expected: expTodo.due_date,
         actual: actTodo?.due_date,
+      });
+    });
+  }
+
+  if (expected.commitments) {
+    expected.commitments.forEach((expC, i) => {
+      const actC = actual.commitments[i];
+      results.push({
+        field: `commitments[${i}].resolved_datetime`,
+        pass: (expC.resolved_datetime || "") === (actC?.resolved_datetime || ""),
+        expected: expC.resolved_datetime,
+        actual: actC?.resolved_datetime,
+      });
+    });
+  }
+
+  if (expected.unresolved) {
+    expected.unresolved.forEach((expU, i) => {
+      const actU = actual.unresolved[i];
+      results.push({
+        field: `unresolved[${i}].blocked_on`,
+        pass: (expU.blocked_on || "") === (actU?.blocked_on || ""),
+        expected: expU.blocked_on,
+        actual: actU?.blocked_on,
       });
     });
   }
