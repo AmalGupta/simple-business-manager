@@ -251,6 +251,12 @@ export async function handleUpdateStaffPhone(request: Request, env: Env, id: str
 }
 
 /** POST /api/staff/:id/reset-pin — new PIN, existing sessions revoked (same lost/compromised-device reasoning as handleAdminRevokeSessions). */
+/**
+ * Optional `{ pin }` in the body picks a specific PIN instead of generating
+ * a random one — always computed here against env.PIN_PEPPER/
+ * PIN_ENCRYPTION_KEY, never by hand against a local copy of those secrets,
+ * since a hash computed with the wrong pepper silently fails to verify.
+ */
 export async function handleResetStaffPin(request: Request, env: Env, id: string): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
@@ -258,7 +264,18 @@ export async function handleResetStaffPin(request: Request, env: Env, id: string
   const user = await getUserById(env.DB, id);
   if (!user) return json({ error: "not found" }, 404);
 
-  const pin = generateRandomPin();
+  let requestedPin: string | undefined;
+  try {
+    const body = (await request.json()) as { pin?: unknown };
+    if (typeof body?.pin === "string") requestedPin = body.pin;
+  } catch {
+    // no body / not JSON — fall through to a generated PIN
+  }
+  if (requestedPin !== undefined && !/^\d{4,6}$/.test(requestedPin)) {
+    return json({ error: "pin must be 4-6 digits" }, 400);
+  }
+
+  const pin = requestedPin ?? generateRandomPin();
   const { hash, salt } = await hashPin(env, pin);
   const pinEncrypted = await encryptPin(env, pin);
   await updateUserPin(env.DB, id, hash, salt, pinEncrypted);
