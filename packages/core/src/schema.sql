@@ -52,7 +52,10 @@ CREATE TABLE sites (
   is_confirmed  TEXT,          -- NULL = unreviewed, 'Y' = confirmed valid, 'N' = confirmed not a real site
   address       TEXT,
   poc_name      TEXT,          -- point of contact
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  -- migration 0012: admin/superadmin-editable, ISO date. Drives the missed
+  -- red highlight on the Sites list and the staff-facing banner.
+  target_closure_date TEXT
 );
 
 -- Always-editable roster of people assigned to a site — see

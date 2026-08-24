@@ -56,6 +56,8 @@ export interface Site {
   address: string | null;
   poc_name: string | null;
   created_at: string;
+  /** Admin/superadmin-editable ISO date — see migration 0012. */
+  target_closure_date: string | null;
 }
 
 export interface SiteTeamMember {

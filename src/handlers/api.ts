@@ -12,6 +12,7 @@ import {
   getCallWithTodos,
   getConfirmedSitesSummary,
   getSitesNeedingAttention,
+  getUnreadActivityCounts,
   getUserById,
   isCallAccessibleToUser,
   isUserAssignedToSite,
@@ -144,7 +145,11 @@ export async function handleGetConfirmedSites(request: Request, env: Env): Promi
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
   const forUserId = session.user_role === "staff" ? session.user_id : null;
-  return json(await getConfirmedSitesSummary(env.DB, forUserId));
+  const [rows, unreadCounts] = await Promise.all([
+    getConfirmedSitesSummary(env.DB, forUserId),
+    getUnreadActivityCounts(env.DB, session.user_id, session.user_role),
+  ]);
+  return json(rows.map((row) => ({ ...row, unread_count: unreadCounts.get(row.id) ?? 0 })));
 }
 
 /**
@@ -190,7 +195,8 @@ export async function handlePostSitesBackfill(request: Request, env: Env): Promi
   });
 }
 
-const SITE_PATCH_KEYS = ["is_confirmed", "address", "poc_name"] as const;
+const SITE_PATCH_KEYS = ["is_confirmed", "address", "poc_name", "target_closure_date"] as const;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function handlePatchSite(request: Request, env: Env, id: string): Promise<Response> {
   const gate = await requireAdmin(request, env);
@@ -207,6 +213,9 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
 
   if ("is_confirmed" in record && record.is_confirmed !== "Y" && record.is_confirmed !== "N" && record.is_confirmed !== null) {
     return json({ error: "is_confirmed must be 'Y', 'N', or null" }, 400);
+  }
+  if ("target_closure_date" in record && record.target_closure_date !== null && !ISO_DATE.test(String(record.target_closure_date))) {
+    return json({ error: "target_closure_date must be an ISO date (YYYY-MM-DD) or null" }, 400);
   }
 
   const patch: Partial<Record<(typeof SITE_PATCH_KEYS)[number], string | null>> = {};

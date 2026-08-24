@@ -17,6 +17,9 @@
   --color-warn: #B8600A;
   --color-warn-bg: #FEF3E6;
   --color-danger: #DC3B30;
+  --color-danger-bg: #FDECEA;
+  /* Unread-activity badge only (the "other side responded" glow) — never used decoratively. */
+  --color-unread: #22C55E;
 
   --font-display: "Space Grotesk", system-ui, sans-serif;
   --font-body: "Mukta", system-ui, sans-serif;
@@ -38,6 +41,8 @@
   --color-warn: #A89880;
   --color-warn-bg: transparent;
   --color-danger: #B3261E;
+  --color-danger-bg: #F6E4E2;
+  --color-unread: #22C55E;
 
   --font-display: "Bricolage Grotesque", system-ui, sans-serif;
   --font-body: "Mukta", system-ui, sans-serif;

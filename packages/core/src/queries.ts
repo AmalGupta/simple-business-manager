@@ -536,9 +536,10 @@ export interface SiteRow {
   is_confirmed: "Y" | "N" | null;
   address: string | null;
   poc_name: string | null;
+  target_closure_date: string | null;
 }
 
-const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name FROM sites`;
+const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name, target_closure_date FROM sites`;
 
 /** All sites regardless of confirmation state — the review screen needs to see everything. */
 /**
@@ -553,7 +554,7 @@ export async function listSites(db: D1Database, forUserId?: string | null): Prom
   return results;
 }
 
-const SITE_PATCH_FIELDS = ["is_confirmed", "address", "poc_name"] as const;
+const SITE_PATCH_FIELDS = ["is_confirmed", "address", "poc_name", "target_closure_date"] as const;
 type SitePatchField = (typeof SITE_PATCH_FIELDS)[number];
 
 /**
@@ -581,9 +582,11 @@ export async function updateSite(
     const values = fields.map((f) => patch[f] ?? null);
     const statements = [db.prepare(`UPDATE sites SET ${setClause} WHERE id = ?`).bind(...values, id)];
 
-    const detailFields = fields.filter((f) => f === "address" || f === "poc_name");
+    const detailFields = fields.filter((f) => f === "address" || f === "poc_name" || f === "target_closure_date");
     if (detailFields.length > 0) {
-      const labels = detailFields.map((f) => (f === "poc_name" ? "point of contact" : f)).join(", ");
+      const labels = detailFields
+        .map((f) => (f === "poc_name" ? "point of contact" : f === "target_closure_date" ? "target closure date" : f))
+        .join(", ");
       statements.push(
         db
           .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
@@ -800,6 +803,9 @@ export interface ConfirmedSiteRow {
   id: string;
   name: string;
   open_count: number;
+  target_closure_date: string | null;
+  /** Count of the other role's timeline entries since the viewer's own last one on this site — see getUnreadActivityCounts. Merged in by the handler, not this query. */
+  unread_count?: number;
 }
 
 /**
@@ -824,17 +830,63 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
     ? `AND sites.id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)`
     : "";
   const stmt = db.prepare(
-    `SELECT sites.id AS id, sites.name AS name,
+    `SELECT sites.id AS id, sites.name AS name, sites.target_closure_date AS target_closure_date,
             COALESCE(SUM(CASE WHEN todos.status = 'open' THEN 1 ELSE 0 END), 0) AS open_count
      FROM sites
      LEFT JOIN call_sites ON call_sites.site_id = sites.id
      LEFT JOIN todos ON todos.call_id = call_sites.call_id
      WHERE ${confirmedClause} ${scoped}
-     GROUP BY sites.id, sites.name
+     GROUP BY sites.id, sites.name, sites.target_closure_date
      ORDER BY sites.name ASC`
   );
   const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<ConfirmedSiteRow>();
   return results;
+}
+
+/**
+ * Powers the glowing unread-count badge on each site row in the Sites list.
+ * "Unread" = the other role's (staff vs admin/superadmin) timeline entries
+ * on that site since the viewer's own most recent one there — not since the
+ * viewer last *opened* the site, per the "clears when you respond" spec.
+ * Reads the same four sources getSiteTimeline composes (calls linked via
+ * call_sites, site_media, site_team_members, site_edits), each reduced to
+ * (site_id, actor_id, created_at) and unioned so "my last activity" and
+ * "their activity since" can be computed in one pass instead of one query
+ * per site.
+ */
+export async function getUnreadActivityCounts(
+  db: D1Database,
+  viewerId: string,
+  viewerRole: UserRole
+): Promise<Map<string, number>> {
+  const otherRoleClause = viewerRole === "staff" ? `users.role IN ('admin', 'superadmin')` : `users.role = 'staff'`;
+  const { results } = await db
+    .prepare(
+      `WITH activity AS (
+         SELECT call_sites.site_id AS site_id, calls.uploaded_by_user_id AS actor_id, calls.recorded_at AS created_at
+         FROM call_sites JOIN calls ON calls.id = call_sites.call_id
+         WHERE calls.uploaded_by_user_id IS NOT NULL
+         UNION ALL
+         SELECT site_id, uploaded_by AS actor_id, created_at FROM site_media
+         UNION ALL
+         SELECT site_id, added_by AS actor_id, created_at FROM site_team_members WHERE added_by IS NOT NULL
+         UNION ALL
+         SELECT site_id, actor_user_id AS actor_id, created_at FROM site_edits WHERE actor_user_id IS NOT NULL
+       ),
+       my_last AS (
+         SELECT site_id, MAX(created_at) AS last_at FROM activity WHERE actor_id = ? GROUP BY site_id
+       )
+       SELECT activity.site_id AS site_id, COUNT(*) AS unread_count
+       FROM activity
+       JOIN users ON users.id = activity.actor_id
+       LEFT JOIN my_last ON my_last.site_id = activity.site_id
+       WHERE ${otherRoleClause}
+         AND (my_last.last_at IS NULL OR activity.created_at > my_last.last_at)
+       GROUP BY activity.site_id`
+    )
+    .bind(viewerId)
+    .all<{ site_id: string; unread_count: number }>();
+  return new Map(results.map((r) => [r.site_id, r.unread_count]));
 }
 
 export interface EscalationRow {

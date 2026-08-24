@@ -35,6 +35,8 @@ const t = {
   puttyBg: "var(--color-warn-bg)",
   accent: "var(--color-accent)",
   signal: "var(--color-danger)",
+  signalBg: "var(--color-danger-bg)",
+  unread: "var(--color-unread)",
   white: "var(--color-surface)",
   display: "var(--font-display)",
   body: "var(--font-body)",
@@ -2068,9 +2070,12 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
      details" instead, since it's not really a fresh/untouched site. */
   const hasDetails = Boolean(siteRecord?.address?.trim() || siteRecord?.poc_name?.trim());
   const isBlankSite = !hasDetails && siteCalls.length === 0;
+  const daysMissed = siteRecord?.target_closure_date ? -daysUntil(siteRecord.target_closure_date) : 0;
+  const targetMissed = daysMissed > 0;
 
   const [address, setAddress] = useState(siteRecord?.address ?? "");
   const [pocName, setPocName] = useState(siteRecord?.poc_name ?? "");
+  const [targetDate, setTargetDate] = useState(siteRecord?.target_closure_date ?? "");
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsSaved, setDetailsSaved] = useState(false);
   // Landing here straight from "Add new site" (see onSiteCreated) opens the
@@ -2123,7 +2128,7 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
     setSavingDetails(true);
     setDetailsSaved(false);
     try {
-      await patchSite(siteRecord.id, { address, poc_name: pocName });
+      await patchSite(siteRecord.id, { address, poc_name: pocName, target_closure_date: targetDate || null });
       await onSiteUpdated?.();
       setDetailsSaved(true);
       setEditingDetails(false);
@@ -2146,6 +2151,30 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
       <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
         {site}
       </h1>
+
+      {/* Staff have no visibility into the Sites-list red highlight (that's
+          their own home page, not a management view) — this is their only
+          signal that a target closure date has passed. Admin/superadmin get
+          the list highlight instead; this banner would be redundant for
+          them since they're the ones who set the date. */}
+      {!canManage && targetMissed && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "10px 14px",
+            marginBottom: "1.25rem",
+            borderRadius: t.radiusCard,
+            background: t.signalBg,
+            color: t.signal,
+            fontSize: 13,
+            fontWeight: 600,
+          }}
+        >
+          You've missed the target closure date by {daysMissed} day{daysMissed === 1 ? "" : "s"}.
+        </div>
+      )}
 
       {siteRecord?.id && (
         <SiteMediaUploadRow
@@ -2206,6 +2235,15 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
                   onChange={(e) => setPocName(e.target.value)}
                   style={TEXT_INPUT_STYLE}
                 />
+                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: t.edge2 }}>
+                  Target closure date
+                  <input
+                    type="date"
+                    value={targetDate}
+                    onChange={(e) => setTargetDate(e.target.value)}
+                    style={TEXT_INPUT_STYLE}
+                  />
+                </label>
               </div>
               <div style={{ marginTop: 10 }}>
                 <button onClick={saveDetails} disabled={savingDetails} style={{ ...PRIMARY_BUTTON_STYLE, opacity: savingDetails ? 0.6 : 1 }}>
@@ -2225,6 +2263,11 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
               {siteRecord?.poc_name?.trim() && (
                 <span style={{ fontSize: 13, color: t.edge2 }}>Point of contact: {siteRecord.poc_name}</span>
               )}
+              <span style={{ fontSize: 13, color: targetMissed ? t.signal : t.edge2, fontWeight: targetMissed ? 700 : 400 }}>
+                {siteRecord?.target_closure_date
+                  ? `Target closure date: ${fmtDate(siteRecord.target_closure_date)}${targetMissed ? ` — missed by ${daysMissed}d` : ""}`
+                  : "No target closure date set."}
+              </span>
             </div>
           )}
         </Card>
@@ -2452,30 +2495,59 @@ function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated, canManage = tru
         </Card>
       ) : (
         <Card>
-          {sites.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => onOpenSite(s.name)}
-              style={{
-                display: "flex",
-                width: "100%",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: 10,
-                padding: "12px 0",
-                margin: 0,
-                border: "none",
-                borderTop: `1px solid ${t.frost}`,
-                background: "none",
-                cursor: "pointer",
-                textAlign: "left",
-                fontFamily: t.body,
-              }}
-            >
-              <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
-              <span style={{ fontSize: 12, color: t.edge2 }}>{s.open_count} open</span>
-            </button>
-          ))}
+          {sites.map((s) => {
+            const missed = s.target_closure_date && daysUntil(s.target_closure_date) < 0;
+            return (
+              <button
+                key={s.id}
+                onClick={() => onOpenSite(s.name)}
+                style={{
+                  display: "flex",
+                  width: "100%",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: missed ? "12px 1.25rem" : "12px 0",
+                  margin: missed ? "0 -1.25rem" : 0,
+                  border: "none",
+                  borderTop: `1px solid ${t.frost}`,
+                  background: missed ? t.signalBg : "none",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontFamily: t.body,
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {s.unread_count > 0 && (
+                    <span
+                      className="sbm-unread-glow"
+                      aria-label={`${s.unread_count} new since you last posted`}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        minWidth: 20,
+                        height: 20,
+                        padding: "0 6px",
+                        borderRadius: 999,
+                        background: t.unread,
+                        color: t.white,
+                        fontSize: 11,
+                        fontWeight: 700,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {s.unread_count}
+                    </span>
+                  )}
+                  <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
+                </span>
+                <span style={{ fontSize: 12, color: missed ? t.signal : t.edge2, fontWeight: missed ? 700 : 400 }}>
+                  {missed ? `missed ${Math.abs(daysUntil(s.target_closure_date))}d` : `${s.open_count} open`}
+                </span>
+              </button>
+            );
+          })}
         </Card>
       )}
 
@@ -3636,11 +3708,22 @@ export default function SimpleBusinessManager() {
         }
         .sbm-tip:focus-visible .sbm-tooltip{opacity:1}
 
+        /* Unread-activity badge — the one deliberate pulse the design
+           allows (CLAUDE.md): flags the other side having posted since you
+           last did, stops the moment it's resolved (the badge just doesn't
+           render once the count is back to zero). */
+        @keyframes sbm-unread-pulse{
+          0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,0.55)}
+          50%{box-shadow:0 0 0 6px rgba(34,197,94,0)}
+        }
+        .sbm-unread-glow{animation:sbm-unread-pulse 2s ease-in-out infinite}
+
         /* Not a blanket kill: the frost must still change instantly, or
            completion becomes ambiguous. Only entrances are dropped. */
         @media (prefers-reduced-motion: reduce){
           .sbm-rise,.sbm-pane{animation:none}
           .sbm-day{transition:none}
+          .sbm-unread-glow{animation:none;box-shadow:0 0 0 3px rgba(34,197,94,0.35)}
         }
       `}</style>
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "2rem 1.25rem 4rem" }}>{children}</main>
