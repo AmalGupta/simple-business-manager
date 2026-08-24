@@ -88,7 +88,7 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   await createSession(env.DB, user.id, tokenHash, sessionExpiryFromNow());
 
   return json(
-    { id: user.id, name: user.name, role: user.role },
+    { id: user.id, name: user.name, role: user.role, phone: user.phone },
     200,
     { "set-cookie": sessionCookieHeader(request, token) }
   );
@@ -107,7 +107,31 @@ export async function handleLogout(request: Request, env: Env): Promise<Response
 export async function handleMe(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  return json({ id: session.user_id, name: session.user_name, role: session.user_role });
+  return json({ id: session.user_id, name: session.user_name, role: session.user_role, phone: session.user_phone });
+}
+
+/**
+ * Self-service phone update — session-gated, any role. Unlike the PIN reset
+ * below this needs no current-value confirmation (a phone number isn't a
+ * credential); it's the "Update phone" item in AccountMenu. Writes straight
+ * to users.phone, which listSiteTeamMembers and the assign-team roster both
+ * read live from, so this is the only place a phone number needs updating.
+ */
+export async function handleUpdateMyPhone(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const phone = typeof record.phone === "string" && record.phone.trim() ? record.phone.trim() : null;
+
+  await updateUserPhone(env.DB, session.user_id, phone);
+  return json({ phone });
 }
 
 /** Self-service PIN reset — session-gated, requires the current PIN (not the admin key). */

@@ -639,9 +639,24 @@ export interface SiteTeamMemberRow {
   user_id: string | null;
 }
 
+/**
+ * `contact_number` reads live from `users.phone` for a row linked to a real
+ * account (the dropdown-assigned path — see migration 0011), falling back
+ * to the snapshot taken at assignment time for legacy free-text rows. That
+ * way an account's own phone-number update (POST /api/me/phone) shows up
+ * here immediately, with nothing to keep in sync on write.
+ */
 export async function listSiteTeamMembers(db: D1Database, siteId: string): Promise<SiteTeamMemberRow[]> {
   const { results } = await db
-    .prepare(`SELECT id, name, contact_number, user_id FROM site_team_members WHERE site_id = ? ORDER BY created_at ASC`)
+    .prepare(
+      `SELECT site_team_members.id AS id, site_team_members.name AS name,
+              COALESCE(users.phone, site_team_members.contact_number) AS contact_number,
+              site_team_members.user_id AS user_id
+       FROM site_team_members
+       LEFT JOIN users ON users.id = site_team_members.user_id
+       WHERE site_team_members.site_id = ?
+       ORDER BY site_team_members.created_at ASC`
+    )
     .bind(siteId)
     .all<SiteTeamMemberRow>();
   return results;
@@ -795,8 +810,16 @@ export interface ConfirmedSiteRow {
  * zero calls included. Alphabetical — it's a reference list, not a triage
  * queue.
  */
-/** `forUserId` — see listSites above; same staff-vs-admin scoping. */
+/**
+ * `forUserId` (a `staff` session — see listSites above) drops the
+ * is_confirmed = 'Y' requirement down to "not explicitly rejected": a site
+ * they're assigned to should show up the moment it's assigned, not only
+ * once an admin has separately run it through the confirmation workflow —
+ * that workflow is an admin curation concept staff have no visibility into
+ * or need for. admin/superadmin keep the stricter confirmed-only list.
+ */
 export async function getConfirmedSitesSummary(db: D1Database, forUserId?: string | null): Promise<ConfirmedSiteRow[]> {
+  const confirmedClause = forUserId ? `sites.is_confirmed IS NOT 'N'` : `sites.is_confirmed = 'Y'`;
   const scoped = forUserId
     ? `AND sites.id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)`
     : "";
@@ -806,7 +829,7 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
      FROM sites
      LEFT JOIN call_sites ON call_sites.site_id = sites.id
      LEFT JOIN todos ON todos.call_id = call_sites.call_id
-     WHERE sites.is_confirmed = 'Y' ${scoped}
+     WHERE ${confirmedClause} ${scoped}
      GROUP BY sites.id, sites.name
      ORDER BY sites.name ASC`
   );
@@ -1007,6 +1030,7 @@ export interface SessionWithUser {
   user_id: string;
   user_name: string;
   user_role: UserRole;
+  user_phone: string | null;
   last_seen_at: string;
 }
 
@@ -1014,7 +1038,8 @@ export interface SessionWithUser {
 export async function getSessionWithUser(db: D1Database, tokenHash: string): Promise<SessionWithUser | null> {
   const row = await db
     .prepare(
-      `SELECT users.id AS user_id, users.name AS user_name, users.role AS user_role, sessions.last_seen_at AS last_seen_at
+      `SELECT users.id AS user_id, users.name AS user_name, users.role AS user_role,
+              users.phone AS user_phone, sessions.last_seen_at AS last_seen_at
        FROM sessions
        JOIN users ON users.id = sessions.user_id
        WHERE sessions.token_hash = ?

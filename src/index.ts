@@ -35,6 +35,7 @@ import {
   handleMe,
   handleResetPin,
   handleResetStaffPin,
+  handleUpdateMyPhone,
   handleUpdateStaffPhone,
 } from "./handlers/auth";
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
@@ -189,6 +190,10 @@ export default {
 
     if (url.pathname === "/api/me/pin" && request.method === "POST") {
       return handleResetPin(request, env);
+    }
+
+    if (url.pathname === "/api/me/phone" && request.method === "POST") {
+      return handleUpdateMyPhone(request, env);
     }
 
     // Admin bootstrap — gated by X-SBM-Key only, not session (see

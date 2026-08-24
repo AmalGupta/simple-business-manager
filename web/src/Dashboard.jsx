@@ -262,6 +262,23 @@ async function postResetPin(currentPin, newPin) {
   return res.json();
 }
 
+/* Self-service phone update — any role, no current-value confirmation (a
+   phone number isn't a credential). Writes straight to users.phone, which
+   the assign-team roster and a site's Team card both read live, so nothing
+   else needs to know this happened. */
+async function postUpdateMyPhone(phone) {
+  const res = await fetch("/api/me/phone", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ phone }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/me/phone → ${res.status}`);
+  }
+  return res.json();
+}
+
 /* Staff management (migration 0011) — session-cookie only, admin/superadmin
    gated server-side, no X-SBM-Key involved (same pattern as /api/me/pin). */
 async function fetchStaff() {
@@ -3099,13 +3116,104 @@ function ResetPinModal({ onClose, onReset }) {
   );
 }
 
+/* Popup for self-service phone update — no current-value confirmation (a
+   phone number isn't a credential, unlike the PIN reset above). Updates
+   users.phone, which the assign-team roster and a site's Team card both
+   read live. */
+function UpdatePhoneModal({ currentPhone, onClose, onSave }) {
+  const [phone, setPhone] = useState(currentPhone ?? "");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await onSave(phone.trim());
+      onClose();
+    } catch (err) {
+      setError(err.message || "Failed to update phone.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Update phone"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,24,31,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.25rem",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          background: t.white,
+          borderRadius: t.radiusCard,
+          padding: "1.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Update phone</span>
+        <input
+          autoFocus
+          placeholder="Phone"
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        <p style={{ fontSize: 12, color: t.edge2, margin: 0 }}>
+          Shown wherever you're listed as a site's assigned team member.
+        </p>
+        {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          <button
+            onClick={onClose}
+            style={{
+              minHeight: 40,
+              padding: "0 16px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              background: t.white,
+              color: t.edge2,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button onClick={submit} disabled={saving} style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Account menu — standard top-right "my account" pattern, in the blue
-   header. Tap the name to open a small dropdown (Reset PIN, Log out);
-   click-outside or Escape closes it. Reset PIN opens the same ResetPinModal
-   used before, just triggered from here now. */
-function AccountMenu({ me, onLogout, onResetPin }) {
+   header. Tap the name to open a small dropdown (Update phone, Reset PIN,
+   Log out); click-outside or Escape closes it. Reset PIN opens the same
+   ResetPinModal used before, just triggered from here now. */
+function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone }) {
   const [open, setOpen] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [showPhoneModal, setShowPhoneModal] = useState(false);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -3187,9 +3295,19 @@ function AccountMenu({ me, onLogout, onResetPin }) {
             role="menuitem"
             onClick={() => {
               setOpen(false);
-              setShowResetModal(true);
+              setShowPhoneModal(true);
             }}
             style={menuItemStyle}
+          >
+            Update phone
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setShowResetModal(true);
+            }}
+            style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
           >
             Reset PIN
           </button>
@@ -3207,6 +3325,9 @@ function AccountMenu({ me, onLogout, onResetPin }) {
       )}
 
       {showResetModal && <ResetPinModal onClose={() => setShowResetModal(false)} onReset={onResetPin} />}
+      {showPhoneModal && (
+        <UpdatePhoneModal currentPhone={me?.phone} onClose={() => setShowPhoneModal(false)} onSave={onUpdatePhone} />
+      )}
     </div>
   );
 }
@@ -3305,6 +3426,11 @@ export default function SimpleBusinessManager() {
 
   const onResetPin = useCallback(async (currentPin, newPin) => {
     await postResetPin(currentPin, newPin);
+  }, []);
+
+  const onUpdatePhone = useCallback(async (phone) => {
+    const result = await postUpdateMyPhone(phone);
+    setMe((m) => (m ? { ...m, phone: result.phone } : m));
   }, []);
 
   const refreshSites = useCallback(async () => {
@@ -3582,7 +3708,7 @@ export default function SimpleBusinessManager() {
               <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
                 Simple Business Manager
               </span>
-              <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} />
+              <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
             </header>
           </div>
         )}
@@ -3614,7 +3740,7 @@ export default function SimpleBusinessManager() {
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
-            <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} />
+            <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
           </div>
         </header>
 
