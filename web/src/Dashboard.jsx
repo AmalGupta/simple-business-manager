@@ -1650,6 +1650,15 @@ function AssignTeamModal({ onClose, onAdd }) {
         ) : (
           <>
             <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={TEXT_INPUT_STYLE}>
+              {/* A real, always-present option for the "" default — without
+                  it, when nobody in the roster has a phone yet (the actual
+                  state of every real staff account at launch), the select's
+                  value matches no <option> at all, which leaves it stuck
+                  showing the first entry and unresponsive to taps on some
+                  mobile browsers. */}
+              <option value="" disabled>
+                Choose a staff member…
+              </option>
               {staff.map((s) => (
                 <option key={s.id} value={s.id} disabled={!s.phone}>
                   {s.name}
