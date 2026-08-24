@@ -1577,7 +1577,7 @@ function AssignTeamModal({ onClose, onAdd }) {
       .then((data) => {
         if (cancelled) return;
         setStaff(data);
-        setStaffId(data.find((s) => s.phone)?.id ?? "");
+        setStaffId(data[0]?.id ?? "");
       })
       .catch((err) => {
         console.error("[sbm] failed to load staff", err);
@@ -1593,10 +1593,6 @@ function AssignTeamModal({ onClose, onAdd }) {
   const submit = async () => {
     if (!staffId) {
       setError("Choose a staff member.");
-      return;
-    }
-    if (selected && !selected.phone) {
-      setError("That staff member has no phone on file yet — add one from the Staff page first.");
       return;
     }
     setSaving(true);
@@ -1651,23 +1647,23 @@ function AssignTeamModal({ onClose, onAdd }) {
           <>
             <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={TEXT_INPUT_STYLE}>
               {/* A real, always-present option for the "" default — without
-                  it, when nobody in the roster has a phone yet (the actual
-                  state of every real staff account at launch), the select's
-                  value matches no <option> at all, which leaves it stuck
-                  showing the first entry and unresponsive to taps on some
-                  mobile browsers. */}
+                  it, if the roster ever loads empty before staff is set, the
+                  select's value matches no <option> at all, which leaves it
+                  stuck showing the first entry and unresponsive to taps on
+                  some mobile browsers. Every staff member is selectable
+                  regardless of phone — it's addable later from the Staff
+                  page without re-doing the assignment. */}
               <option value="" disabled>
                 Choose a staff member…
               </option>
               {staff.map((s) => (
-                <option key={s.id} value={s.id} disabled={!s.phone}>
+                <option key={s.id} value={s.id}>
                   {s.name}
-                  {s.phone ? "" : " (no phone on file)"}
                 </option>
               ))}
             </select>
             <div style={{ fontSize: 13, color: t.edge2 }}>
-              Phone: {selected?.phone ?? "—"}
+              Phone: {selected?.phone || "not on file yet"}
             </div>
           </>
         )}
@@ -2264,7 +2260,7 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
             team.map((m) => (
               <div key={m.id} style={{ display: "flex", justifyContent: "space-between", ...TILE_ROW_STYLE }}>
                 <span style={{ fontSize: 14, color: t.edge }}>{m.name}</span>
-                <span style={{ fontSize: 13, color: t.edge2 }}>{m.contact_number}</span>
+                <span style={{ fontSize: 13, color: t.edge2 }}>{m.contact_number || "no phone on file"}</span>
               </div>
             ))
           )}

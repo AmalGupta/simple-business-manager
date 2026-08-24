@@ -258,9 +258,11 @@ export async function handlePostSiteTeamMember(request: Request, env: Env, siteI
   if (userId) {
     const user = await getUserById(env.DB, userId);
     if (!user) return json({ error: "no such user" }, 404);
-    if (!user.phone) return json({ error: "that staff member has no phone on file yet" }, 400);
+    // A missing phone no longer blocks assignment — contact_number is
+    // NOT NULL in the schema, so "" stands in for "not on file yet" and can
+    // be added later from the Staff page without re-doing the assignment.
     name = user.name;
-    contactNumber = user.phone;
+    contactNumber = user.phone ?? "";
   } else {
     name = typeof record.name === "string" ? record.name.trim() : "";
     contactNumber = typeof record.contact_number === "string" ? record.contact_number.trim() : "";
