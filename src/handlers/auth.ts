@@ -3,6 +3,12 @@
 // src/lib/auth.ts header comment). POST /api/admin/users and
 // POST /api/admin/users/:id/revoke-sessions are the admin-seeding path,
 // gated by X-SBM-Key only — see plan's "Admin seeding" note for why.
+//
+// GET/POST /api/staff, PATCH /api/staff/:id, and POST /api/staff/:id/reset-pin
+// (migration 0011) are the day-to-day staff-management path used from the
+// dashboard's Staff page — session-gated, admin/superadmin only. Distinct
+// from the X-SBM-Key bootstrap above: this is how Piyush (admin) manages the
+// staff roster without ever needing the shared dev secret.
 
 import {
   createSession,
@@ -10,13 +16,21 @@ import {
   getUserByName,
   getUserById,
   incrementFailedLogin,
+  listStaffAndSelf,
+  listStaffRoster,
   resetFailedLogin,
   revokeAllSessionsForUser,
   revokeSession,
+  updateUserPhone,
   updateUserPin,
+  type SessionWithUser,
+  type User,
 } from "@sbm/core";
 import {
   clearSessionCookieHeader,
+  decryptPin,
+  encryptPin,
+  generateRandomPin,
   hashPin,
   hashToken,
   newSessionToken,
@@ -32,6 +46,14 @@ function json(data: unknown, status = 200, extraHeaders?: Record<string, string>
     status,
     headers: { "content-type": "application/json", ...extraHeaders },
   });
+}
+
+/** admin/superadmin only — every new staff-management route needs this. Returns the session on success, or the Response to short-circuit with otherwise. */
+async function requireAdmin(request: Request, env: Env): Promise<SessionWithUser | Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  if (session.user_role === "staff") return json({ error: "forbidden" }, 403);
+  return session;
 }
 
 export async function handleLogin(request: Request, env: Env): Promise<Response> {
@@ -65,7 +87,11 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   const tokenHash = await hashToken(token);
   await createSession(env.DB, user.id, tokenHash, sessionExpiryFromNow());
 
-  return json({ id: user.id, name: user.name }, 200, { "set-cookie": sessionCookieHeader(request, token) });
+  return json(
+    { id: user.id, name: user.name, role: user.role },
+    200,
+    { "set-cookie": sessionCookieHeader(request, token) }
+  );
 }
 
 export async function handleLogout(request: Request, env: Env): Promise<Response> {
@@ -81,7 +107,7 @@ export async function handleLogout(request: Request, env: Env): Promise<Response
 export async function handleMe(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  return json({ id: session.user_id, name: session.user_name });
+  return json({ id: session.user_id, name: session.user_name, role: session.user_role });
 }
 
 /** Self-service PIN reset — session-gated, requires the current PIN (not the admin key). */
@@ -107,11 +133,14 @@ export async function handleResetPin(request: Request, env: Env): Promise<Respon
   if (!valid) return json({ error: "current pin is incorrect" }, 401);
 
   const { hash, salt } = await hashPin(env, newPin);
-  await updateUserPin(env.DB, user.id, hash, salt);
+  const pinEncrypted = await encryptPin(env, newPin);
+  await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
   return json({ ok: true });
 }
 
-/** Admin bootstrap — gated by X-SBM-Key only (see module header). */
+const VALID_ROLES = new Set(["staff", "admin", "superadmin"]);
+
+/** Admin bootstrap — gated by X-SBM-Key only (see module header). Also how a superadmin account (e.g. the developer's own) gets created — there's no self-service UI for that role. */
 export async function handleAdminCreateUser(request: Request, env: Env): Promise<Response> {
   let body: unknown;
   try {
@@ -122,6 +151,8 @@ export async function handleAdminCreateUser(request: Request, env: Env): Promise
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
   const name = typeof record.name === "string" ? record.name.trim() : "";
   const pin = typeof record.pin === "string" ? record.pin : "";
+  const role = typeof record.role === "string" && VALID_ROLES.has(record.role) ? (record.role as User["role"]) : "staff";
+  const phone = typeof record.phone === "string" && record.phone.trim() ? record.phone.trim() : null;
   if (!name || !/^\d{4,6}$/.test(pin)) {
     return json({ error: "name is required and pin must be 4-6 digits" }, 400);
   }
@@ -129,8 +160,9 @@ export async function handleAdminCreateUser(request: Request, env: Env): Promise
   if (await getUserByName(env.DB, name)) return json({ error: "a user with that name already exists" }, 409);
 
   const { hash, salt } = await hashPin(env, pin);
-  const user = await createUser(env.DB, name, hash, salt);
-  return json({ id: user.id, name: user.name }, 201);
+  const pinEncrypted = await encryptPin(env, pin);
+  const user = await createUser(env.DB, name, hash, salt, role, phone, pinEncrypted);
+  return json({ id: user.id, name: user.name, role: user.role }, 201);
 }
 
 /** Lost/compromised device — the escape hatch when a PIN can't be trusted anymore. */
@@ -139,4 +171,97 @@ export async function handleAdminRevokeSessions(env: Env, userId: string): Promi
   if (!user) return json({ error: "not found" }, 404);
   await revokeAllSessionsForUser(env.DB, userId);
   return json({ ok: true });
+}
+
+/** GET /api/staff — the Staff page's data source: every staff account plus the requesting admin/superadmin's own row, PIN decrypted inline (null if not recoverable — see docs "PIN visibility" decision). */
+export async function handleListStaff(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const users = await listStaffAndSelf(env.DB, gate.user_id);
+  const rows = await Promise.all(
+    users.map(async (u) => ({
+      id: u.id,
+      name: u.name,
+      phone: u.phone,
+      role: u.role,
+      pin: u.pin_encrypted ? await decryptPin(env, u.pin_encrypted) : null,
+      is_self: u.id === gate.user_id,
+    }))
+  );
+  return json(rows);
+}
+
+/**
+ * GET /api/staff/roster — the "assign team member" dropdown's data source.
+ * `staff` accounts only (no admin/superadmin, no self-inclusion) and no PIN
+ * decryption, unlike GET /api/staff above: the dropdown never shows a PIN,
+ * and decrypting every row on every modal open was making it slow to open
+ * for no reason.
+ */
+export async function handleListStaffRoster(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  return json(await listStaffRoster(env.DB));
+}
+
+/** POST /api/staff — admin adds a new staff member; PIN is generated server-side and returned once (also stored for later viewing via GET /api/staff). */
+export async function handleCreateStaff(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  const phone = typeof record.phone === "string" && record.phone.trim() ? record.phone.trim() : null;
+  if (!name) return json({ error: "name is required" }, 400);
+  if (await getUserByName(env.DB, name)) return json({ error: "a user with that name already exists" }, 409);
+
+  const pin = generateRandomPin();
+  const { hash, salt } = await hashPin(env, pin);
+  const pinEncrypted = await encryptPin(env, pin);
+  const user = await createUser(env.DB, name, hash, salt, "staff", phone, pinEncrypted);
+  return json({ id: user.id, name: user.name, phone: user.phone, role: user.role, pin }, 201);
+}
+
+/** PATCH /api/staff/:id — admin editing a staff member's phone (e.g. backfilling it so site-assignment auto-fill has something to show). */
+export async function handleUpdateStaffPhone(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const phone = typeof record.phone === "string" && record.phone.trim() ? record.phone.trim() : null;
+
+  const user = await getUserById(env.DB, id);
+  if (!user) return json({ error: "not found" }, 404);
+
+  await updateUserPhone(env.DB, id, phone);
+  return json({ id, phone });
+}
+
+/** POST /api/staff/:id/reset-pin — new PIN, existing sessions revoked (same lost/compromised-device reasoning as handleAdminRevokeSessions). */
+export async function handleResetStaffPin(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const user = await getUserById(env.DB, id);
+  if (!user) return json({ error: "not found" }, 404);
+
+  const pin = generateRandomPin();
+  const { hash, salt } = await hashPin(env, pin);
+  const pinEncrypted = await encryptPin(env, pin);
+  await updateUserPin(env.DB, id, hash, salt, pinEncrypted);
+  await revokeAllSessionsForUser(env.DB, id);
+  return json({ pin });
 }

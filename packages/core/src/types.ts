@@ -64,8 +64,13 @@ export interface SiteTeamMember {
   name: string;
   contact_number: string;
   added_by: string | null;
+  /** Links to a real login account when assigned via the dropdown — see migration 0011. NULL for legacy free-text rows. */
+  user_id: string | null;
   created_at: string;
 }
+
+/** 'staff' lands on a filtered Sites view; 'admin'/'superadmin' get the full dashboard. See migration 0011. */
+export type UserRole = "staff" | "admin" | "superadmin";
 
 export interface User {
   id: string;
@@ -76,6 +81,10 @@ export interface User {
   locked_until: string | null;
   disabled_at: string | null;
   created_at: string;
+  role: UserRole;
+  phone: string | null;
+  /** AES-GCM ciphertext of the current raw PIN — see src/lib/auth.ts encryptPin/decryptPin. NULL until set/reset under this scheme. */
+  pin_encrypted: string | null;
 }
 
 export interface Session {

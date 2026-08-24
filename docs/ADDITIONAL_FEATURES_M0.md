@@ -127,7 +127,7 @@ Speaker labels are themselves unreliable — IDs drift within a single call and 
 
 ## Known roster and sites
 
-**Staff:** Mishra, Gaurav, Neeraj, Shubham, Shivam, Anand, Azeem, Tanzeem, Manglesh, Ravi, Rupam, Vishal, Manjeet, Harisharan, Jaskaran
+**Staff:** Mishra, Gaurav, Neeraj, Shubham, Shivam, Anand, Azeem, Tanzeem, Manglesh, Ravi, Rupam, Vishal, Manjeet, Harisharan, Jaskaran, Brijesh
 
 **Sites:** Sector 35, Sector 70, Sector 106, Sector 241, 123/125, Regalia, Eco City / Mullanpur, Dera Bassi, Homeland
 

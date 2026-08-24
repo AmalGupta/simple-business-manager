@@ -17,3 +17,9 @@ ANTHROPIC_API_KEY=sk-ant-your-key-here
 # leaked D1 export (hashes + salts alone) insufficient to brute-force
 # offline. Required before POST /api/admin/users will work.
 PIN_PEPPER=replace-with-openssl-rand-hex-32
+
+# AES-256-GCM key (base64, 32 raw bytes) letting admin/superadmin view a
+# staff member's current PIN from the Staff page — see src/lib/auth.ts
+# encryptPin/decryptPin. Deliberately separate from PIN_PEPPER, which stays
+# one-way. Generate: python3 -c "import secrets,base64;print(base64.b64encode(secrets.token_bytes(32)).decode())"
+PIN_ENCRYPTION_KEY=replace-with-32-random-bytes-base64

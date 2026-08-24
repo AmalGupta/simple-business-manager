@@ -63,6 +63,10 @@ CREATE TABLE site_team_members (
   name            TEXT NOT NULL,
   contact_number  TEXT NOT NULL,
   added_by        TEXT REFERENCES users(id),   -- migration 0010; NULL if added before login existed or with no session
+  -- migration 0011: links this row to a real login account when assigned via
+  -- the admin "choose from dropdown" flow. NULL for free-text rows added
+  -- before this feature existed.
+  user_id         TEXT REFERENCES users(id),
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -148,6 +152,7 @@ CREATE INDEX idx_call_sites_site ON call_sites(site_id);
 CREATE INDEX idx_commitments_call ON commitments(call_id);
 CREATE INDEX idx_escalations_status ON escalations(status, created_at DESC);
 CREATE INDEX idx_site_team_members_site ON site_team_members(site_id);
+CREATE INDEX idx_site_team_members_user ON site_team_members(user_id);
 
 -- Per-person accounts and sessions — migration 0009. Admin-seeded roster
 -- only (POST /api/admin/users, gated by X-SBM-Key); login is name + short
@@ -160,7 +165,17 @@ CREATE TABLE users (
   failed_attempts INTEGER NOT NULL DEFAULT 0,
   locked_until    TEXT,
   disabled_at     TEXT,
-  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+
+  -- migration 0011: role-based access. 'staff' | 'admin' | 'superadmin',
+  -- enforced in code (not a CHECK), same as is_confirmed above.
+  role            TEXT NOT NULL DEFAULT 'staff',
+  phone           TEXT,
+  -- AES-256-GCM ciphertext of the current raw PIN (src/lib/auth.ts
+  -- encryptPin/decryptPin) — lets admin/superadmin view a staff member's PIN
+  -- from the Staff page. NULL until the PIN is next set/reset under this
+  -- scheme.
+  pin_encrypted   TEXT
 );
 
 CREATE TABLE sessions (

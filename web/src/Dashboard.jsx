@@ -111,6 +111,14 @@ async function fetchCalls() {
   return fetchJSON("/api/calls");
 }
 
+/* Single-call fetch, on demand — the bulk fetchCalls() list is never loaded
+   for a `staff` session (no office dashboard for them), so opening a call
+   from their site's timeline needs its own fetch. Same endpoint the admin
+   dashboard would resolve from its already-loaded list. */
+async function fetchCall(id) {
+  return fetchJSON(`/api/calls/${id}`);
+}
+
 async function fetchEscalations() {
   return fetchJSON("/api/escalations");
 }
@@ -154,13 +162,18 @@ async function fetchSiteTeam(siteId) {
   return fetchJSON(`/api/sites/${siteId}/team`);
 }
 
-async function postSiteTeamMember(siteId, name, contactNumber) {
+/* `userId` set = the "choose from dropdown" path (name/phone come from the
+   account server-side); omitted = legacy free-text entry. */
+async function postSiteTeamMember(siteId, userId) {
   const res = await fetch(`/api/sites/${siteId}/team`, {
     method: "POST",
     headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
-    body: JSON.stringify({ name, contact_number: contactNumber }),
+    body: JSON.stringify({ user_id: userId }),
   });
-  if (!res.ok) throw new Error(`POST /api/sites/${siteId}/team → ${res.status}`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/sites/${siteId}/team → ${res.status}`);
+  }
   return res.json();
 }
 
@@ -246,6 +259,54 @@ async function postResetPin(currentPin, newPin) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `POST /api/me/pin → ${res.status}`);
   }
+  return res.json();
+}
+
+/* Staff management (migration 0011) — session-cookie only, admin/superadmin
+   gated server-side, no X-SBM-Key involved (same pattern as /api/me/pin). */
+async function fetchStaff() {
+  const res = await fetch("/api/staff");
+  if (!res.ok) throw new Error(`GET /api/staff → ${res.status}`);
+  return res.json();
+}
+
+/* Lean roster (id/name/phone, staff role only, no PIN decryption) — the
+   "assign team member" dropdown's data source. Deliberately not fetchStaff()
+   above: that endpoint decrypts every row's PIN and includes the viewer's
+   own row, neither of which the dropdown wants, and the decryption was
+   making it slow to open for no reason. */
+async function fetchStaffRoster() {
+  const res = await fetch("/api/staff/roster");
+  if (!res.ok) throw new Error(`GET /api/staff/roster → ${res.status}`);
+  return res.json();
+}
+
+async function postCreateStaff(name, phone) {
+  const res = await fetch("/api/staff", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, phone: phone || null }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/staff → ${res.status}`);
+  }
+  return res.json();
+}
+
+async function patchStaffPhone(id, phone) {
+  const res = await fetch(`/api/staff/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ phone: phone || null }),
+  });
+  if (!res.ok) throw new Error(`PATCH /api/staff/${id} → ${res.status}`);
+  return res.json();
+}
+
+async function postResetStaffPin(id) {
+  const res = await fetch(`/api/staff/${id}/reset-pin`, { method: "POST" });
+  if (!res.ok) throw new Error(`POST /api/staff/${id}/reset-pin → ${res.status}`);
   return res.json();
 }
 
@@ -555,7 +616,7 @@ function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, on
 }
 
 /* ------------------------------------------------------------------ */
-function TodoRow({ todo, onToggle, onPark, busy }) {
+function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
   const done = todo.status === "done";
   const parked = todo.status === "snoozed";
   const urgent = isUrgent(todo);
@@ -576,8 +637,8 @@ function TodoRow({ todo, onToggle, onPark, busy }) {
       }}
     >
       <button
-        onClick={() => onToggle(todo)}
-        disabled={busy}
+        onClick={readOnly ? undefined : () => onToggle(todo)}
+        disabled={busy || readOnly}
         aria-pressed={done}
         aria-label={done ? `Reopen: ${todo.text}` : `Mark done: ${todo.text}`}
         style={{
@@ -640,7 +701,7 @@ function TodoRow({ todo, onToggle, onPark, busy }) {
         </span>
       )}
 
-      {!done && (
+      {!done && !readOnly && (
         <button
           onClick={() => onPark(todo)}
           disabled={busy}
@@ -979,7 +1040,7 @@ function DayView({ date, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
 }
 
 /* ------------------------------------------------------------------ */
-function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
+function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage = true }) {
   const openTodos = call.todos.filter((td) => td.status !== "done");
   const doneTodos = call.todos.filter((td) => td.status === "done");
   const [openTranscript, setOpenTranscript] = useState(false);
@@ -1061,7 +1122,14 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
           </button>
           {openTodosPanel &&
             [...openTodos, ...doneTodos].map((td) => (
-              <TodoRow key={td.id} todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds.has(td.id)} />
+              <TodoRow
+                key={td.id}
+                todo={td}
+                onToggle={onToggle}
+                onPark={onPark}
+                busy={busyIds.has(td.id)}
+                readOnly={!canManage}
+              />
             ))}
         </Card>
       )}
@@ -1251,6 +1319,28 @@ function StatCard({ value, label }) {
         </span>
       </div>
     </Card>
+  );
+}
+
+/* Home-panel entry point into StaffDirectoryView — admin/superadmin only
+   (migration 0011), same tile template as StatCard but clickable, matching
+   the other tiles' Card+TileLabel shape rather than a bespoke look. */
+function StaffTile({ count, onOpen }) {
+  return (
+    <button
+      onClick={onOpen}
+      style={{ all: "unset", cursor: "pointer", display: "block" }}
+      aria-label={`Staff — ${count} people`}
+    >
+      <Card>
+        <TileLabel action={<Users size={14} color={t.edge2} />}>staff</TileLabel>
+        <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
+          <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
+            {count}
+          </span>
+        </div>
+      </Card>
+    </button>
   );
 }
 
@@ -1455,27 +1545,51 @@ function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
 
 /* Popup for "Assign team" — see docs/ADDITIONAL_FEATURES_M0.md follow-up.
    Two fields, add-or-cancel — deliberately not a full contact form. */
+/* Assigns a real staff account (dropdown, phone auto-filled from their
+   profile) rather than free text — migration 0011. Staff with no phone on
+   file yet are shown but disabled, since the backend rejects those. */
 function AssignTeamModal({ onClose, onAdd }) {
-  const [name, setName] = useState("");
-  const [contact, setContact] = useState("");
+  const [staff, setStaff] = useState(null);
+  const [staffId, setStaffId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    let cancelled = false;
+    fetchStaffRoster()
+      .then((data) => {
+        if (cancelled) return;
+        setStaff(data);
+        setStaffId(data.find((s) => s.phone)?.id ?? "");
+      })
+      .catch((err) => {
+        console.error("[sbm] failed to load staff", err);
+        if (!cancelled) setStaff([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selected = staff?.find((s) => s.id === staffId) ?? null;
+
   const submit = async () => {
-    const trimmedName = name.trim();
-    const trimmedContact = contact.trim();
-    if (!trimmedName || !trimmedContact) {
-      setError("Enter both a name and contact number.");
+    if (!staffId) {
+      setError("Choose a staff member.");
+      return;
+    }
+    if (selected && !selected.phone) {
+      setError("That staff member has no phone on file yet — add one from the Staff page first.");
       return;
     }
     setSaving(true);
     setError("");
     try {
-      await onAdd(trimmedName, trimmedContact);
+      await onAdd(staffId);
       onClose();
     } catch (err) {
       console.error("[sbm] failed to add team member", err);
-      setError("Failed to add — try again.");
+      setError(err.message || "Failed to add — try again.");
     } finally {
       setSaving(false);
     }
@@ -1512,19 +1626,25 @@ function AssignTeamModal({ onClose, onAdd }) {
         }}
       >
         <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Assign team member</span>
-        <input
-          autoFocus
-          placeholder="Employee name"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          style={TEXT_INPUT_STYLE}
-        />
-        <input
-          placeholder="Contact number"
-          value={contact}
-          onChange={(e) => setContact(e.target.value)}
-          style={TEXT_INPUT_STYLE}
-        />
+        {staff === null ? (
+          <p style={{ fontSize: 13, color: t.edge2, margin: 0 }}>Loading staff…</p>
+        ) : staff.length === 0 ? (
+          <p style={{ fontSize: 13, color: t.edge2, margin: 0 }}>No staff yet — add one from the Staff page first.</p>
+        ) : (
+          <>
+            <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={TEXT_INPUT_STYLE}>
+              {staff.map((s) => (
+                <option key={s.id} value={s.id} disabled={!s.phone}>
+                  {s.name}
+                  {s.phone ? "" : " (no phone on file)"}
+                </option>
+              ))}
+            </select>
+            <div style={{ fontSize: 13, color: t.edge2 }}>
+              Phone: {selected?.phone ?? "—"}
+            </div>
+          </>
+        )}
         {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
           <button
@@ -1543,7 +1663,11 @@ function AssignTeamModal({ onClose, onAdd }) {
           >
             Cancel
           </button>
-          <button onClick={submit} disabled={saving} style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}>
+          <button
+            onClick={submit}
+            disabled={saving || !staff?.length}
+            style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving || !staff?.length ? 0.6 : 1 }}
+          >
             {saving ? "Adding…" : "Add"}
           </button>
         </div>
@@ -1911,7 +2035,7 @@ function SiteTimeline({ entries, onOpenCall }) {
    and an always-editable team roster — see the conversation that added
    this: "Always available, not conditional" on call/item count.
    ------------------------------------------------------------------ */
-function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, autoEditDetails = false }) {
+function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, autoEditDetails = false, canManage = true }) {
   const siteCalls = useMemo(
     () => sortCalls(calls.filter((c) => c.sites?.includes(site))),
     [calls, site]
@@ -1988,8 +2112,8 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
     }
   };
 
-  const addTeamMember = async (name, contactNumber) => {
-    const member = await postSiteTeamMember(siteRecord.id, name, contactNumber);
+  const addTeamMember = async (userId) => {
+    const member = await postSiteTeamMember(siteRecord.id, userId);
     setTeam((current) => [...(current ?? []), member]);
   };
 
@@ -2016,34 +2140,36 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
         <Card style={{ marginBottom: 12 }}>
           <TileLabel
             action={
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                {detailsSaved && !editingDetails && <span style={{ fontSize: 12, color: t.edge2 }}>Saved.</span>}
-                <button
-                  onClick={() => {
-                    setDetailsSaved(false);
-                    setEditingDetails((v) => !v);
-                  }}
-                  style={{
-                    padding: "6px 12px",
-                    border: `1px solid ${t.frost}`,
-                    borderRadius: t.radiusButton,
-                    background: t.white,
-                    color: t.edge,
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {editingDetails ? "Cancel" : isBlankSite ? "Assign new site" : "Add more site details"}
-                </button>
-              </div>
+              canManage ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  {detailsSaved && !editingDetails && <span style={{ fontSize: 12, color: t.edge2 }}>Saved.</span>}
+                  <button
+                    onClick={() => {
+                      setDetailsSaved(false);
+                      setEditingDetails((v) => !v);
+                    }}
+                    style={{
+                      padding: "6px 12px",
+                      border: `1px solid ${t.frost}`,
+                      borderRadius: t.radiusButton,
+                      background: t.white,
+                      color: t.edge,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {editingDetails ? "Cancel" : isBlankSite ? "Assign new site" : "Add more site details"}
+                  </button>
+                </div>
+              ) : undefined
             }
           >
             Site details
           </TileLabel>
 
-          {editingDetails && (
+          {canManage && editingDetails && (
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
                 <input
@@ -2066,6 +2192,15 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
               </div>
             </>
           )}
+
+          {!canManage && (
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontSize: 14, color: t.edge }}>{siteRecord?.address?.trim() || "No address on file."}</span>
+              {siteRecord?.poc_name?.trim() && (
+                <span style={{ fontSize: 13, color: t.edge2 }}>Point of contact: {siteRecord.poc_name}</span>
+              )}
+            </div>
+          )}
         </Card>
       )}
 
@@ -2073,22 +2208,24 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
         <Card style={{ marginBottom: 12 }}>
           <TileLabel
             action={
-              <button
-                onClick={() => setShowAssignModal(true)}
-                style={{
-                  padding: "6px 12px",
-                  border: `1px solid ${t.frost}`,
-                  borderRadius: t.radiusButton,
-                  background: t.white,
-                  color: t.edge,
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {team && team.length > 0 ? "Add more members" : "Assign team"}
-              </button>
+              canManage ? (
+                <button
+                  onClick={() => setShowAssignModal(true)}
+                  style={{
+                    padding: "6px 12px",
+                    border: `1px solid ${t.frost}`,
+                    borderRadius: t.radiusButton,
+                    background: t.white,
+                    color: t.edge,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {team && team.length > 0 ? "Add more members" : "Assign team"}
+                </button>
+              ) : undefined
             }
           >
             Team
@@ -2232,7 +2369,7 @@ function AddSiteModal({ onClose, onCreate }) {
    triage. Tapping a row reuses the same per-site drilldown (SiteView) Tile
    3's own rows link to. Also the entry point for "Add new site".
    ------------------------------------------------------------------ */
-function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated }) {
+function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated, canManage = true, isHome = false }) {
   const [sites, setSites] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
 
@@ -2253,30 +2390,32 @@ function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated }) {
 
   return (
     <div>
-      <BackLink onClick={onBack}>Back</BackLink>
+      {!isHome && <BackLink onClick={onBack}>Back</BackLink>}
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem", gap: 12 }}>
         <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>Sites</h1>
-        <button
-          onClick={() => setShowAddModal(true)}
-          style={{
-            flexShrink: 0,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "7px 12px",
-            border: `1px solid ${t.frost}`,
-            borderRadius: t.radiusButton,
-            background: t.white,
-            color: t.edge,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: "pointer",
-            whiteSpace: "nowrap",
-          }}
-        >
-          <Plus size={14} /> Add new site
-        </button>
+        {canManage && (
+          <button
+            onClick={() => setShowAddModal(true)}
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "7px 12px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              background: t.white,
+              color: t.edge,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Plus size={14} /> Add new site
+          </button>
+        )}
       </div>
 
       {sites === null ? (
@@ -2324,6 +2463,315 @@ function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated }) {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Staff — admin/superadmin only (migration 0011). Lists every `staff`
+   account plus the viewer's own row ("or himself" — see docs). PINs come
+   back decrypted from GET /api/staff and are masked client-side behind a
+   per-row reveal toggle; a null pin means the account predates reversible
+   storage and needs a reset before it's viewable.
+   ------------------------------------------------------------------ */
+function StaffDirectoryView({ onBack }) {
+  const [staff, setStaff] = useState(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [revealed, setRevealed] = useState(new Set());
+  const [phoneDrafts, setPhoneDrafts] = useState({});
+  const [confirmingResetId, setConfirmingResetId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState("");
+
+  const load = useCallback(() => {
+    return fetchStaff()
+      .then((data) => setStaff(data))
+      .catch((err) => {
+        console.error("[sbm] failed to load staff", err);
+        setStaff([]);
+      });
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const toggleReveal = (id) =>
+    setRevealed((s) => {
+      const n = new Set(s);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+
+  const savePhone = async (id) => {
+    const phone = phoneDrafts[id] ?? "";
+    setBusyId(id);
+    setError("");
+    try {
+      await patchStaffPhone(id, phone.trim());
+      setPhoneDrafts((d) => {
+        const { [id]: _drop, ...rest } = d;
+        return rest;
+      });
+      await load();
+    } catch (err) {
+      console.error("[sbm] failed to save phone", err);
+      setError("Failed to save phone — try again.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const resetPin = async (id) => {
+    if (confirmingResetId !== id) {
+      setConfirmingResetId(id);
+      return;
+    }
+    setConfirmingResetId(null);
+    setBusyId(id);
+    setError("");
+    try {
+      await postResetStaffPin(id);
+      setRevealed((s) => new Set(s).add(id));
+      await load();
+    } catch (err) {
+      console.error("[sbm] failed to reset pin", err);
+      setError("Failed to reset PIN — try again.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div>
+      <BackLink onClick={onBack}>Back</BackLink>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem", gap: 12 }}>
+        <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>Staff</h1>
+        <button
+          onClick={() => setShowAddModal(true)}
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "7px 12px",
+            border: `1px solid ${t.frost}`,
+            borderRadius: t.radiusButton,
+            background: t.white,
+            color: t.edge,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <Plus size={14} /> Add staff
+        </button>
+      </div>
+
+      {error && <p style={{ fontSize: 12, color: t.signal, marginTop: 0 }}>{error}</p>}
+
+      {staff === null ? (
+        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+      ) : staff.length === 0 ? (
+        <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
+          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No staff yet.</p>
+        </Card>
+      ) : (
+        <Card>
+          {staff.map((s) => {
+            const draft = phoneDrafts[s.id] ?? s.phone ?? "";
+            const dirty = draft !== (s.phone ?? "");
+            const isRevealed = revealed.has(s.id);
+            const busy = busyId === s.id;
+            return (
+              <div key={s.id} style={{ ...TILE_ROW_STYLE, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 14, color: t.edge, fontWeight: 600 }}>
+                    {s.name}
+                    {s.is_self && <span style={{ fontWeight: 400, color: t.edge2 }}> (you)</span>}
+                  </span>
+                  <span style={{ fontSize: 12, color: t.edge2, textTransform: "capitalize" }}>{s.role}</span>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input
+                    placeholder="Phone"
+                    value={draft}
+                    onChange={(e) => setPhoneDrafts((d) => ({ ...d, [s.id]: e.target.value }))}
+                    style={{ ...TEXT_INPUT_STYLE, minHeight: 34, fontSize: 13, flex: 1 }}
+                  />
+                  {dirty && (
+                    <button
+                      onClick={() => savePhone(s.id)}
+                      disabled={busy}
+                      style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12, opacity: busy ? 0.6 : 1 }}
+                    >
+                      Save
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 13, color: t.edge2, fontVariantNumeric: "tabular-nums" }}>
+                    PIN: {s.pin ? (isRevealed ? s.pin : "••••") : "not recoverable"}
+                  </span>
+                  {s.pin && (
+                    <button
+                      onClick={() => toggleReveal(s.id)}
+                      style={{ border: "none", background: "none", color: t.accent, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}
+                    >
+                      {isRevealed ? "Hide" : "Show"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => resetPin(s.id)}
+                    disabled={busy}
+                    style={{ border: "none", background: "none", color: t.edge2, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0, opacity: busy ? 0.6 : 1 }}
+                  >
+                    {confirmingResetId === s.id ? "Click again to confirm" : "Reset PIN"}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </Card>
+      )}
+
+      {showAddModal && (
+        <AddStaffModal
+          onClose={() => setShowAddModal(false)}
+          onCreate={async (name, phone) => {
+            const created = await postCreateStaff(name, phone);
+            await load();
+            setRevealed((s) => new Set(s).add(created.id));
+            return created;
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* "Add staff" — name + optional phone. The PIN is generated server-side and
+   returned once here; it stays viewable afterward from the row's reveal
+   toggle (see docs "PIN visibility" decision), so there's no separate
+   one-time-only confirmation screen to build. */
+function AddStaffModal({ onClose, onCreate }) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [created, setCreated] = useState(null);
+
+  const submit = async () => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      setError("Enter a name.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      const result = await onCreate(trimmed, phone.trim());
+      setCreated(result);
+    } catch (err) {
+      console.error("[sbm] failed to add staff", err);
+      setError(err.message || "Failed to add — try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add staff"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,24,31,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.25rem",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          background: t.white,
+          borderRadius: t.radiusCard,
+          padding: "1.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {created ? (
+          <>
+            <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>
+              {created.name} added
+            </span>
+            <p style={{ fontSize: 13, color: t.edge2, margin: 0 }}>
+              Share this PIN with {created.name} to log in. You can view it again later from the Staff page.
+            </p>
+            <div style={{ fontSize: 22, fontWeight: 600, letterSpacing: 2, color: t.edge, fontVariantNumeric: "tabular-nums" }}>
+              {created.pin}
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 4 }}>
+              <button onClick={onClose} style={PRIMARY_BUTTON_STYLE}>
+                Done
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Add staff</span>
+            <input
+              autoFocus
+              placeholder="Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={TEXT_INPUT_STYLE}
+            />
+            <input
+              placeholder="Phone (optional)"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              style={TEXT_INPUT_STYLE}
+            />
+            {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+              <button
+                onClick={onClose}
+                style={{
+                  minHeight: 40,
+                  padding: "0 16px",
+                  border: `1px solid ${t.frost}`,
+                  borderRadius: t.radiusButton,
+                  background: t.white,
+                  color: t.edge2,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button onClick={submit} disabled={saving} style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}>
+                {saving ? "Adding…" : "Add"}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -2768,15 +3216,25 @@ export default function SimpleBusinessManager() {
   const [escalations, setEscalations] = useState([]);
   const [sitesAttention, setSitesAttention] = useState([]);
   const [allSites, setAllSites] = useState([]);
+  const [staffCount, setStaffCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState({ name: "home" });
   const [busyIds, setBusyIds] = useState(new Set());
 
+  /* Fetched on demand when a `staff` session opens a call from their site's
+     timeline — their bulk `calls` list is never loaded (see the `me` effect
+     below), so this is the only path to a call's transcript for them. */
+  const [fetchedCall, setFetchedCall] = useState(null);
+
   /* undefined = checking, null = logged out, object = logged in. See
      src/lib/auth.ts / LoginScreen above — additive session-cookie auth,
      the whole dashboard is now gated behind it. */
   const [me, setMe] = useState(undefined);
+
+  /* `staff` lands on a filtered Sites view instead of the office dashboard —
+     migration 0011. admin/superadmin get the dashboard unchanged. */
+  const homeView = me?.role === "staff" ? { name: "sites-directory" } : { name: "home" };
 
   useEffect(() => {
     let cancelled = false;
@@ -2796,13 +3254,36 @@ export default function SimpleBusinessManager() {
   useEffect(() => {
     if (!me) return;
     let cancelled = false;
-    Promise.all([fetchCalls(), fetchEscalations(), fetchSitesAttention(), fetchSites()])
-      .then(([callsData, escalationsData, attentionData, sitesData]) => {
+
+    if (me.role === "staff") {
+      // No calls/escalations/attention tile for staff — they only ever see
+      // their own assigned sites, already filtered server-side.
+      setView({ name: "sites-directory" });
+      fetchSites()
+        .then((sitesData) => {
+          if (!cancelled) setAllSites(sitesData);
+        })
+        .catch((err) => {
+          console.error("[sbm] failed to load sites", err);
+          if (!cancelled) setLoadError(err.message);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    setView({ name: "home" });
+    Promise.all([fetchCalls(), fetchEscalations(), fetchSitesAttention(), fetchSites(), fetchStaffRoster()])
+      .then(([callsData, escalationsData, attentionData, sitesData, staffData]) => {
         if (cancelled) return;
         setCalls(callsData);
         setEscalations(escalationsData);
         setSitesAttention(attentionData);
         setAllSites(sitesData);
+        setStaffCount(staffData.length);
       })
       .catch((err) => {
         console.error("[sbm] failed to load calls", err);
@@ -2819,6 +3300,7 @@ export default function SimpleBusinessManager() {
   const onLogout = useCallback(async () => {
     await postLogout();
     setMe(null);
+    setView({ name: "home" });
   }, []);
 
   const onResetPin = useCallback(async (currentPin, newPin) => {
@@ -2960,7 +3442,32 @@ export default function SimpleBusinessManager() {
     [mutate]
   );
 
-  const openCall = view.name === "call" ? calls.find((c) => c.id === view.id) : null;
+  const bulkCall = view.name === "call" ? calls.find((c) => c.id === view.id) : null;
+
+  useEffect(() => {
+    if (view.name !== "call" || bulkCall) {
+      setFetchedCall(null);
+      return;
+    }
+    // undefined = fetch in flight, distinct from null ("fetched, not found /
+    // not permitted") so the render below can tell the two apart.
+    setFetchedCall(undefined);
+    let cancelled = false;
+    fetchCall(view.id)
+      .then((data) => {
+        if (!cancelled) setFetchedCall(data);
+      })
+      .catch((err) => {
+        console.error("[sbm] failed to load call", err);
+        if (!cancelled) setFetchedCall(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.name, view.id, bulkCall]);
+
+  const openCall = bulkCall ?? (view.name === "call" ? fetchedCall : null);
   const ordered = useMemo(() => sortCalls(calls), [calls]);
 
   const shell = (children) => (
@@ -3011,23 +3518,37 @@ export default function SimpleBusinessManager() {
   if (loading) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
   if (loadError) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Couldn't load calls: {loadError}</p>);
 
+  if (view.name === "call" && !bulkCall && fetchedCall === undefined) {
+    return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
+  }
+
   if (openCall)
     return shell(
       <CallDetail
         call={openCall}
-        onBack={() => setView(view.from ?? { name: "home" })}
+        onBack={() => setView(view.from ?? homeView)}
         onToggle={onToggle}
         onPark={onPark}
         busyIds={busyIds}
+        canManage={me.role !== "staff"}
       />
     );
+
+  if (view.name === "call") {
+    return shell(
+      <div>
+        <BackLink onClick={() => setView(view.from ?? homeView)}>Back</BackLink>
+        <p style={{ fontSize: 14, color: t.edge2 }}>Couldn't load that call.</p>
+      </div>
+    );
+  }
 
   if (view.name === "day")
     return shell(
       <DayView
         date={view.date}
         calls={calls}
-        onBack={() => setView({ name: "home" })}
+        onBack={() => setView(homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "day", date: view.date } })}
         onToggle={onToggle}
         onPark={onPark}
@@ -3041,24 +3562,41 @@ export default function SimpleBusinessManager() {
         site={view.site}
         siteRecord={allSites.find((s) => s.name === view.site)}
         calls={calls}
-        onBack={() => setView(view.from ?? { name: "home" })}
+        onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "site", site: view.site, from: view.from } })}
         onSiteUpdated={refreshSites}
         autoEditDetails={Boolean(view.autoEdit)}
+        canManage={me.role !== "staff"}
       />
     );
 
   if (view.name === "sites-review")
-    return shell(<SitesReviewView sites={allSites} onBack={() => setView({ name: "home" })} onSaved={refreshSites} />);
+    return shell(<SitesReviewView sites={allSites} onBack={() => setView(homeView)} onSaved={refreshSites} />);
 
   if (view.name === "sites-directory")
     return shell(
-      <SitesDirectoryView
-        onBack={() => setView({ name: "home" })}
-        onOpenSite={(site) => setView({ name: "site", site, from: { name: "sites-directory" } })}
-        onSiteCreated={onSiteCreated}
-      />
+      <>
+        {me.role === "staff" && (
+          <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
+            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
+                Simple Business Manager
+              </span>
+              <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} />
+            </header>
+          </div>
+        )}
+        <SitesDirectoryView
+          onBack={() => setView(homeView)}
+          onOpenSite={(site) => setView({ name: "site", site, from: { name: "sites-directory" } })}
+          onSiteCreated={onSiteCreated}
+          canManage={me.role !== "staff"}
+          isHome={me.role === "staff"}
+        />
+      </>
     );
+
+  if (view.name === "staff-directory") return shell(<StaffDirectoryView onBack={() => setView(homeView)} />);
 
   return shell(
     <>
@@ -3126,6 +3664,9 @@ export default function SimpleBusinessManager() {
           onClose={onCloseEscalation}
           busyIds={busyIds}
         />
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <StaffTile count={staffCount} onOpen={() => setView({ name: "staff-directory" })} />
+        )}
       </div>
 
       {ordered.length === 0 ? (

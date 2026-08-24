@@ -6,7 +6,7 @@
 // new session-cookie-only routes (media/voice-note/timeline) that <img>/
 // <video>/<audio> tags can't attach a custom header to.
 
-import { getSessionWithUser, touchSession, type SessionWithUser } from "@sbm/core";
+import { getSessionWithUser, isUserAssignedToSite, touchSession, type SessionWithUser } from "@sbm/core";
 import type { Env } from "../index";
 
 const PBKDF2_ITERATIONS = 100_000;
@@ -54,6 +54,61 @@ export async function hashPin(env: Env, pin: string): Promise<PinHash> {
 export async function verifyPin(env: Env, pin: string, storedHash: string, storedSalt: string): Promise<boolean> {
   const candidate = await pbkdf2(env.PIN_PEPPER ?? "", pin, fromHex(storedSalt));
   return timingSafeEqualHex(candidate, storedHash);
+}
+
+/**
+ * Reversible PIN storage, deliberately separate from the one-way hash above
+ * — lets admin/superadmin view a staff member's current PIN from the Staff
+ * page (see docs "Deploy the change to dev" PIN-visibility decision).
+ * AES-256-GCM under PIN_ENCRYPTION_KEY, stored as `ivB64:cipherB64`.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
+function base64ToBytes(b64: string): Uint8Array {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function importPinEncryptionKey(env: Env): Promise<CryptoKey> {
+  return crypto.subtle.importKey("raw", base64ToBytes(env.PIN_ENCRYPTION_KEY ?? ""), "AES-GCM", false, [
+    "encrypt",
+    "decrypt",
+  ]);
+}
+
+export async function encryptPin(env: Env, pin: string): Promise<string> {
+  const key = await importPinEncryptionKey(env);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(pin));
+  return `${bytesToBase64(iv)}:${bytesToBase64(new Uint8Array(ciphertext))}`;
+}
+
+/** Returns null if decryption fails (wrong/missing key, corrupt value) rather than throwing — callers treat that as "not recoverable, offer a reset." */
+export async function decryptPin(env: Env, encrypted: string): Promise<string | null> {
+  const [ivB64, cipherB64] = encrypted.split(":");
+  if (!ivB64 || !cipherB64) return null;
+  try {
+    const key = await importPinEncryptionKey(env);
+    const plaintext = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: base64ToBytes(ivB64) },
+      key,
+      base64ToBytes(cipherB64)
+    );
+    return new TextDecoder().decode(plaintext);
+  } catch {
+    return null;
+  }
+}
+
+/** Random 4-digit PIN for admin-created/reset staff accounts — shown once in the response, then only recoverable via decryptPin. */
+export function generateRandomPin(): string {
+  return String(crypto.getRandomValues(new Uint32Array(1))[0] % 10000).padStart(4, "0");
 }
 
 function timingSafeEqualHex(a: string, b: string): boolean {
@@ -125,4 +180,17 @@ export async function requireSession(request: Request, env: Env): Promise<Sessio
     await touchSession(env.DB, tokenHash);
   }
   return session;
+}
+
+/**
+ * Role gate for the site-scoped routes (team/media/timeline/voice-note): a
+ * `staff` session must actually be assigned to the site to read/write it —
+ * without this, a staff member could still reach another site's data by
+ * guessing its ID even though the UI never shows it to them. admin/superadmin
+ * pass unconditionally.
+ */
+export async function assertSiteMembership(env: Env, session: SessionWithUser | null, siteId: string): Promise<boolean> {
+  if (!session) return false;
+  if (session.user_role !== "staff") return true;
+  return isUserAssignedToSite(env.DB, session.user_id, siteId);
 }

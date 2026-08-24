@@ -12,6 +12,7 @@ import type {
   Todo,
   TodoOwner,
   User,
+  UserRole,
 } from "./types";
 
 export interface NewCallInput {
@@ -540,10 +541,15 @@ export interface SiteRow {
 const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name FROM sites`;
 
 /** All sites regardless of confirmation state — the review screen needs to see everything. */
-export async function listSites(db: D1Database): Promise<SiteRow[]> {
-  const { results } = await db
-    .prepare(`${SITE_ROW_SELECT} ORDER BY (is_confirmed IS NOT NULL), name ASC`)
-    .all<SiteRow>();
+/**
+ * `forUserId` restricts to sites that user is on the team roster for — used
+ * for a `staff` session (see migration 0011); omitted for admin/superadmin,
+ * who see everything, same as before roles existed.
+ */
+export async function listSites(db: D1Database, forUserId?: string | null): Promise<SiteRow[]> {
+  const scoped = forUserId ? `AND id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)` : "";
+  const stmt = db.prepare(`${SITE_ROW_SELECT} WHERE 1=1 ${scoped} ORDER BY (is_confirmed IS NOT NULL), name ASC`);
+  const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<SiteRow>();
   return results;
 }
 
@@ -630,29 +636,57 @@ export interface SiteTeamMemberRow {
   id: string;
   name: string;
   contact_number: string;
+  user_id: string | null;
 }
 
 export async function listSiteTeamMembers(db: D1Database, siteId: string): Promise<SiteTeamMemberRow[]> {
   const { results } = await db
-    .prepare(`SELECT id, name, contact_number FROM site_team_members WHERE site_id = ? ORDER BY created_at ASC`)
+    .prepare(`SELECT id, name, contact_number, user_id FROM site_team_members WHERE site_id = ? ORDER BY created_at ASC`)
     .bind(siteId)
     .all<SiteTeamMemberRow>();
   return results;
 }
 
+/** True if `userId` is on `siteId`'s team roster — backs assertSiteMembership in src/lib/auth.ts. */
+export async function isUserAssignedToSite(db: D1Database, userId: string, siteId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 FROM site_team_members WHERE site_id = ? AND user_id = ? LIMIT 1`)
+    .bind(siteId, userId)
+    .first();
+  return row !== null;
+}
+
+/** True if `callId` is linked (call_sites) to any site `userId` is on the team roster for — lets a `staff` session open a call's transcript from their site's timeline. */
+export async function isCallAccessibleToUser(db: D1Database, userId: string, callId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM call_sites
+       JOIN site_team_members ON site_team_members.site_id = call_sites.site_id
+       WHERE call_sites.call_id = ? AND site_team_members.user_id = ?
+       LIMIT 1`
+    )
+    .bind(callId, userId)
+    .first();
+  return row !== null;
+}
+
+/** `memberUserId` links this row to a real login account (the admin "choose from dropdown" flow) — see migration 0011. */
 export async function addSiteTeamMember(
   db: D1Database,
   siteId: string,
   name: string,
   contactNumber: string,
-  addedBy?: string | null
+  addedBy?: string | null,
+  memberUserId?: string | null
 ): Promise<SiteTeamMemberRow> {
   const id = crypto.randomUUID();
   await db
-    .prepare(`INSERT INTO site_team_members (id, site_id, name, contact_number, added_by) VALUES (?, ?, ?, ?, ?)`)
-    .bind(id, siteId, name, contactNumber, addedBy ?? null)
+    .prepare(
+      `INSERT INTO site_team_members (id, site_id, name, contact_number, added_by, user_id) VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(id, siteId, name, contactNumber, addedBy ?? null, memberUserId ?? null)
     .run();
-  return { id, name, contact_number: contactNumber };
+  return { id, name, contact_number: contactNumber, user_id: memberUserId ?? null };
 }
 
 export interface SiteAttentionRow {
@@ -761,19 +795,22 @@ export interface ConfirmedSiteRow {
  * zero calls included. Alphabetical — it's a reference list, not a triage
  * queue.
  */
-export async function getConfirmedSitesSummary(db: D1Database): Promise<ConfirmedSiteRow[]> {
-  const { results } = await db
-    .prepare(
-      `SELECT sites.id AS id, sites.name AS name,
-              COALESCE(SUM(CASE WHEN todos.status = 'open' THEN 1 ELSE 0 END), 0) AS open_count
-       FROM sites
-       LEFT JOIN call_sites ON call_sites.site_id = sites.id
-       LEFT JOIN todos ON todos.call_id = call_sites.call_id
-       WHERE sites.is_confirmed = 'Y'
-       GROUP BY sites.id, sites.name
-       ORDER BY sites.name ASC`
-    )
-    .all<ConfirmedSiteRow>();
+/** `forUserId` — see listSites above; same staff-vs-admin scoping. */
+export async function getConfirmedSitesSummary(db: D1Database, forUserId?: string | null): Promise<ConfirmedSiteRow[]> {
+  const scoped = forUserId
+    ? `AND sites.id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)`
+    : "";
+  const stmt = db.prepare(
+    `SELECT sites.id AS id, sites.name AS name,
+            COALESCE(SUM(CASE WHEN todos.status = 'open' THEN 1 ELSE 0 END), 0) AS open_count
+     FROM sites
+     LEFT JOIN call_sites ON call_sites.site_id = sites.id
+     LEFT JOIN todos ON todos.call_id = call_sites.call_id
+     WHERE sites.is_confirmed = 'Y' ${scoped}
+     GROUP BY sites.id, sites.name
+     ORDER BY sites.name ASC`
+  );
+  const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<ConfirmedSiteRow>();
   return results;
 }
 
@@ -859,13 +896,57 @@ export async function closeEscalation(db: D1Database, id: string): Promise<Escal
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_MINUTES = 15;
 
-export async function createUser(db: D1Database, name: string, pinHash: string, pinSalt: string): Promise<User> {
+export async function createUser(
+  db: D1Database,
+  name: string,
+  pinHash: string,
+  pinSalt: string,
+  role: UserRole = "staff",
+  phone: string | null = null,
+  pinEncrypted: string | null = null
+): Promise<User> {
   const id = crypto.randomUUID();
   await db
-    .prepare(`INSERT INTO users (id, name, pin_hash, pin_salt) VALUES (?, ?, ?, ?)`)
-    .bind(id, name, pinHash, pinSalt)
+    .prepare(
+      `INSERT INTO users (id, name, pin_hash, pin_salt, role, phone, pin_encrypted) VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(id, name, pinHash, pinSalt, role, phone, pinEncrypted)
     .run();
   return (await getUserById(db, id))!;
+}
+
+/** Staff page — every `staff` account, plus the requesting admin/superadmin's own row (view/reset your own PIN too, not other admins'). */
+export async function listStaffAndSelf(db: D1Database, requesterId: string): Promise<User[]> {
+  const { results } = await db
+    .prepare(`SELECT * FROM users WHERE role = 'staff' OR id = ? ORDER BY (id = ?) DESC, name ASC`)
+    .bind(requesterId, requesterId)
+    .all<User>();
+  return results;
+}
+
+export interface StaffRosterRow {
+  id: string;
+  name: string;
+  phone: string | null;
+}
+
+/**
+ * The "assign team member" dropdown's data source — `staff` accounts only
+ * (never admin/superadmin, and never the requester's own row the way
+ * listStaffAndSelf includes it), and only the three fields the dropdown
+ * needs. Deliberately not listStaffAndSelf: that query also decrypts every
+ * row's PIN, which the dropdown never shows and which was making it slow
+ * to open for no reason.
+ */
+export async function listStaffRoster(db: D1Database): Promise<StaffRosterRow[]> {
+  const { results } = await db
+    .prepare(`SELECT id, name, phone FROM users WHERE role = 'staff' ORDER BY name ASC`)
+    .all<StaffRosterRow>();
+  return results;
+}
+
+export async function updateUserPhone(db: D1Database, userId: string, phone: string | null): Promise<void> {
+  await db.prepare(`UPDATE users SET phone = ? WHERE id = ?`).bind(phone, userId).run();
 }
 
 export async function getUserByName(db: D1Database, name: string): Promise<User | null> {
@@ -878,9 +959,24 @@ export async function getUserById(db: D1Database, id: string): Promise<User | nu
   return row ?? null;
 }
 
-/** Self-service PIN reset (POST /api/me/pin) — a fresh salt is generated for every reset, not reused. */
-export async function updateUserPin(db: D1Database, userId: string, pinHash: string, pinSalt: string): Promise<void> {
-  await db.prepare(`UPDATE users SET pin_hash = ?, pin_salt = ? WHERE id = ?`).bind(pinHash, pinSalt, userId).run();
+/**
+ * PIN reset (self-service POST /api/me/pin, admin-create, or admin
+ * POST /api/staff/:id/reset-pin) — a fresh salt is generated for every
+ * reset, not reused. `pinEncrypted` keeps the reversible copy (see
+ * src/lib/auth.ts encryptPin) in sync with the hash so the Staff page never
+ * shows a stale PIN.
+ */
+export async function updateUserPin(
+  db: D1Database,
+  userId: string,
+  pinHash: string,
+  pinSalt: string,
+  pinEncrypted: string | null
+): Promise<void> {
+  await db
+    .prepare(`UPDATE users SET pin_hash = ?, pin_salt = ?, pin_encrypted = ? WHERE id = ?`)
+    .bind(pinHash, pinSalt, pinEncrypted, userId)
+    .run();
 }
 
 /** Login failure — locks the account for LOCKOUT_MINUTES once LOCKOUT_THRESHOLD consecutive failures are hit. */
@@ -910,6 +1006,7 @@ export async function createSession(db: D1Database, userId: string, tokenHash: s
 export interface SessionWithUser {
   user_id: string;
   user_name: string;
+  user_role: UserRole;
   last_seen_at: string;
 }
 
@@ -917,7 +1014,7 @@ export interface SessionWithUser {
 export async function getSessionWithUser(db: D1Database, tokenHash: string): Promise<SessionWithUser | null> {
   const row = await db
     .prepare(
-      `SELECT users.id AS user_id, users.name AS user_name, sessions.last_seen_at AS last_seen_at
+      `SELECT users.id AS user_id, users.name AS user_name, users.role AS user_role, sessions.last_seen_at AS last_seen_at
        FROM sessions
        JOIN users ON users.id = sessions.user_id
        WHERE sessions.token_hash = ?
