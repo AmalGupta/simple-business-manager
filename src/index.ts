@@ -14,6 +14,7 @@ import {
   handleGetCalls,
   handleGetEscalations,
   handleGetSites,
+  handlePostSite,
   handleGetConfirmedSites,
   handleGetSitesAttention,
   handleGetSiteTeam,
@@ -23,6 +24,18 @@ import {
   handlePostSitesBackfill,
   handlePostSiteTeamMember,
 } from "./handlers/api";
+import {
+  handleAdminCreateUser,
+  handleAdminRevokeSessions,
+  handleLogin,
+  handleLogout,
+  handleMe,
+  handleResetPin,
+} from "./handlers/auth";
+import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
+import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
+import { handleGetSiteTimeline } from "./handlers/site-timeline";
+import { requireSession } from "./lib/auth";
 
 export interface Env {
   ENVIRONMENT: string;
@@ -41,6 +54,8 @@ export interface Env {
   SARVAM_API_KEY?: string;
   SARVAM_WEBHOOK_TOKEN?: string;
   ANTHROPIC_API_KEY?: string;
+  /** Pepper mixed into every PIN hash — see src/lib/auth.ts. */
+  PIN_PEPPER?: string;
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -98,6 +113,11 @@ export default {
       return handleGetSites(env);
     }
 
+    if (url.pathname === "/api/sites" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostSite(request, env);
+    }
+
     if (url.pathname === "/api/sites/attention" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetSitesAttention(env);
@@ -143,6 +163,81 @@ export default {
     if (escalationMatch && request.method === "PATCH") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleCloseEscalation(env, escalationMatch[1]);
+    }
+
+    // --- Auth: session-cookie login for the dashboard SPA, additive to
+    // X-SBM-Key above (see src/lib/auth.ts header comment). ---
+
+    if (url.pathname === "/api/login" && request.method === "POST") {
+      return handleLogin(request, env);
+    }
+
+    if (url.pathname === "/api/logout" && request.method === "POST") {
+      return handleLogout(request, env);
+    }
+
+    if (url.pathname === "/api/me" && request.method === "GET") {
+      return handleMe(request, env);
+    }
+
+    if (url.pathname === "/api/me/pin" && request.method === "POST") {
+      return handleResetPin(request, env);
+    }
+
+    // Admin bootstrap — gated by X-SBM-Key only, not session (see
+    // src/handlers/auth.ts module header for why).
+    if (url.pathname === "/api/admin/users" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleAdminCreateUser(request, env);
+    }
+
+    const revokeMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)\/revoke-sessions$/);
+    if (revokeMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleAdminRevokeSessions(env, revokeMatch[1]);
+    }
+
+    // --- Site media, voice notes, and the unified timeline — session-cookie
+    // gated only, since <img>/<video>/<audio> can't set X-SBM-Key. ---
+
+    const siteMediaMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/media$/);
+    if (siteMediaMatch && request.method === "GET") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handleGetSiteMedia(env, siteMediaMatch[1]);
+    }
+    if (siteMediaMatch && request.method === "POST") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handlePostSiteMedia(request, env, siteMediaMatch[1], session.user_id);
+    }
+
+    const mediaMatch = url.pathname.match(/^\/api\/media\/([^/]+)$/);
+    if (mediaMatch && request.method === "GET") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handleGetMedia(request, env, mediaMatch[1]);
+    }
+
+    const voiceNoteMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/voice-note$/);
+    if (voiceNoteMatch && request.method === "POST") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handlePostSiteVoiceNote(request, env, ctx, voiceNoteMatch[1], session.user_id);
+    }
+
+    const recordingMatch = url.pathname.match(/^\/api\/calls\/([^/]+)\/recording$/);
+    if (recordingMatch && request.method === "GET") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallRecording(request, env, recordingMatch[1]);
+    }
+
+    const timelineMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/timeline$/);
+    if (timelineMatch && request.method === "GET") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handleGetSiteTimeline(env, timelineMatch[1]);
     }
 
     return env.ASSETS.fetch(request);

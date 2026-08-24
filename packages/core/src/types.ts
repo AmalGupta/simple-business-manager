@@ -38,6 +38,11 @@ export interface Call {
   deadline: string | null;
 
   prompt_version: string | null;
+
+  /** Set only for a voice memo uploaded explicitly from a site's page — see queries.ts insertCall. */
+  recorded_for_site_id: string | null;
+  uploaded_by_user_id: string | null;
+
   created_at: string;
 }
 
@@ -58,6 +63,49 @@ export interface SiteTeamMember {
   site_id: string;
   name: string;
   contact_number: string;
+  added_by: string | null;
+  created_at: string;
+}
+
+export interface User {
+  id: string;
+  name: string;
+  pin_hash: string;
+  pin_salt: string;
+  failed_attempts: number;
+  locked_until: string | null;
+  disabled_at: string | null;
+  created_at: string;
+}
+
+export interface Session {
+  token_hash: string;
+  user_id: string;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  revoked_at: string | null;
+}
+
+export type SiteMediaType = "photo" | "video";
+
+export interface SiteMedia {
+  id: string;
+  site_id: string;
+  media_type: SiteMediaType;
+  r2_key: string;
+  content_type: string;
+  file_size: number | null;
+  caption: string | null;
+  uploaded_by: string;
+  created_at: string;
+}
+
+export interface SiteEdit {
+  id: string;
+  site_id: string;
+  actor_user_id: string | null;
+  summary: string;
   created_at: string;
 }
 

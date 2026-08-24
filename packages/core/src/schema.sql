@@ -33,6 +33,13 @@ CREATE TABLE calls (
   -- which prompt version produced the fields above; never null after extraction
   prompt_version  TEXT,
 
+  -- migration 0010: set only when this call is a voice memo uploaded
+  -- explicitly from a site's page (not inferred from transcript content,
+  -- and orthogonal to call_type — a memo can still classify as internal or
+  -- low_signal). NULL for every ordinary phone-uploaded call.
+  recorded_for_site_id  TEXT REFERENCES sites(id),
+  uploaded_by_user_id   TEXT REFERENCES users(id),
+
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -55,6 +62,7 @@ CREATE TABLE site_team_members (
   site_id         TEXT NOT NULL REFERENCES sites(id),
   name            TEXT NOT NULL,
   contact_number  TEXT NOT NULL,
+  added_by        TEXT REFERENCES users(id),   -- migration 0010; NULL if added before login existed or with no session
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -140,3 +148,57 @@ CREATE INDEX idx_call_sites_site ON call_sites(site_id);
 CREATE INDEX idx_commitments_call ON commitments(call_id);
 CREATE INDEX idx_escalations_status ON escalations(status, created_at DESC);
 CREATE INDEX idx_site_team_members_site ON site_team_members(site_id);
+
+-- Per-person accounts and sessions — migration 0009. Admin-seeded roster
+-- only (POST /api/admin/users, gated by X-SBM-Key); login is name + short
+-- PIN. See src/lib/auth.ts for the hashing scheme.
+CREATE TABLE users (
+  id              TEXT PRIMARY KEY,
+  name            TEXT NOT NULL UNIQUE,
+  pin_hash        TEXT NOT NULL,
+  pin_salt        TEXT NOT NULL,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until    TEXT,
+  disabled_at     TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE sessions (
+  token_hash    TEXT PRIMARY KEY,
+  user_id       TEXT NOT NULL REFERENCES users(id),
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at    TEXT NOT NULL,
+  revoked_at    TEXT
+);
+
+CREATE INDEX idx_sessions_user ON sessions(user_id);
+CREATE INDEX idx_sessions_expires ON sessions(expires_at);
+
+-- Site media, edit log, and explicit call<->site linkage — migration 0010.
+-- The unified site timeline is composed at read time from these tables plus
+-- `calls` and `site_team_members` — see getSiteTimeline in queries.ts.
+CREATE TABLE site_media (
+  id            TEXT PRIMARY KEY,
+  site_id       TEXT NOT NULL REFERENCES sites(id),
+  media_type    TEXT NOT NULL,          -- 'photo' | 'video' (voice notes live in `calls`, not here)
+  r2_key        TEXT NOT NULL UNIQUE,
+  content_type  TEXT NOT NULL,
+  file_size     INTEGER,
+  caption       TEXT,
+  uploaded_by   TEXT NOT NULL REFERENCES users(id),
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_site_media_site ON site_media(site_id, created_at DESC);
+
+-- sites.address/poc_name are overwritten in place with no history; one row
+-- here per PATCH that actually changed something.
+CREATE TABLE site_edits (
+  id            TEXT PRIMARY KEY,
+  site_id       TEXT NOT NULL REFERENCES sites(id),
+  actor_user_id TEXT REFERENCES users(id),
+  summary       TEXT NOT NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_site_edits_site ON site_edits(site_id, created_at DESC);
+CREATE INDEX idx_calls_recorded_for_site ON calls(recorded_for_site_id);

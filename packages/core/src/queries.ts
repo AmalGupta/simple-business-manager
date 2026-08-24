@@ -1,6 +1,18 @@
 // All D1 access lives here — see docs/SCAFFOLDING.md §1 ("no SQL outside queries.ts").
 
-import type { Call, CallExtraction, CallSource, CallType, Escalation, EscalationStatus, Todo, TodoOwner } from "./types";
+import type {
+  Call,
+  CallExtraction,
+  CallSource,
+  CallType,
+  Escalation,
+  EscalationStatus,
+  SiteMedia,
+  SiteMediaType,
+  Todo,
+  TodoOwner,
+  User,
+} from "./types";
 
 export interface NewCallInput {
   id: string;
@@ -9,15 +21,27 @@ export interface NewCallInput {
   recordedAt: string;
   recordingDate: string | null;
   durationS: number | null;
+  /** Set for a voice memo uploaded explicitly from a site's page — see src/handlers/site-voice-note.ts. */
+  recordedForSiteId?: string | null;
+  uploadedByUserId?: string | null;
 }
 
 export async function insertCall(db: D1Database, input: NewCallInput): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO calls (id, r2_key, source, recorded_at, recording_date, duration_s, stt_status)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending')`
+      `INSERT INTO calls (id, r2_key, source, recorded_at, recording_date, duration_s, stt_status, recorded_for_site_id, uploaded_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
     )
-    .bind(input.id, input.r2Key, input.source, input.recordedAt, input.recordingDate, input.durationS)
+    .bind(
+      input.id,
+      input.r2Key,
+      input.source,
+      input.recordedAt,
+      input.recordingDate,
+      input.durationS,
+      input.recordedForSiteId ?? null,
+      input.uploadedByUserId ?? null
+    )
     .run();
 }
 
@@ -132,6 +156,15 @@ export async function linkCallToSites(db: D1Database, callId: string, siteNames:
       db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId)
     )
   );
+}
+
+/**
+ * Direct site link for a voice memo uploaded explicitly from a site's page —
+ * the site is already known (the id, not just a name), so this skips
+ * linkCallToSites' upsert-by-name path entirely.
+ */
+export async function linkCallToSiteExplicit(db: D1Database, callId: string, siteId: string): Promise<void> {
+  await db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId).run();
 }
 
 /** Task 5 — extraction landed. Writes the extracted fields, prompt_version, sites, todos, and commitments. */
@@ -522,16 +555,75 @@ type SitePatchField = (typeof SITE_PATCH_FIELDS)[number];
  * (SitesReviewView) and address/point-of-contact (SiteView — always
  * editable, not gated on the site having any calls or open items). Only
  * the fields present in `patch` are touched, same pattern as updateTodo.
+ *
+ * `actorUserId` is opportunistic — passed only when a session cookie was
+ * present on the request (see requireSession in src/lib/auth.ts). When a
+ * human-meaningful field (address/poc_name) actually changed, a `site_edits`
+ * row is logged so the unified timeline (getSiteTimeline) has something to
+ * show for "site details edited"; a bare confirmation-status change doesn't
+ * log, since that's the review workflow's own action, not a detail edit.
  */
-export async function updateSite(db: D1Database, id: string, patch: Partial<Record<SitePatchField, string | null>>): Promise<SiteRow | null> {
+export async function updateSite(
+  db: D1Database,
+  id: string,
+  patch: Partial<Record<SitePatchField, string | null>>,
+  actorUserId?: string | null
+): Promise<SiteRow | null> {
   const fields = SITE_PATCH_FIELDS.filter((f) => f in patch);
   if (fields.length > 0) {
     const setClause = fields.map((f) => `${f} = ?`).join(", ");
     const values = fields.map((f) => patch[f] ?? null);
-    await db.prepare(`UPDATE sites SET ${setClause} WHERE id = ?`).bind(...values, id).run();
+    const statements = [db.prepare(`UPDATE sites SET ${setClause} WHERE id = ?`).bind(...values, id)];
+
+    const detailFields = fields.filter((f) => f === "address" || f === "poc_name");
+    if (detailFields.length > 0) {
+      const labels = detailFields.map((f) => (f === "poc_name" ? "point of contact" : f)).join(", ");
+      statements.push(
+        db
+          .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
+          .bind(crypto.randomUUID(), id, actorUserId ?? null, `${labels[0].toUpperCase()}${labels.slice(1)} updated`)
+      );
+    }
+    await db.batch(statements);
   }
   const row = await db.prepare(`${SITE_ROW_SELECT} WHERE id = ?`).bind(id).first<SiteRow>();
   return row ?? null;
+}
+
+/**
+ * Manual "Add new site" — distinct from upsertSite (used by the LLM
+ * extraction/site-scan pipeline, which leaves is_confirmed NULL pending
+ * review). A human explicitly typing a site name here needs no review, so
+ * it's confirmed immediately. Find-or-create by name: if the site already
+ * exists (e.g. an unreviewed one the LLM already found), this confirms and
+ * patches it rather than erroring on the UNIQUE constraint — same
+ * `updateSite` path SitesReviewView uses, so it logs a site_edits row too.
+ */
+export async function createSite(
+  db: D1Database,
+  name: string,
+  address: string | null,
+  pocName: string | null,
+  actorUserId?: string | null
+): Promise<SiteRow> {
+  const trimmed = name.trim();
+  const existing = await db.prepare(`${SITE_ROW_SELECT} WHERE name = ?`).bind(trimmed).first<SiteRow>();
+  if (existing) {
+    const updated = await updateSite(db, existing.id, { is_confirmed: "Y", address, poc_name: pocName }, actorUserId ?? null);
+    return updated ?? existing;
+  }
+
+  const id = crypto.randomUUID();
+  await db.batch([
+    db
+      .prepare(`INSERT INTO sites (id, name, is_confirmed, address, poc_name) VALUES (?, ?, 'Y', ?, ?)`)
+      .bind(id, trimmed, address, pocName),
+    db
+      .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, 'Site added')`)
+      .bind(crypto.randomUUID(), id, actorUserId ?? null),
+  ]);
+  const row = await db.prepare(`${SITE_ROW_SELECT} WHERE id = ?`).bind(id).first<SiteRow>();
+  return row!;
 }
 
 export interface SiteTeamMemberRow {
@@ -552,12 +644,13 @@ export async function addSiteTeamMember(
   db: D1Database,
   siteId: string,
   name: string,
-  contactNumber: string
+  contactNumber: string,
+  addedBy?: string | null
 ): Promise<SiteTeamMemberRow> {
   const id = crypto.randomUUID();
   await db
-    .prepare(`INSERT INTO site_team_members (id, site_id, name, contact_number) VALUES (?, ?, ?, ?)`)
-    .bind(id, siteId, name, contactNumber)
+    .prepare(`INSERT INTO site_team_members (id, site_id, name, contact_number, added_by) VALUES (?, ?, ?, ?, ?)`)
+    .bind(id, siteId, name, contactNumber, addedBy ?? null)
     .run();
   return { id, name, contact_number: contactNumber };
 }
@@ -755,4 +848,278 @@ export async function closeEscalation(db: D1Database, id: string): Promise<Escal
     .bind(id)
     .run();
   return db.prepare(`SELECT * FROM escalations WHERE id = ?`).bind(id).first<Escalation>();
+}
+
+// ---------------------------------------------------------------------------
+// Users & sessions — admin-seeded accounts, name + PIN login. See
+// src/lib/auth.ts for hashing/token mechanics; this file only ever sees
+// hashes, never a raw PIN or session token.
+// ---------------------------------------------------------------------------
+
+const LOCKOUT_THRESHOLD = 5;
+const LOCKOUT_MINUTES = 15;
+
+export async function createUser(db: D1Database, name: string, pinHash: string, pinSalt: string): Promise<User> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(`INSERT INTO users (id, name, pin_hash, pin_salt) VALUES (?, ?, ?, ?)`)
+    .bind(id, name, pinHash, pinSalt)
+    .run();
+  return (await getUserById(db, id))!;
+}
+
+export async function getUserByName(db: D1Database, name: string): Promise<User | null> {
+  const row = await db.prepare(`SELECT * FROM users WHERE name = ?`).bind(name).first<User>();
+  return row ?? null;
+}
+
+export async function getUserById(db: D1Database, id: string): Promise<User | null> {
+  const row = await db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first<User>();
+  return row ?? null;
+}
+
+/** Self-service PIN reset (POST /api/me/pin) — a fresh salt is generated for every reset, not reused. */
+export async function updateUserPin(db: D1Database, userId: string, pinHash: string, pinSalt: string): Promise<void> {
+  await db.prepare(`UPDATE users SET pin_hash = ?, pin_salt = ? WHERE id = ?`).bind(pinHash, pinSalt, userId).run();
+}
+
+/** Login failure — locks the account for LOCKOUT_MINUTES once LOCKOUT_THRESHOLD consecutive failures are hit. */
+export async function incrementFailedLogin(db: D1Database, userId: string): Promise<void> {
+  const user = await getUserById(db, userId);
+  if (!user) return;
+  const attempts = user.failed_attempts + 1;
+  const lockedUntil =
+    attempts >= LOCKOUT_THRESHOLD ? new Date(Date.now() + LOCKOUT_MINUTES * 60_000).toISOString() : user.locked_until;
+  await db
+    .prepare(`UPDATE users SET failed_attempts = ?, locked_until = ? WHERE id = ?`)
+    .bind(attempts, lockedUntil, userId)
+    .run();
+}
+
+export async function resetFailedLogin(db: D1Database, userId: string): Promise<void> {
+  await db.prepare(`UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?`).bind(userId).run();
+}
+
+export async function createSession(db: D1Database, userId: string, tokenHash: string, expiresAt: string): Promise<void> {
+  await db
+    .prepare(`INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?, ?, ?)`)
+    .bind(tokenHash, userId, expiresAt)
+    .run();
+}
+
+export interface SessionWithUser {
+  user_id: string;
+  user_name: string;
+  last_seen_at: string;
+}
+
+/** Joins sessions+users and filters revoked/expired — a row back means "valid session." */
+export async function getSessionWithUser(db: D1Database, tokenHash: string): Promise<SessionWithUser | null> {
+  const row = await db
+    .prepare(
+      `SELECT users.id AS user_id, users.name AS user_name, sessions.last_seen_at AS last_seen_at
+       FROM sessions
+       JOIN users ON users.id = sessions.user_id
+       WHERE sessions.token_hash = ?
+         AND sessions.revoked_at IS NULL
+         AND sessions.expires_at > datetime('now')
+         AND users.disabled_at IS NULL`
+    )
+    .bind(tokenHash)
+    .first<SessionWithUser>();
+  return row ?? null;
+}
+
+/** Sliding expiry — see SESSION_REFRESH_THRESHOLD_MS in src/lib/auth.ts for why this isn't called on every request. */
+export async function touchSession(db: D1Database, tokenHash: string): Promise<void> {
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  await db
+    .prepare(`UPDATE sessions SET last_seen_at = datetime('now'), expires_at = ? WHERE token_hash = ?`)
+    .bind(expiresAt, tokenHash)
+    .run();
+}
+
+export async function revokeSession(db: D1Database, tokenHash: string): Promise<void> {
+  await db.prepare(`UPDATE sessions SET revoked_at = datetime('now') WHERE token_hash = ?`).bind(tokenHash).run();
+}
+
+/** Lost/compromised device — the admin-only escape hatch, see POST /api/admin/users/:id/revoke-sessions. */
+export async function revokeAllSessionsForUser(db: D1Database, userId: string): Promise<void> {
+  await db
+    .prepare(`UPDATE sessions SET revoked_at = datetime('now') WHERE user_id = ? AND revoked_at IS NULL`)
+    .bind(userId)
+    .run();
+}
+
+// ---------------------------------------------------------------------------
+// Site media (photos/videos) — voice notes are calls, not site_media rows;
+// see NewCallInput.recordedForSiteId.
+// ---------------------------------------------------------------------------
+
+export interface NewSiteMediaInput {
+  siteId: string;
+  mediaType: SiteMediaType;
+  r2Key: string;
+  contentType: string;
+  fileSize: number | null;
+  caption: string | null;
+  uploadedBy: string;
+}
+
+export async function addSiteMedia(db: D1Database, input: NewSiteMediaInput): Promise<SiteMedia> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO site_media (id, site_id, media_type, r2_key, content_type, file_size, caption, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(id, input.siteId, input.mediaType, input.r2Key, input.contentType, input.fileSize, input.caption, input.uploadedBy)
+    .run();
+  return (await getSiteMediaById(db, id))!;
+}
+
+export async function getSiteMediaById(db: D1Database, id: string): Promise<SiteMedia | null> {
+  const row = await db.prepare(`SELECT * FROM site_media WHERE id = ?`).bind(id).first<SiteMedia>();
+  return row ?? null;
+}
+
+export async function listSiteMedia(db: D1Database, siteId: string): Promise<SiteMedia[]> {
+  const { results } = await db
+    .prepare(`SELECT * FROM site_media WHERE site_id = ? ORDER BY created_at DESC`)
+    .bind(siteId)
+    .all<SiteMedia>();
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Unified site timeline — composed at read time from calls (incl. voice
+// memos), site_media, site_team_members, and site_edits, rather than a
+// generic write-time activity log. See the plan's "Timeline read strategy"
+// note for why.
+// ---------------------------------------------------------------------------
+
+export type SiteTimelineEntryType = "call" | "media" | "team_added" | "site_edit";
+
+export interface SiteTimelineEntry {
+  type: SiteTimelineEntryType;
+  id: string;
+  created_at: string;
+  actor_name: string | null;
+  summary: string;
+  /** call: call id. media: site_media row (id/media_type/r2_key/content_type/caption). team_added: name/contact_number. */
+  ref: unknown;
+}
+
+export async function getSiteTimeline(db: D1Database, siteId: string): Promise<SiteTimelineEntry[]> {
+  const [{ results: callRows }, { results: mediaRows }, { results: teamRows }, { results: editRows }] =
+    await Promise.all([
+      db
+        .prepare(
+          `SELECT calls.id AS id, calls.recorded_at AS created_at, calls.summary AS summary,
+                  calls.call_type AS call_type, calls.recorded_for_site_id AS recorded_for_site_id,
+                  users.name AS actor_name
+           FROM call_sites
+           JOIN calls ON calls.id = call_sites.call_id
+           LEFT JOIN users ON users.id = calls.uploaded_by_user_id
+           WHERE call_sites.site_id = ?`
+        )
+        .bind(siteId)
+        .all<{
+          id: string;
+          created_at: string | null;
+          summary: string | null;
+          call_type: CallType | null;
+          recorded_for_site_id: string | null;
+          actor_name: string | null;
+        }>(),
+      db
+        .prepare(
+          `SELECT site_media.id AS id, site_media.created_at AS created_at, site_media.media_type AS media_type,
+                  site_media.r2_key AS r2_key, site_media.content_type AS content_type, site_media.caption AS caption,
+                  users.name AS actor_name
+           FROM site_media
+           JOIN users ON users.id = site_media.uploaded_by
+           WHERE site_media.site_id = ?`
+        )
+        .bind(siteId)
+        .all<{
+          id: string;
+          created_at: string;
+          media_type: SiteMediaType;
+          r2_key: string;
+          content_type: string;
+          caption: string | null;
+          actor_name: string;
+        }>(),
+      db
+        .prepare(
+          `SELECT site_team_members.id AS id, site_team_members.created_at AS created_at,
+                  site_team_members.name AS member_name, site_team_members.contact_number AS contact_number,
+                  users.name AS actor_name
+           FROM site_team_members
+           LEFT JOIN users ON users.id = site_team_members.added_by
+           WHERE site_team_members.site_id = ?`
+        )
+        .bind(siteId)
+        .all<{ id: string; created_at: string; member_name: string; contact_number: string; actor_name: string | null }>(),
+      db
+        .prepare(
+          `SELECT site_edits.id AS id, site_edits.created_at AS created_at, site_edits.summary AS summary,
+                  users.name AS actor_name
+           FROM site_edits
+           LEFT JOIN users ON users.id = site_edits.actor_user_id
+           WHERE site_edits.site_id = ?`
+        )
+        .bind(siteId)
+        .all<{ id: string; created_at: string; summary: string; actor_name: string | null }>(),
+    ]);
+
+  const entries: SiteTimelineEntry[] = [];
+
+  for (const c of callRows) {
+    const isVoiceMemo = c.recorded_for_site_id === siteId;
+    entries.push({
+      type: "call",
+      id: c.id,
+      created_at: c.created_at ?? "",
+      actor_name: c.actor_name,
+      summary: c.summary ?? (isVoiceMemo ? "Voice note — transcribing…" : "Call recorded"),
+      ref: { call_id: c.id, is_voice_memo: isVoiceMemo },
+    });
+  }
+
+  for (const m of mediaRows) {
+    entries.push({
+      type: "media",
+      id: m.id,
+      created_at: m.created_at,
+      actor_name: m.actor_name,
+      summary: m.caption ?? (m.media_type === "photo" ? "Photo added" : "Video added"),
+      ref: { media_id: m.id, media_type: m.media_type, content_type: m.content_type },
+    });
+  }
+
+  for (const tm of teamRows) {
+    entries.push({
+      type: "team_added",
+      id: tm.id,
+      created_at: tm.created_at,
+      actor_name: tm.actor_name,
+      summary: `${tm.member_name} added to the team`,
+      ref: { name: tm.member_name, contact_number: tm.contact_number },
+    });
+  }
+
+  for (const e of editRows) {
+    entries.push({
+      type: "site_edit",
+      id: e.id,
+      created_at: e.created_at,
+      actor_name: e.actor_name,
+      summary: e.summary,
+      ref: null,
+    });
+  }
+
+  return entries.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }

@@ -8,6 +8,7 @@ import {
   addSiteTeamMember,
   closeEscalation,
   createEscalation,
+  createSite,
   getCallWithTodos,
   getConfirmedSitesSummary,
   getSitesNeedingAttention,
@@ -21,6 +22,7 @@ import {
   updateTodo,
 } from "@sbm/core";
 import { scanCallForSites } from "../../packages/core/prompts/site-scan";
+import { requireSession } from "../lib/auth";
 import type { Env } from "../index";
 
 function json(data: unknown, status = 200): Response {
@@ -65,6 +67,25 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
 
 export async function handleGetSites(env: Env): Promise<Response> {
   return json(await listSites(env.DB));
+}
+
+/** "Add new site" — manual creation, distinct from the LLM-driven upsertSite path. See createSite in queries.ts. */
+export async function handlePostSite(request: Request, env: Env): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const name = typeof record.name === "string" ? record.name.trim() : "";
+  if (!name) return json({ error: "name is required" }, 400);
+  const address = typeof record.address === "string" && record.address.trim() ? record.address.trim() : null;
+  const pocName = typeof record.poc_name === "string" && record.poc_name.trim() ? record.poc_name.trim() : null;
+
+  const session = await requireSession(request, env);
+  const site = await createSite(env.DB, name, address, pocName, session?.user_id ?? null);
+  return json(site, 201);
 }
 
 export async function handleGetSitesAttention(env: Env): Promise<Response> {
@@ -137,7 +158,11 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
     if (key in record) patch[key] = record[key] as string | null;
   }
 
-  const updated = await updateSite(env.DB, id, patch);
+  // Opportunistic — a session cookie isn't required on this route (it's
+  // still gated by X-SBM-Key like every other /api/* route), but when one
+  // is present we attribute the resulting site_edits row to that user.
+  const session = await requireSession(request, env);
+  const updated = await updateSite(env.DB, id, patch, session?.user_id ?? null);
   if (!updated) return json({ error: "not found" }, 404);
   return json(updated);
 }
@@ -158,7 +183,8 @@ export async function handlePostSiteTeamMember(request: Request, env: Env, siteI
   const contactNumber = typeof record.contact_number === "string" ? record.contact_number.trim() : "";
   if (!name || !contactNumber) return json({ error: "name and contact_number are required" }, 400);
 
-  const member = await addSiteTeamMember(env.DB, siteId, name, contactNumber);
+  const session = await requireSession(request, env);
+  const member = await addSiteTeamMember(env.DB, siteId, name, contactNumber, session?.user_id ?? null);
   return json(member, 201);
 }
 

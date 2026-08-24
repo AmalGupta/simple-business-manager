@@ -12,3 +12,8 @@ SARVAM_API_KEY=sk_your-sarvam-key-here
 SARVAM_WEBHOOK_TOKEN=replace-with-openssl-rand-hex-32
 # Extraction (Task 5). Optional if you only care about upload → R2 → D1.
 ANTHROPIC_API_KEY=sk-ant-your-key-here
+
+# Pepper mixed into every per-person PIN hash (src/lib/auth.ts) — makes a
+# leaked D1 export (hashes + salts alone) insufficient to brute-force
+# offline. Required before POST /api/admin/users will work.
+PIN_PEPPER=replace-with-openssl-rand-hex-32

@@ -5,10 +5,18 @@ import {
   CircleDashed,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   FileText,
   Clock,
   Download,
   Phone,
+  Image,
+  Video,
+  Mic,
+  Square,
+  User,
+  Users,
+  Plus,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------
@@ -119,6 +127,19 @@ async function fetchConfirmedSites() {
   return fetchJSON("/api/sites/confirmed");
 }
 
+async function postCreateSite(name, address, pocName) {
+  const res = await fetch("/api/sites", {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ name, address: address || null, poc_name: pocName || null }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/sites → ${res.status}`);
+  }
+  return res.json();
+}
+
 async function patchSite(id, patch) {
   const res = await fetch(`/api/sites/${id}`, {
     method: "PATCH",
@@ -187,6 +208,74 @@ async function patchTodo(id, patch) {
     console.error("[sbm] todo update failed", err);
     throw err;
   }
+}
+
+/* Session-cookie auth (login gate + site media/timeline) — additive to the
+   X-SBM-Key mechanism above, not a replacement. See src/lib/auth.ts. */
+async function fetchMe() {
+  const res = await fetch("/api/me");
+  if (res.status === 401) return null;
+  if (!res.ok) throw new Error(`GET /api/me → ${res.status}`);
+  return res.json();
+}
+
+async function postLogin(name, pin) {
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, pin }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/login → ${res.status}`);
+  }
+  return res.json();
+}
+
+async function postLogout() {
+  await fetch("/api/logout", { method: "POST" });
+}
+
+async function postResetPin(currentPin, newPin) {
+  const res = await fetch("/api/me/pin", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ current_pin: currentPin, new_pin: newPin }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/me/pin → ${res.status}`);
+  }
+  return res.json();
+}
+
+async function fetchSiteMedia(siteId) {
+  const res = await fetch(`/api/sites/${siteId}/media`);
+  if (!res.ok) throw new Error(`GET /api/sites/${siteId}/media → ${res.status}`);
+  return res.json();
+}
+
+async function postSiteMedia(siteId, file, caption) {
+  const fd = new FormData();
+  fd.append("file", file);
+  if (caption) fd.append("caption", caption);
+  const res = await fetch(`/api/sites/${siteId}/media`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`POST /api/sites/${siteId}/media → ${res.status}`);
+  return res.json();
+}
+
+async function postSiteVoiceNote(siteId, blob, fileName) {
+  const fd = new FormData();
+  fd.append("recording", blob, fileName);
+  const res = await fetch(`/api/sites/${siteId}/voice-note`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`POST /api/sites/${siteId}/voice-note → ${res.status}`);
+  return res.json();
+}
+
+async function fetchSiteTimeline(siteId) {
+  const res = await fetch(`/api/sites/${siteId}/timeline`);
+  if (!res.ok) throw new Error(`GET /api/sites/${siteId}/timeline → ${res.status}`);
+  return res.json();
 }
 
 /* ------------------------------------------------------------------
@@ -714,6 +803,7 @@ function CommitmentsList({ commitments }) {
 function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0 }) {
   const visible = call.todos.filter((td) => td.status !== "done");
   const done = call.todos.filter((td) => td.status === "done");
+  const [openTranscript, setOpenTranscript] = useState(false);
 
   return (
     <Card
@@ -751,6 +841,35 @@ function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0 }) {
       {call.commitments?.length > 0 && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.frost}` }}>
           <CommitmentsList commitments={call.commitments} />
+        </div>
+      )}
+
+      {call.transcript != null && (
+        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.frost}` }}>
+          <button
+            onClick={() => setOpenTranscript((v) => !v)}
+            aria-expanded={openTranscript}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: 0,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              color: t.edge2,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <FileText size={14} />
+            {openTranscript ? "Hide transcript" : "Show transcript"}
+          </button>
+          {openTranscript && (
+            <p style={{ fontSize: 13, lineHeight: 1.8, color: t.edge2, marginTop: 8, whiteSpace: "pre-wrap" }}>
+              {call.transcript}
+            </p>
+          )}
         </div>
       )}
     </Card>
@@ -864,6 +983,7 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
   const openTodos = call.todos.filter((td) => td.status !== "done");
   const doneTodos = call.todos.filter((td) => td.status === "done");
   const [openTranscript, setOpenTranscript] = useState(false);
+  const [openTodosPanel, setOpenTodosPanel] = useState(false);
 
   const Section = ({ label, children }) => (
     <div style={{ marginBottom: "1.5rem" }}>
@@ -917,12 +1037,34 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds }) {
         </ul>
       </Section>
 
-      <Card style={{ marginBottom: "1.5rem" }}>
-        <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Todos</div>
-        {[...openTodos, ...doneTodos].map((td) => (
-          <TodoRow key={td.id} todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds.has(td.id)} />
-        ))}
-      </Card>
+      {call.todos.length > 0 && (
+        <Card style={{ marginBottom: "1.5rem" }}>
+          <button
+            onClick={() => setOpenTodosPanel((v) => !v)}
+            aria-expanded={openTodosPanel}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              width: "100%",
+              padding: 0,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              color: t.edge2,
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <Check size={14} />
+            {openTodosPanel ? "Hide todos" : `Show todos (${call.todos.length})`}
+          </button>
+          {openTodosPanel &&
+            [...openTodos, ...doneTodos].map((td) => (
+              <TodoRow key={td.id} todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds.has(td.id)} />
+            ))}
+        </Card>
+      )}
 
       {call.commitments?.length > 0 && (
         <Section label="Commitments">
@@ -1411,13 +1553,365 @@ function AssignTeamModal({ onClose, onAdd }) {
 }
 
 /* ------------------------------------------------------------------
+   Audio playback — voice notes and site memos. Thin native <audio>
+   wrapper, no custom scrubber; the browser issues Range requests against
+   the streaming endpoint (see src/lib/r2-stream.ts) for seeking.
+   ------------------------------------------------------------------ */
+function AudioPlayer({ src }) {
+  return (
+    <audio controls src={src} style={{ width: "100%", height: 36, marginTop: 6 }}>
+      Your browser can't play this audio.
+    </audio>
+  );
+}
+
+function pickRecorderMimeType() {
+  const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"];
+  for (const c of candidates) {
+    if (window.MediaRecorder?.isTypeSupported?.(c)) return c;
+  }
+  return "";
+}
+
+function extensionForMimeType(mimeType) {
+  if (mimeType.includes("mp4")) return "m4a";
+  if (mimeType.includes("webm")) return "webm";
+  if (mimeType.includes("ogg")) return "ogg";
+  return "m4a";
+}
+
+/* Popup for recording a voice note in-browser via MediaRecorder — record,
+   stop, preview, save. No waveform — matches the app's "no new UI kit"
+   restraint, same as AssignTeamModal above. */
+function VoiceNoteModal({ onClose, onSave }) {
+  const [status, setStatus] = useState("idle"); // idle | recording | recorded | saving
+  const [elapsedS, setElapsedS] = useState(0);
+  const [error, setError] = useState("");
+  const recorderRef = useRef(null);
+  const chunksRef = useRef([]);
+  const streamRef = useRef(null);
+  const blobRef = useRef(null);
+  const previewUrlRef = useRef(null);
+  const timerRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      clearInterval(timerRef.current);
+      streamRef.current?.getTracks().forEach((tr) => tr.stop());
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    };
+  }, []);
+
+  const startRecording = async () => {
+    setError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mimeType = pickRecorderMimeType();
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: recorder.mimeType || "audio/mp4" });
+        blobRef.current = blob;
+        previewUrlRef.current = URL.createObjectURL(blob);
+        setStatus("recorded");
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setStatus("recording");
+      setElapsedS(0);
+      timerRef.current = setInterval(() => setElapsedS((s) => s + 1), 1000);
+    } catch (err) {
+      console.error("[sbm] mic access failed", err);
+      setError("Couldn't access the microphone — check permissions.");
+    }
+  };
+
+  const stopRecording = () => {
+    clearInterval(timerRef.current);
+    recorderRef.current?.stop();
+    streamRef.current?.getTracks().forEach((tr) => tr.stop());
+  };
+
+  const save = async () => {
+    if (!blobRef.current) return;
+    setStatus("saving");
+    setError("");
+    try {
+      const ext = extensionForMimeType(blobRef.current.type);
+      await onSave(blobRef.current, `voice-note.${ext}`);
+      onClose();
+    } catch (err) {
+      console.error("[sbm] voice note upload failed", err);
+      setError("Failed to save — try again.");
+      setStatus("recorded");
+    }
+  };
+
+  const mm = String(Math.floor(elapsedS / 60)).padStart(2, "0");
+  const ss = String(elapsedS % 60).padStart(2, "0");
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Record voice note"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,24,31,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.25rem",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          background: t.white,
+          borderRadius: t.radiusCard,
+          padding: "1.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Record voice note</span>
+
+        {status === "idle" && (
+          <button onClick={startRecording} style={{ ...PRIMARY_BUTTON_STYLE, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+            <Mic size={16} /> Start recording
+          </button>
+        )}
+
+        {status === "recording" && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontFamily: t.display, fontSize: 22, color: t.signal }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: t.signal }} />
+              {mm}:{ss}
+            </div>
+            <button
+              onClick={stopRecording}
+              style={{ ...PRIMARY_BUTTON_STYLE, background: t.edge, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
+            >
+              <Square size={14} /> Stop
+            </button>
+          </>
+        )}
+
+        {status === "recorded" && previewUrlRef.current && (
+          <>
+            <AudioPlayer src={previewUrlRef.current} />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                onClick={onClose}
+                style={{ minHeight: 40, padding: "0 16px", border: `1px solid ${t.frost}`, borderRadius: t.radiusButton, background: t.white, color: t.edge2, fontSize: 13, fontWeight: 600, cursor: "pointer" }}
+              >
+                Discard
+              </button>
+              <button onClick={save} style={PRIMARY_BUTTON_STYLE}>
+                Save
+              </button>
+            </div>
+          </>
+        )}
+
+        {status === "saving" && <p style={{ fontSize: 13, color: t.edge2, margin: 0 }}>Saving…</p>}
+        {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+/* Add photo / video / voice note — sits at the top of SiteView. Photo/video
+   upload immediately on file selection; voice note opens VoiceNoteModal. */
+function SiteMediaUploadRow({ siteId, onUploaded, onVoiceNote }) {
+  const photoInputRef = useRef(null);
+  const videoInputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [showVoiceModal, setShowVoiceModal] = useState(false);
+
+  const handleFile = async (file) => {
+    if (!file) return;
+    setUploading(true);
+    try {
+      await postSiteMedia(siteId, file);
+      await onUploaded?.();
+    } catch (err) {
+      console.error("[sbm] media upload failed", err);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const actionButtonStyle = {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 14px",
+    minHeight: 40,
+    border: `1px solid ${t.frost}`,
+    borderRadius: t.radiusButton,
+    background: t.white,
+    color: t.edge,
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: uploading ? "wait" : "pointer",
+    whiteSpace: "nowrap",
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+      <input
+        ref={photoInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          handleFile(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
+      <input
+        ref={videoInputRef}
+        type="file"
+        accept="video/*"
+        capture="environment"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          handleFile(e.target.files?.[0]);
+          e.target.value = "";
+        }}
+      />
+      <button disabled={uploading} onClick={() => photoInputRef.current?.click()} style={actionButtonStyle}>
+        <Image size={15} /> Add photo
+      </button>
+      <button disabled={uploading} onClick={() => videoInputRef.current?.click()} style={actionButtonStyle}>
+        <Video size={15} /> Add video
+      </button>
+      <button disabled={uploading} onClick={() => setShowVoiceModal(true)} style={actionButtonStyle}>
+        <Mic size={15} /> Add voice note
+      </button>
+      {showVoiceModal && (
+        <VoiceNoteModal
+          onClose={() => setShowVoiceModal(false)}
+          onSave={async (blob, fileName) => {
+            await onVoiceNote(blob, fileName);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------
+   Site timeline — unified activity feed (calls incl. voice notes, media
+   uploads, team changes, site-detail edits), newest first. Extends the
+   borderLeft rail idiom already used for CallDetail's unresolved-items
+   block, with a dot marker per entry.
+   ------------------------------------------------------------------ */
+function timelineEntryIcon(entry) {
+  if (entry.type === "call") return entry.ref?.is_voice_memo ? <Mic size={13} /> : <FileText size={13} />;
+  if (entry.type === "media") return entry.ref?.media_type === "video" ? <Video size={13} /> : <Image size={13} />;
+  if (entry.type === "team_added") return <Users size={13} />;
+  return <FileText size={13} />;
+}
+
+function SiteTimelineEntry({ entry, onOpenCall }) {
+  const content = () => {
+    if (entry.type === "call") {
+      return (
+        <button
+          onClick={() => onOpenCall(entry.ref.call_id)}
+          style={{ display: "block", textAlign: "left", padding: 0, border: "none", background: "none", cursor: "pointer", color: t.edge, fontSize: 14, lineHeight: 1.6 }}
+        >
+          {entry.summary}
+        </button>
+      );
+    }
+    if (entry.type === "media") {
+      return (
+        <>
+          <span style={{ fontSize: 14, color: t.edge }}>{entry.summary}</span>
+          {entry.ref?.media_type === "photo" ? (
+            <img
+              src={`/api/media/${entry.ref.media_id}`}
+              alt=""
+              style={{ display: "block", marginTop: 6, maxWidth: "100%", maxHeight: 220, borderRadius: t.radiusButton, border: `1px solid ${t.frost}` }}
+            />
+          ) : (
+            <video
+              src={`/api/media/${entry.ref.media_id}`}
+              controls
+              style={{ display: "block", marginTop: 6, maxWidth: "100%", maxHeight: 220, borderRadius: t.radiusButton }}
+            />
+          )}
+        </>
+      );
+    }
+    return <span style={{ fontSize: 14, color: t.edge }}>{entry.summary}</span>;
+  };
+
+  return (
+    <div style={{ position: "relative", paddingLeft: 20, paddingBottom: 18 }}>
+      <span
+        style={{
+          position: "absolute",
+          left: -4.5,
+          top: 4,
+          width: 9,
+          height: 9,
+          borderRadius: "50%",
+          background: t.accent,
+          border: `2px solid ${t.white}`,
+        }}
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.edge2, marginBottom: 3 }}>
+        {timelineEntryIcon(entry)}
+        <span>{fmtDate(entry.created_at)}</span>
+        {entry.actor_name && <span>· {entry.actor_name}</span>}
+      </div>
+      {content()}
+      {entry.type === "call" && entry.ref?.is_voice_memo && <AudioPlayer src={`/api/calls/${entry.ref.call_id}/recording`} />}
+    </div>
+  );
+}
+
+function SiteTimeline({ entries, onOpenCall }) {
+  if (entries === null) return <p style={{ fontSize: 13, color: t.edge2 }}>Loading…</p>;
+  if (entries.length === 0) {
+    return (
+      <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
+        <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>Nothing recorded for this site yet.</p>
+      </Card>
+    );
+  }
+  return (
+    <div style={{ borderLeft: `2px solid ${t.frost}`, marginLeft: 4 }}>
+      {entries.map((entry) => (
+        <SiteTimelineEntry key={`${entry.type}-${entry.id}`} entry={entry} onOpenCall={onOpenCall} />
+      ))}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------
    Site view — drilldown from Tile 3, the sites directory, or the
    review screen. Calls tagged to this site (same shape as DayView,
    filtered by site instead of date), plus always-editable site details
    and an always-editable team roster — see the conversation that added
    this: "Always available, not conditional" on call/item count.
    ------------------------------------------------------------------ */
-function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, busyIds, onSiteUpdated }) {
+function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, autoEditDetails = false }) {
   const siteCalls = useMemo(
     () => sortCalls(calls.filter((c) => c.sites?.includes(site))),
     [calls, site]
@@ -1433,10 +1927,14 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
   const [pocName, setPocName] = useState(siteRecord?.poc_name ?? "");
   const [savingDetails, setSavingDetails] = useState(false);
   const [detailsSaved, setDetailsSaved] = useState(false);
-  const [editingDetails, setEditingDetails] = useState(false);
+  // Landing here straight from "Add new site" (see onSiteCreated) opens the
+  // details form immediately rather than requiring an extra tap, since the
+  // whole point of that flow was to keep filling this site in.
+  const [editingDetails, setEditingDetails] = useState(autoEditDetails && !hasDetails);
 
   const [team, setTeam] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [timeline, setTimeline] = useState(null);
 
   useEffect(() => {
     if (!siteRecord?.id) {
@@ -1456,6 +1954,23 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
       cancelled = true;
     };
   }, [siteRecord?.id]);
+
+  const loadTimeline = useCallback(() => {
+    if (!siteRecord?.id) {
+      setTimeline([]);
+      return Promise.resolve();
+    }
+    return fetchSiteTimeline(siteRecord.id)
+      .then((data) => setTimeline(data))
+      .catch((err) => {
+        console.error("[sbm] failed to load site timeline", err);
+        setTimeline([]);
+      });
+  }, [siteRecord?.id]);
+
+  useEffect(() => {
+    loadTimeline();
+  }, [loadTimeline]);
 
   const saveDetails = async () => {
     if (!siteRecord?.id) return;
@@ -1485,6 +2000,17 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
       <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
         {site}
       </h1>
+
+      {siteRecord?.id && (
+        <SiteMediaUploadRow
+          siteId={siteRecord.id}
+          onUploaded={loadTimeline}
+          onVoiceNote={async (blob, fileName) => {
+            await postSiteVoiceNote(siteRecord.id, blob, fileName);
+            await loadTimeline();
+          }}
+        />
+      )}
 
       {siteRecord?.id && (
         <Card style={{ marginBottom: 12 }}>
@@ -1582,25 +2108,119 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
         </Card>
       )}
 
-      {siteCalls.length === 0 ? (
-        <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
-          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No calls recorded for this site.</p>
-        </Card>
-      ) : (
-        siteCalls.map((call, i) => (
-          <CallCard
-            key={call.id}
-            index={i}
-            call={call}
-            onOpen={onOpen}
-            onToggle={onToggle}
-            onPark={onPark}
-            busyIds={busyIds}
-          />
-        ))
-      )}
+      <TileLabel>Timeline</TileLabel>
+      <div style={{ marginTop: 8 }}>
+        <SiteTimeline entries={timeline} onOpenCall={onOpen} />
+      </div>
 
       {showAssignModal && <AssignTeamModal onClose={() => setShowAssignModal(false)} onAdd={addTeamMember} />}
+    </div>
+  );
+}
+
+/* Popup for "Add new site" — name plus the same optional address/POC
+   fields SiteView's own details form uses (identical placeholders), so a
+   site created here looks no different from one filled in afterward.
+   Team assignment and photo/video/voice-note upload aren't collected here
+   — creating the site hands off straight into SiteView, where that flow
+   already exists, rather than duplicating it in this modal. */
+function AddSiteModal({ onClose, onCreate }) {
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [pocName, setPocName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      setError("Enter a site name.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onCreate(trimmedName, address.trim(), pocName.trim());
+    } catch (err) {
+      console.error("[sbm] failed to create site", err);
+      setError("Failed to create site — try again.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Add new site"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,24,31,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.25rem",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          background: t.white,
+          borderRadius: t.radiusCard,
+          padding: "1.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Add new site</span>
+        <input
+          autoFocus
+          placeholder="Site name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        <input
+          placeholder="Address"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        <input
+          placeholder="Point of contact name"
+          value={pocName}
+          onChange={(e) => setPocName(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          <button
+            onClick={onClose}
+            style={{
+              minHeight: 40,
+              padding: "0 16px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              background: t.white,
+              color: t.edge2,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button onClick={submit} disabled={saving} style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Adding…" : "Add site"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1610,10 +2230,11 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onToggle, onPark, b
    Every confirmed site with its current open-item count, alphabetical — a
    reference list, unlike Tile 3 itself which only shows sites that need
    triage. Tapping a row reuses the same per-site drilldown (SiteView) Tile
-   3's own rows link to.
+   3's own rows link to. Also the entry point for "Add new site".
    ------------------------------------------------------------------ */
-function SitesDirectoryView({ onBack, onOpenSite }) {
+function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated }) {
   const [sites, setSites] = useState(null);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -1634,9 +2255,29 @@ function SitesDirectoryView({ onBack, onOpenSite }) {
     <div>
       <BackLink onClick={onBack}>Back</BackLink>
 
-      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
-        Sites
-      </h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem", gap: 12 }}>
+        <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>Sites</h1>
+        <button
+          onClick={() => setShowAddModal(true)}
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            padding: "7px 12px",
+            border: `1px solid ${t.frost}`,
+            borderRadius: t.radiusButton,
+            background: t.white,
+            color: t.edge,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+          }}
+        >
+          <Plus size={14} /> Add new site
+        </button>
+      </div>
 
       {sites === null ? (
         <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
@@ -1671,6 +2312,17 @@ function SitesDirectoryView({ onBack, onOpenSite }) {
             </button>
           ))}
         </Card>
+      )}
+
+      {showAddModal && (
+        <AddSiteModal
+          onClose={() => setShowAddModal(false)}
+          onCreate={async (name, address, pocName) => {
+            const site = await onSiteCreated(name, address, pocName);
+            setShowAddModal(false);
+            return site;
+          }}
+        />
       )}
     </div>
   );
@@ -1824,6 +2476,293 @@ function SitesReviewView({ sites, onBack, onSaved }) {
   );
 }
 
+/* ------------------------------------------------------------------
+   Login gate — name + short PIN, session cookie set by POST /api/login.
+   See src/lib/auth.ts. Shown in place of the whole dashboard until
+   GET /api/me succeeds.
+   ------------------------------------------------------------------ */
+function LoginScreen({ onLogin }) {
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    if (!name.trim() || !pin.trim()) {
+      setError("Enter your name and PIN.");
+      return;
+    }
+    setSubmitting(true);
+    setError("");
+    try {
+      const me = await postLogin(name.trim(), pin.trim());
+      onLogin(me);
+    } catch (err) {
+      setError(err.message || "Login failed.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ background: t.pane, minHeight: "100vh", fontFamily: t.body, display: "flex", alignItems: "center", justifyContent: "center", padding: "1.25rem" }}>
+      <form
+        onSubmit={submit}
+        style={{ width: "100%", maxWidth: 340, background: t.white, border: `1px solid ${t.frost}`, borderRadius: t.radiusCard, padding: "1.75rem 1.5rem", display: "flex", flexDirection: "column", gap: 12 }}
+      >
+        <span style={{ fontFamily: t.display, fontSize: 18, fontWeight: 500, color: t.edge, marginBottom: 4 }}>
+          Simple Business Manager
+        </span>
+        <input
+          autoFocus
+          placeholder="Name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        <input
+          type="password"
+          inputMode="numeric"
+          placeholder="PIN"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+        <button type="submit" disabled={submitting} style={{ ...PRIMARY_BUTTON_STYLE, opacity: submitting ? 0.6 : 1 }}>
+          {submitting ? "Logging in…" : "Log in"}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/* Popup for self-service PIN reset — requires the current PIN (not the
+   admin X-SBM-Key), same modal idiom as AssignTeamModal/VoiceNoteModal. */
+function ResetPinModal({ onClose, onReset }) {
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const submit = async () => {
+    if (!/^\d{4,6}$/.test(newPin)) {
+      setError("New PIN must be 4-6 digits.");
+      return;
+    }
+    if (newPin !== confirmPin) {
+      setError("New PIN and confirmation don't match.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onReset(currentPin, newPin);
+      onClose();
+    } catch (err) {
+      setError(err.message || "Failed to reset PIN.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Reset PIN"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,24,31,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.25rem",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 360,
+          background: t.white,
+          borderRadius: t.radiusCard,
+          padding: "1.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Reset PIN</span>
+        <input
+          autoFocus
+          type="password"
+          inputMode="numeric"
+          placeholder="Current PIN"
+          value={currentPin}
+          onChange={(e) => setCurrentPin(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        <input
+          type="password"
+          inputMode="numeric"
+          placeholder="New PIN (4-6 digits)"
+          value={newPin}
+          onChange={(e) => setNewPin(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        <input
+          type="password"
+          inputMode="numeric"
+          placeholder="Confirm new PIN"
+          value={confirmPin}
+          onChange={(e) => setConfirmPin(e.target.value)}
+          style={TEXT_INPUT_STYLE}
+        />
+        {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          <button
+            onClick={onClose}
+            style={{
+              minHeight: 40,
+              padding: "0 16px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              background: t.white,
+              color: t.edge2,
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button onClick={submit} disabled={saving} style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Account menu — standard top-right "my account" pattern, in the blue
+   header. Tap the name to open a small dropdown (Reset PIN, Log out);
+   click-outside or Escape closes it. Reset PIN opens the same ResetPinModal
+   used before, just triggered from here now. */
+function AccountMenu({ me, onLogout, onResetPin }) {
+  const [open, setOpen] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocPointerDown = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const menuItemStyle = {
+    display: "flex",
+    alignItems: "center",
+    width: "100%",
+    padding: "10px 14px",
+    border: "none",
+    background: "none",
+    color: t.edge,
+    fontSize: 13,
+    fontWeight: 600,
+    fontFamily: t.body,
+    textAlign: "left",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: "relative" }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "5px 10px",
+          border: "none",
+          borderRadius: t.radiusButton,
+          background: open ? "rgba(255,255,255,0.16)" : "none",
+          color: t.white,
+          fontSize: 13,
+          fontWeight: 600,
+          fontFamily: t.body,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        <User size={14} />
+        {me?.name}
+        <ChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 120ms ease" }} />
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            top: "calc(100% + 6px)",
+            right: 0,
+            minWidth: 170,
+            background: t.white,
+            border: `1px solid ${t.frost}`,
+            borderRadius: t.radiusButton,
+            boxShadow: "0 8px 24px rgba(20,24,31,0.22)",
+            overflow: "hidden",
+            zIndex: 50,
+          }}
+        >
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setShowResetModal(true);
+            }}
+            style={menuItemStyle}
+          >
+            Reset PIN
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              onLogout();
+            }}
+            style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+          >
+            Log out
+          </button>
+        </div>
+      )}
+
+      {showResetModal && <ResetPinModal onClose={() => setShowResetModal(false)} onReset={onResetPin} />}
+    </div>
+  );
+}
+
 export default function SimpleBusinessManager() {
   const [calls, setCalls] = useState([]);
   const [escalations, setEscalations] = useState([]);
@@ -1834,7 +2773,28 @@ export default function SimpleBusinessManager() {
   const [view, setView] = useState({ name: "home" });
   const [busyIds, setBusyIds] = useState(new Set());
 
+  /* undefined = checking, null = logged out, object = logged in. See
+     src/lib/auth.ts / LoginScreen above — additive session-cookie auth,
+     the whole dashboard is now gated behind it. */
+  const [me, setMe] = useState(undefined);
+
   useEffect(() => {
+    let cancelled = false;
+    fetchMe()
+      .then((data) => {
+        if (!cancelled) setMe(data);
+      })
+      .catch((err) => {
+        console.error("[sbm] session check failed", err);
+        if (!cancelled) setMe(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!me) return;
     let cancelled = false;
     Promise.all([fetchCalls(), fetchEscalations(), fetchSitesAttention(), fetchSites()])
       .then(([callsData, escalationsData, attentionData, sitesData]) => {
@@ -1854,6 +2814,15 @@ export default function SimpleBusinessManager() {
     return () => {
       cancelled = true;
     };
+  }, [me]);
+
+  const onLogout = useCallback(async () => {
+    await postLogout();
+    setMe(null);
+  }, []);
+
+  const onResetPin = useCallback(async (currentPin, newPin) => {
+    await postResetPin(currentPin, newPin);
   }, []);
 
   const refreshSites = useCallback(async () => {
@@ -1861,6 +2830,20 @@ export default function SimpleBusinessManager() {
     setAllSites(sitesData);
     setSitesAttention(attentionData);
   }, []);
+
+  /* "Add new site": create, refresh the site list so SiteView can find the
+     new record, then hand off straight into SiteView — team assignment and
+     photo/video/voice-note upload already exist there, no need to
+     duplicate that flow in the creation modal itself. */
+  const onSiteCreated = useCallback(
+    async (name, address, pocName) => {
+      const site = await postCreateSite(name, address, pocName);
+      await refreshSites();
+      setView({ name: "site", site: site.name, from: { name: "sites-directory" }, autoEdit: true });
+      return site;
+    },
+    [refreshSites]
+  );
 
   const onAddEscalation = useCallback(async (text) => {
     const created = await postEscalation(text, null);
@@ -2022,6 +3005,9 @@ export default function SimpleBusinessManager() {
     </div>
   );
 
+  if (me === undefined) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
+  if (me === null) return <LoginScreen onLogin={setMe} />;
+
   if (loading) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
   if (loadError) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Couldn't load calls: {loadError}</p>);
 
@@ -2057,10 +3043,8 @@ export default function SimpleBusinessManager() {
         calls={calls}
         onBack={() => setView(view.from ?? { name: "home" })}
         onOpen={(id) => setView({ name: "call", id, from: { name: "site", site: view.site, from: view.from } })}
-        onToggle={onToggle}
-        onPark={onPark}
-        busyIds={busyIds}
         onSiteUpdated={refreshSites}
+        autoEditDetails={Boolean(view.autoEdit)}
       />
     );
 
@@ -2072,6 +3056,7 @@ export default function SimpleBusinessManager() {
       <SitesDirectoryView
         onBack={() => setView({ name: "home" })}
         onOpenSite={(site) => setView({ name: "site", site, from: { name: "sites-directory" } })}
+        onSiteCreated={onSiteCreated}
       />
     );
 
@@ -2089,7 +3074,10 @@ export default function SimpleBusinessManager() {
           <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
             Simple Business Manager
           </span>
-          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
+            <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} />
+          </div>
         </header>
 
         <StreakWall
