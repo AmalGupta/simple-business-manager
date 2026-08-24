@@ -2191,7 +2191,7 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
             Site details
           </TileLabel>
 
-          {canManage && editingDetails && (
+          {canManage && editingDetails ? (
             <>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
                 <input
@@ -2213,9 +2213,13 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
                 </button>
               </div>
             </>
-          )}
-
-          {!canManage && (
+          ) : (
+            // Read-only summary of whatever's currently saved — shown for
+            // everyone, not just staff, and not only while the edit form
+            // happens to be open. Previously an admin had no way to see a
+            // site's saved address/point-of-contact without re-opening the
+            // edit form every visit, which read as "the details I added
+            // aren't there when I come back."
             <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontSize: 14, color: t.edge }}>{siteRecord?.address?.trim() || "No address on file."}</span>
               {siteRecord?.poc_name?.trim() && (
