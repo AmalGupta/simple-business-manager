@@ -5,7 +5,7 @@
 
 export const STAFF_ROSTER = [
   "Mishra", "Gaurav", "Neeraj", "Shubham", "Shivam", "Anand", "Azeem",
-  "Tanzeem", "Manglesh", "Ravi", "Rupam", "Vishal", "Manjeet", "Harisharan", "Jaskaran", "Brijesh",
+  "Tanseem", "Manglesh", "Ravi", "Rupam", "Vishal", "Manjeet", "Harisharan", "Jaskaran", "Brijesh",
 ];
 
 export const SITE_ROSTER = [
