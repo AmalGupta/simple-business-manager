@@ -75,7 +75,7 @@ function uploadPageHtml(sbmKey: string, summary: InsightsSummary): string {
   <div class="header-bar"><h1>Upload a call recording</h1></div>
   <main>
     <form id="f">
-      <input type="file" name="recording" accept="audio/*,.wav,.m4a,.mp3,.aac,.mp4,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/mpeg,audio/aac,video/mp4" required />
+      <input type="file" name="recording" accept="audio/*,.wav,.m4a,.mp3,.aac,.mp4,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,audio/mpeg,audio/aac" required />
       <button type="submit">Upload</button>
     </form>
     <p id="status"></p>
