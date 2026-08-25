@@ -582,15 +582,27 @@ export async function updateSite(
     const values = fields.map((f) => patch[f] ?? null);
     const statements = [db.prepare(`UPDATE sites SET ${setClause} WHERE id = ?`).bind(...values, id)];
 
-    const detailFields = fields.filter((f) => f === "address" || f === "poc_name" || f === "target_closure_date");
+    const detailFields = fields.filter((f) => f === "address" || f === "poc_name");
     if (detailFields.length > 0) {
-      const labels = detailFields
-        .map((f) => (f === "poc_name" ? "point of contact" : f === "target_closure_date" ? "target closure date" : f))
-        .join(", ");
+      const labels = detailFields.map((f) => (f === "poc_name" ? "point of contact" : f)).join(", ");
       statements.push(
         db
           .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
           .bind(crypto.randomUUID(), id, actorUserId ?? null, `${labels[0].toUpperCase()}${labels.slice(1)} updated`)
+      );
+    }
+
+    // A dedicated, value-bearing entry rather than folding into the generic
+    // "Address, point of contact updated" line above — everyone watching
+    // this site (admin/superadmin and staff both read the same timeline)
+    // needs to see *what* the new date is without opening the edit form.
+    if (fields.includes("target_closure_date")) {
+      const value = patch.target_closure_date ?? null;
+      const summary = value ? `Target closure date updated to ${value}` : `Target closure date cleared`;
+      statements.push(
+        db
+          .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
+          .bind(crypto.randomUUID(), id, actorUserId ?? null, summary)
       );
     }
     await db.batch(statements);

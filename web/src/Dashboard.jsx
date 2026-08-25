@@ -2541,6 +2541,11 @@ function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated, canManage = tru
                     </span>
                   )}
                   <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
+                  {s.target_closure_date && (
+                    <span style={{ fontSize: 12, color: missed ? t.signal : t.edge2, fontWeight: missed ? 700 : 400 }}>
+                      Due {fmtShort(s.target_closure_date)}
+                    </span>
+                  )}
                 </span>
                 <span style={{ fontSize: 12, color: missed ? t.signal : t.edge2, fontWeight: missed ? 700 : 400 }}>
                   {missed ? `missed ${Math.abs(daysUntil(s.target_closure_date))}d` : `${s.open_count} open`}
