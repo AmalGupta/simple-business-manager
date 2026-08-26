@@ -28,6 +28,7 @@ import {
 const t = {
   pane: "var(--color-canvas)",
   edge: "var(--color-ink)",
+  edgeStrong: "var(--color-ink-emphasis)",
   edge2: "var(--color-slate)",
   frost: "var(--color-line)",
   frostSoft: "var(--color-line-soft)",
@@ -39,6 +40,7 @@ const t = {
   unread: "var(--color-unread)",
   white: "var(--color-surface)",
   display: "var(--font-display)",
+  label: "var(--font-label)",
   body: "var(--font-body)",
   radius: "var(--radius-badge)",
   radiusCard: "var(--radius-card)",
@@ -697,6 +699,17 @@ function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, on
 }
 
 /* ------------------------------------------------------------------ */
+/* Sentence-format rendering of a structured todo — same {owner, text,
+   due_date} the extraction pipeline already produces via forced tool-use
+   (TodoRow below renders it as a checklist row); this just phrases it as a
+   sentence for the admin Recordings review panel. No change to extraction
+   itself — see docs/SCAFFOLDING.md §6. */
+function formatTodoSentence(todo) {
+  const owner = todo.owner === "self" ? "He" : todo.owner;
+  const due = todo.due_date ? fmtShort(todo.due_date) : "date not mentioned";
+  return `${owner} is assigned ${todo.text}, to be done by ${due}`;
+}
+
 function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
   const done = todo.status === "done";
   const parked = todo.status === "snoozed";
@@ -824,7 +837,16 @@ function WaitingTag() {
   );
 }
 
-function Card({ children, style, className }) {
+/* Flat white surface, hairline border, one shared radius — every Card
+   usage renders the same skin now (see docs/DESIGN_LANGUAGE.md "Surface").
+   `tile` no longer changes the skin; it only fixes the card to
+   --tile-height and lays it out as a column flexbox, so the home-grid
+   tiles stay symmetrical regardless of content — a tile with a
+   variable-length list (SitesAttentionTile, EscalationsTile) scrolls
+   internally rather than growing taller than its neighbours. See those
+   components for the `flex: 1; overflowY: auto` content wrapper that
+   makes that scrolling work. */
+function Card({ children, style, className, tile = false }) {
   return (
     <div
       className={className}
@@ -833,6 +855,7 @@ function Card({ children, style, className }) {
         border: `1px solid ${t.frost}`,
         borderRadius: t.radiusCard,
         padding: "1rem 1.25rem",
+        ...(tile ? { height: "var(--tile-height)", display: "flex", flexDirection: "column" } : {}),
         ...style,
       }}
     >
@@ -1379,7 +1402,18 @@ function EmptyState() {
 function TileLabel({ children, action }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-      <span style={{ fontSize: 12, color: t.edge2 }}>{children}</span>
+      <span
+        style={{
+          fontFamily: t.label,
+          fontSize: 11,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          color: t.edge,
+        }}
+      >
+        {children}
+      </span>
       {action}
     </div>
   );
@@ -1391,6 +1425,28 @@ function TileLabel({ children, action }) {
 const TILE_ROW_STYLE = {
   padding: "10px 0",
   borderTop: `1px solid ${t.frost}`,
+};
+
+/* The value row in a fixed-height number tile (StatCard, StaffTile,
+   WorkflowTilesRow, "calls logged", "recordings") — grows to fill the
+   tile's remaining --tile-height below the label and centers the number
+   in it, so every number tile looks the same regardless of row position. */
+const TILE_VALUE_ROW_STYLE = {
+  flex: 1,
+  display: "flex",
+  alignItems: "center",
+};
+
+/* The numeral itself, inside TILE_VALUE_ROW_STYLE — accent-blue and bold
+   rather than ink-black, so color reads as a deliberate signal on the one
+   thing worth it, not decoration applied everywhere. See
+   docs/DESIGN_LANGUAGE.md "Color". */
+const TILE_NUMBER_STYLE = {
+  fontFamily: t.display,
+  fontSize: 32,
+  fontWeight: 700,
+  lineHeight: 1,
+  color: t.accent,
 };
 
 const TEXT_INPUT_STYLE = {
@@ -1418,12 +1474,10 @@ const PRIMARY_BUTTON_STYLE = {
 
 function StatCard({ value, label }) {
   return (
-    <Card>
+    <Card tile>
       <TileLabel>{label}</TileLabel>
-      <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-        <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-          {value}
-        </span>
+      <div style={TILE_VALUE_ROW_STYLE}>
+        <span style={TILE_NUMBER_STYLE}>{value}</span>
       </div>
     </Card>
   );
@@ -1439,12 +1493,10 @@ function StaffTile({ count, onOpen }) {
       style={{ all: "unset", cursor: "pointer", display: "block" }}
       aria-label={`Staff — ${count} people`}
     >
-      <Card>
+      <Card tile>
         <TileLabel action={<Users size={14} color={t.edge2} />}>staff</TileLabel>
-        <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-          <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-            {count}
-          </span>
+        <div style={TILE_VALUE_ROW_STYLE}>
+          <span style={TILE_NUMBER_STYLE}>{count}</span>
         </div>
       </Card>
     </button>
@@ -1473,12 +1525,10 @@ function WorkflowTilesRow({ tasks, onOpenCategory }) {
       style={{ all: "unset", cursor: "pointer", display: "block" }}
       aria-label={`${c.label} — ${counts.get(c.key)} open`}
     >
-      <Card>
+      <Card tile>
         <TileLabel>{c.label}</TileLabel>
-        <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-          <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-            {counts.get(c.key)}
-          </span>
+        <div style={TILE_VALUE_ROW_STYLE}>
+          <span style={TILE_NUMBER_STYLE}>{counts.get(c.key)}</span>
         </div>
       </Card>
     </button>
@@ -1556,42 +1606,48 @@ function SitesAttentionTile({ sites, onOpenSite, onReviewSites, onViewDirectory,
   const showEmptyState = sites.length === 0 && !hasAnySites;
 
   return (
-    <Card>
+    <Card tile>
       <TileLabel>Sites needing attention</TileLabel>
-      {showEmptyState && <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing needs attention.</p>}
-      {sites.map((s) => (
-        <button
-          key={s.id}
-          onClick={() => onOpenSite(s.name)}
-          style={{
-            display: "flex",
-            width: "100%",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            ...TILE_ROW_STYLE,
-            margin: 0,
-            border: "none",
-            borderTop: `1px solid ${t.frost}`,
-            background: "none",
-            cursor: "pointer",
-            textAlign: "left",
-            fontFamily: t.body,
-          }}
-        >
-          <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
-          <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: t.edge2 }}>
-            <span>
-              {s.open_count} open · {s.oldest_age_days}d
+      {/* Scrolls internally past --tile-height rather than growing the tile
+          — see the Card `tile` comment. The two footer links below stay
+          pinned outside this region so they're always reachable. */}
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+        {showEmptyState && <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing needs attention.</p>}
+        {sites.map((s) => (
+          <button
+            key={s.id}
+            onClick={() => onOpenSite(s.name)}
+            style={{
+              display: "flex",
+              width: "100%",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: 10,
+              ...TILE_ROW_STYLE,
+              margin: 0,
+              border: "none",
+              borderTop: `1px solid ${t.frost}`,
+              background: "none",
+              cursor: "pointer",
+              textAlign: "left",
+              fontFamily: t.body,
+            }}
+          >
+            <span style={{ fontSize: 14, fontWeight: 500, color: t.edgeStrong }}>{s.name}</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: t.edge2 }}>
+              <span>
+                {s.open_count} open · {s.oldest_age_days}d
+              </span>
             </span>
-          </span>
-        </button>
-      ))}
+          </button>
+        ))}
+      </div>
       {confirmedCount > 0 && (
         <button
           onClick={onViewDirectory}
           style={{
             display: "block",
+            flexShrink: 0,
             width: "100%",
             textAlign: "left",
             padding: "10px 0 0",
@@ -1612,6 +1668,7 @@ function SitesAttentionTile({ sites, onOpenSite, onReviewSites, onViewDirectory,
         onClick={onReviewSites}
         style={{
           display: "block",
+          flexShrink: 0,
           width: "100%",
           textAlign: "left",
           padding: "10px 0 0",
@@ -1678,11 +1735,11 @@ function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
   );
 
   return (
-    <Card>
+    <Card tile>
       <TileLabel action={addButton}>Escalations</TileLabel>
 
       {adding && (
-        <div style={{ display: "flex", gap: 8, ...TILE_ROW_STYLE }}>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0, ...TILE_ROW_STYLE }}>
           <input
             autoFocus
             value={text}
@@ -1701,39 +1758,43 @@ function EscalationsTile({ escalations, onAdd, onClose, busyIds }) {
         </div>
       )}
 
-      {escalations.length === 0 ? (
-        <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing escalated.</p>
-      ) : (
-        escalations.map((e) => (
-          <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, ...TILE_ROW_STYLE }}>
-            <button
-              onClick={() => onClose(e.id)}
-              disabled={busyIds.has(e.id)}
-              aria-label={`Close: ${e.text}`}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: 44,
-                height: 44,
-                margin: "-11px 0 -11px -11px",
-                flexShrink: 0,
-                padding: 0,
-                border: "none",
-                background: "none",
-                cursor: busyIds.has(e.id) ? "wait" : "pointer",
-                color: t.edge2,
-              }}
-            >
-              <Circle size={17} strokeWidth={1.75} />
-            </button>
-            <div style={{ flex: 1, fontSize: 14, lineHeight: 1.5, color: t.edge }}>
-              {e.text}
-              {e.site_name && <span style={{ display: "block", fontSize: 11, color: t.edge2, marginTop: 2 }}>{e.site_name}</span>}
+      {/* Scrolls internally past --tile-height rather than growing the tile
+          — see the Card `tile` comment. */}
+      <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
+        {escalations.length === 0 ? (
+          <p style={{ fontSize: 13, color: t.edge2, margin: "10px 0 0" }}>Nothing escalated.</p>
+        ) : (
+          escalations.map((e) => (
+            <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, ...TILE_ROW_STYLE }}>
+              <button
+                onClick={() => onClose(e.id)}
+                disabled={busyIds.has(e.id)}
+                aria-label={`Close: ${e.text}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 44,
+                  height: 44,
+                  margin: "-11px 0 -11px -11px",
+                  flexShrink: 0,
+                  padding: 0,
+                  border: "none",
+                  background: "none",
+                  cursor: busyIds.has(e.id) ? "wait" : "pointer",
+                  color: t.edge2,
+                }}
+              >
+                <Circle size={17} strokeWidth={1.75} />
+              </button>
+              <div style={{ flex: 1, fontSize: 14, lineHeight: 1.5, color: t.edge }}>
+                {e.text}
+                {e.site_name && <span style={{ display: "block", fontSize: 11, color: t.edge2, marginTop: 2 }}>{e.site_name}</span>}
+              </div>
             </div>
-          </div>
-        ))
-      )}
+          ))
+        )}
+      </div>
     </Card>
   );
 }
@@ -3173,7 +3234,7 @@ function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated, canManage = tru
                       {s.unread_count}
                     </span>
                   )}
-                  <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: t.edgeStrong }}>{s.name}</span>
                   {s.target_closure_date && (
                     <span style={{ fontSize: 12, color: missed ? t.signal : t.edge2, fontWeight: missed ? 700 : 400 }}>
                       Due {fmtShort(s.target_closure_date)}
@@ -4076,9 +4137,7 @@ function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds }) {
           <Card style={{ borderColor: filter === "important" ? t.accent : t.frost }}>
             <TileLabel>Important calls</TileLabel>
             <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-                {importantCalls.length}
-              </span>
+              <span style={TILE_NUMBER_STYLE}>{importantCalls.length}</span>
             </div>
           </Card>
         </button>
@@ -4086,9 +4145,7 @@ function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds }) {
           <Card style={{ borderColor: filter === "regular" ? t.accent : t.frost }}>
             <TileLabel>Regular calls</TileLabel>
             <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-                {regularCalls.length}
-              </span>
+              <span style={TILE_NUMBER_STYLE}>{regularCalls.length}</span>
             </div>
           </Card>
         </button>
@@ -4118,6 +4175,68 @@ function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds }) {
             </DownloadButton>
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+/* Recordings — admin/superadmin-only control, separate from the Calls page
+   above. Where Calls is day-to-day todo triage (checklist rows, park/close),
+   this is a review surface over the raw recordings themselves: play the
+   audio back, see each extracted todo phrased as a plain sentence
+   (formatTodoSentence) rather than a checkbox. Reuses the same `calls` list
+   already loaded for an admin session — no separate fetch. Recording
+   playback itself is scoped server-side (GET /api/calls/:id/recording,
+   src/handlers/site-media.ts); this view is only ever reachable by
+   admin/superadmin in the first place, same as CallsPageView. */
+function RecordingsPageView({ calls, onBack, onOpen }) {
+  const ordered = useMemo(() => sortCalls(calls), [calls]);
+
+  return (
+    <div>
+      <BackLink onClick={onBack}>Back</BackLink>
+      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
+        Recordings
+      </h1>
+
+      {ordered.length === 0 ? (
+        <EmptyState />
+      ) : (
+        ordered.map((call) => (
+          <Card key={call.id} style={{ marginBottom: 12 }}>
+            <button
+              onClick={() => onOpen(call.id)}
+              style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 500, color: t.edge }}>
+                  {call.client_name}
+                </span>
+                <span style={{ fontSize: 12, color: t.edge2, whiteSpace: "nowrap" }}>
+                  {fmtDate(call.recorded_at)}
+                  {call.duration_s ? ` · ${Math.round(call.duration_s / 60)} min` : ""}
+                </span>
+              </div>
+            </button>
+
+            {call.transcript == null ? (
+              <span style={{ display: "flex", alignItems: "center", gap: 8, color: t.edge2, fontSize: 13, marginTop: 8 }}>
+                <FileText size={16} />
+                Transcription in progress
+              </span>
+            ) : (
+              <AudioPlayer src={`/api/calls/${call.id}/recording`} />
+            )}
+
+            {call.todos.length > 0 && (
+              <ul style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 13, lineHeight: 1.8, color: t.edge2 }}>
+                {call.todos.map((td) => (
+                  <li key={td.id}>{formatTodoSentence(td)}</li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        ))
       )}
     </div>
   );
@@ -4545,6 +4664,15 @@ export default function SimpleBusinessManager() {
       />
     );
 
+  if (view.name === "recordings")
+    return shell(
+      <RecordingsPageView
+        calls={calls}
+        onBack={() => setView(homeView)}
+        onOpen={(id) => setView({ name: "call", id, from: { name: "recordings" } })}
+      />
+    );
+
   if (view.name === "sites-review")
     return shell(<SitesReviewView sites={allSites} onBack={() => setView(homeView)} onSaved={refreshSites} />);
 
@@ -4654,15 +4782,15 @@ export default function SimpleBusinessManager() {
           call-card feed moved to its own page (see "calls" view) — both per
           the admin-overview revision to this plan; "closed today" kept its
           original position. 2 columns on a phone; auto-widens toward one
-          row as space allows. align-items:start keeps each card its own
-          natural height instead of stretching short stat cards to match the
-          taller list cards. */}
+          row as space allows. Every tile is fixed to --tile-height (see the
+          Card `tile` variant) so the grid stays symmetrical regardless of
+          content — list tiles (SitesAttentionTile, EscalationsTile) scroll
+          internally instead of growing taller than their neighbours. */}
       <div
         style={{
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
           gap: 12,
-          alignItems: "start",
           marginBottom: "1.5rem",
         }}
       >
@@ -4695,12 +4823,25 @@ export default function SimpleBusinessManager() {
           style={{ all: "unset", cursor: "pointer", display: "block" }}
           aria-label={`Calls logged — ${callsCount}`}
         >
-          <Card>
+          <Card tile>
             <TileLabel>calls logged</TileLabel>
-            <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-                {callsCount}
-              </span>
+            <div style={TILE_VALUE_ROW_STYLE}>
+              <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
+            </div>
+          </Card>
+        </button>
+        {/* Admin/superadmin only, same as "calls logged" — staff never load
+            this home view at all (see homeView above). Separate control from
+            Calls: recordings + sentence-format todos, not a todo checklist. */}
+        <button
+          onClick={() => setView({ name: "recordings" })}
+          style={{ all: "unset", cursor: "pointer", display: "block" }}
+          aria-label={`Recordings — ${callsCount}`}
+        >
+          <Card tile>
+            <TileLabel>recordings</TileLabel>
+            <div style={TILE_VALUE_ROW_STYLE}>
+              <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
             </div>
           </Card>
         </button>
