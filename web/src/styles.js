@@ -52,3 +52,15 @@ export const PRIMARY_BUTTON_STYLE = {
   fontWeight: 700,
   cursor: "pointer",
 };
+
+export const SMALL_SECONDARY_BUTTON_STYLE = {
+  padding: "6px 12px",
+  border: `1px solid ${t.frost}`,
+  borderRadius: t.radiusButton,
+  background: t.white,
+  color: t.edge,
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
