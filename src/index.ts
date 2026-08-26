@@ -26,6 +26,7 @@ import {
   handlePostEscalation,
   handlePostSitesBackfill,
   handlePostSiteTeamMember,
+  handleReExtractCall,
   handleRetryCallStt,
 } from "./handlers/api";
 import {
@@ -140,6 +141,12 @@ export default {
     if (retryMatch && request.method === "POST") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleRetryCallStt(request, env, retryMatch[1]);
+    }
+
+    const reExtractMatch = url.pathname.match(/^\/api\/calls\/([^/]+)\/re-extract$/);
+    if (reExtractMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleReExtractCall(request, env, reExtractMatch[1]);
     }
 
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);

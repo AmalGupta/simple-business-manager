@@ -12,6 +12,7 @@ import {
   createSite,
   getCallById,
   getCallsCount,
+  getCallDiarizedForExtract,
   getCallWithTodos,
   getConfirmedSitesSummary,
   getDashboardSummary,
@@ -27,12 +28,15 @@ import {
   listOpenEscalations,
   listSiteTeamMembers,
   listSites,
+  replaceExtraction,
   setCallFailed,
   setCallSubmitted,
   updateSite,
   updateTodo,
   type SessionWithUser,
 } from "@sbm/core";
+import { ACTIVE } from "../../packages/core/prompts";
+import { extractCall } from "../../packages/core/prompts/extract";
 import { scanCallForSites } from "../../packages/core/prompts/site-scan";
 import { requireSession } from "../lib/auth";
 import { submitRecording } from "../lib/sarvam";
@@ -129,6 +133,39 @@ export async function handleRetryCallStt(request: Request, env: Env, id: string)
   } catch (err) {
     await setCallFailed(env.DB, id, `submit: ${String(err)}`);
     return json({ error: String(err) }, 502);
+  }
+}
+
+/**
+ * Re-run ACTIVE prompt extraction on an already-transcribed call. Used after
+ * a prompt version bump (e.g. v2 → v3) to refresh LLM todos without re-STT.
+ * Preserves manual todos; replaces llm-origin todos and all commitments.
+ */
+export async function handleReExtractCall(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  if (!env.ANTHROPIC_API_KEY) return json({ error: "ANTHROPIC_API_KEY not configured" }, 500);
+
+  const payload = await getCallDiarizedForExtract(env.DB, id);
+  if (!payload) return json({ error: "not found" }, 404);
+  if (payload.entries.length === 0) {
+    return json({ error: "no diarized transcript to extract" }, 400);
+  }
+
+  try {
+    const extraction = await extractCall({
+      apiKey: env.ANTHROPIC_API_KEY,
+      model: env.ANTHROPIC_MODEL,
+      clientName: null,
+      recordedAt: payload.recorded_at,
+      entries: payload.entries,
+    });
+    await replaceExtraction(env.DB, id, extraction, ACTIVE.version);
+    const call = await getCallWithTodos(env.DB, id);
+    return json({ ok: true, prompt_version: ACTIVE.version, todo_count: call?.todos?.length ?? 0, call });
+  } catch (err) {
+    return json({ error: `extraction: ${String(err)}` }, 502);
   }
 }
 

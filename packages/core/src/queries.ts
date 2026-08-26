@@ -5,6 +5,7 @@ import type {
   CallExtraction,
   CallSource,
   CallType,
+  DiarizedEntry,
   Escalation,
   EscalationStatus,
   SiteMedia,
@@ -227,6 +228,52 @@ export async function saveExtraction(
   }
 
   await db.batch(statements);
+}
+
+/**
+ * Re-run extraction for an existing call: drop prior LLM todos and all
+ * commitments for that call, then saveExtraction (writes prompt_version and
+ * new rows). Manual todos (origin != 'llm') are preserved. call_sites rows
+ * already present are left alone (INSERT OR IGNORE in saveExtraction).
+ */
+export async function replaceExtraction(
+  db: D1Database,
+  callId: string,
+  extraction: CallExtraction,
+  promptVersion: string
+): Promise<void> {
+  await db.batch([
+    db.prepare(`DELETE FROM todos WHERE call_id = ? AND origin = 'llm'`).bind(callId),
+    db.prepare(`DELETE FROM commitments WHERE call_id = ?`).bind(callId),
+  ]);
+  await saveExtraction(db, callId, extraction, promptVersion);
+}
+
+/** Diarized entries + recorded_at for re-extract / offline eval. */
+export async function getCallDiarizedForExtract(
+  db: D1Database,
+  callId: string
+): Promise<{ recorded_at: string | null; entries: DiarizedEntry[] } | null> {
+  const row = await db
+    .prepare(
+      `SELECT calls.recorded_at AS recorded_at, transcripts.diarized_transcript AS diarized_transcript
+       FROM calls
+       LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
+       WHERE calls.id = ?`
+    )
+    .bind(callId)
+    .first<{ recorded_at: string | null; diarized_transcript: string | null }>();
+  if (!row) return null;
+  let entries: DiarizedEntry[] = [];
+  if (row.diarized_transcript) {
+    try {
+      const parsed = JSON.parse(row.diarized_transcript) as { entries?: DiarizedEntry[] };
+      entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+    } catch {
+      entries = [];
+    }
+  }
+  return { recorded_at: row.recorded_at, entries };
 }
 
 // ---------------------------------------------------------------------------

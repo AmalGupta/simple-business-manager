@@ -27,6 +27,13 @@ interface GoldenCase {
   expected: Partial<CallExtraction>;
 }
 
+/** Roster / STT aliases — Tanseem in roster often appears as Tanzeem in diarization. */
+function normalizeOwner(owner: string | null | undefined): string {
+  const o = (owner ?? "").trim().toLowerCase();
+  if (o === "tanzeem") return "tanseem";
+  return o;
+}
+
 /** Only what docs/ADDITIONAL_FEATURES_M0.md "The prompt layer"-equivalent scoring says is worth scoring: deadlines, quantities, names, amounts. */
 function scoreFields(expected: Partial<CallExtraction>, actual: CallExtraction) {
   const results: Array<{ field: string; pass: boolean; expected: unknown; actual: unknown }> = [];
@@ -41,11 +48,26 @@ function scoreFields(expected: Partial<CallExtraction>, actual: CallExtraction) 
   }
 
   if (expected.todos) {
+    results.push({
+      field: "todos.length",
+      pass: actual.todos.length >= expected.todos.length,
+      expected: `>= ${expected.todos.length}`,
+      actual: actual.todos.length,
+    });
+    const used = new Set<number>();
     expected.todos.forEach((expTodo, i) => {
-      const actTodo = actual.todos[i];
+      const expOwner = normalizeOwner(expTodo.owner);
+      let actIdx = actual.todos.findIndex(
+        (t, j) => !used.has(j) && normalizeOwner(t.owner) === expOwner
+      );
+      if (actIdx < 0) {
+        actIdx = actual.todos.findIndex((t, j) => !used.has(j));
+      }
+      const actTodo = actIdx >= 0 ? actual.todos[actIdx] : undefined;
+      if (actIdx >= 0) used.add(actIdx);
       results.push({
         field: `todos[${i}].owner`,
-        pass: expTodo.owner === actTodo?.owner,
+        pass: !!actTodo && normalizeOwner(actTodo.owner) === expOwner,
         expected: expTodo.owner,
         actual: actTodo?.owner,
       });

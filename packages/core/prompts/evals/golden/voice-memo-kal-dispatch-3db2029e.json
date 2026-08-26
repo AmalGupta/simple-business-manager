@@ -1,0 +1,55 @@
+{
+  "name": "voice-memo-kal-dispatch-3db2029e",
+  "clientName": null,
+  "recordedAt": "2026-08-25T18:05:52.730Z",
+  "entries": [
+    {
+      "speaker_id": "1",
+      "transcript": "Okay, kal Shubham aur ek helper jayega Homeland Regalia mein. Saath mein Tanzeem Regalia Homeland ki windows ki manufacturing ka process ko expedite karega."
+    },
+    {
+      "speaker_id": "1",
+      "transcript": "Then Mishra जी morning 7 o'clock एक helper को लेके जा रहे हैं Ricadia के अंदर cafe का काम complete करने के लिए।\nIn the meanwhile हमारी जो balance team रहेगी such as Neeraj and Gaurav they will be responsible कि जो जो windows हैं Ricadia की वो integrate हो जाएं।\nऔर in case क्या कहते हैं ये थोड़े से plan में changes होंगे।"
+    },
+    {
+      "speaker_id": "0",
+      "transcript": "तो हमें मुल्लापुर जो मनोहर City है वहाँ का silicon का काम कराना है and half the silicon work for today for house number 106 in sector 106 was done तो उसका balance काम भी कल कराना है तो जो expire person होएंगे वो वहाँ लगेंगे।"
+    }
+  ],
+  "expected": {
+    "call_type": "internal",
+    "todos": [
+      {
+        "text": "Homeland/Regalia with helper",
+        "owner": "Shubham",
+        "due_date": "2026-08-26"
+      },
+      {
+        "text": "Expedite windows manufacturing at Regalia/Homeland",
+        "owner": "Tanseem",
+        "due_date": "2026-08-26"
+      },
+      {
+        "text": "Ricadia cafe work with helper at 7am",
+        "owner": "Mishra",
+        "due_date": "2026-08-26"
+      },
+      {
+        "text": "Window integration at Ricadia",
+        "owner": "Neeraj",
+        "due_date": "2026-08-26"
+      },
+      {
+        "text": "Window integration at Ricadia",
+        "owner": "Gaurav",
+        "due_date": "2026-08-26"
+      },
+      {
+        "text": "Silicon work at Eco City/Mullanpur and balance Sector 106",
+        "owner": "self",
+        "due_date": "2026-08-26"
+      }
+    ],
+    "deadline": "2026-08-26"
+  }
+}
