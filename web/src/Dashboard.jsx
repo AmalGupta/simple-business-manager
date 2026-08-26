@@ -41,7 +41,13 @@ import { CommitmentsList } from "./components/CommitmentsList.jsx";
 import { CallTypeBadge } from "./components/CallTypeBadge.jsx";
 import { CallCard } from "./components/CallCard.jsx";
 import { StatCard } from "./components/StatCard.jsx";
-import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "./styles.js";
+import {
+  TILE_ROW_STYLE,
+  TILE_VALUE_ROW_STYLE,
+  TILE_NUMBER_STYLE,
+  TEXT_INPUT_STYLE,
+  PRIMARY_BUTTON_STYLE,
+} from "./styles.js";
 import {
   fetchCalls,
   fetchCall,
