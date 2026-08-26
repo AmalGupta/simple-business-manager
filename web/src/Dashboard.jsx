@@ -31,6 +31,7 @@ import {
 } from "./lib/dates.js";
 import { WORKFLOW_CATEGORIES, WORKFLOW_CATEGORY_LABEL, sortCalls } from "./lib/constants.js";
 import { DownloadButton } from "./components/DownloadButton.jsx";
+import { WaitingTag } from "./components/WaitingTag.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -374,24 +375,6 @@ function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
         </button>
       )}
     </div>
-  );
-}
-
-function WaitingTag() {
-  return (
-    <span
-      style={{
-        fontSize: 12,
-        fontWeight: 700,
-        padding: "4px 10px",
-        borderRadius: t.radius,
-        background: t.puttyBg,
-        color: t.putty,
-        whiteSpace: "nowrap",
-      }}
-    >
-      customer waiting
-    </span>
   );
 }
 
