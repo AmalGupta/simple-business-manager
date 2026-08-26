@@ -1,15 +1,21 @@
-/* Design tokens — see docs/SCAFFOLDING.md §7.
+/* Design tokens — palette in docs/SCAFFOLDING.md §7, surfaces/typography in
+   docs/DESIGN_LANGUAGE.md ("Studio", 2026-08-26).
    Externalized so the theme is swappable: components read var(--color-*),
    not hardcoded hex. To revert to the retired float-glass palette, set
    data-theme="float-glass" on <html> — nothing else needs to change. */
 
-@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=Mukta:wght@400;500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@600;700&family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600&family=Mukta:wght@400;500;600&display=swap");
 
 :root {
   /* Colour — ink/slate/line neutrals, one accent, one warn, one danger */
   --color-canvas: #F6F7F9;
   --color-surface: #FFFFFF;
   --color-ink: #14181F;
+  /* Primary list-row text that needs to read a shade heavier than body ink
+     (site names on the Sites directory and "Sites needing attention") — a
+     narrow addition for one recurring pattern, not a blanket darkening of
+     --color-ink. See docs/DESIGN_LANGUAGE.md. */
+  --color-ink-emphasis: #05070A;
   --color-slate: #5B6472;
   --color-line: #E4E7EC;
   --color-line-soft: #EEF0F3;
@@ -22,11 +28,23 @@
   --color-unread: #22C55E;
 
   --font-display: "Space Grotesk", system-ui, sans-serif;
+  /* Small section/tile headers (TileLabel) — see docs/DESIGN_LANGUAGE.md. */
+  --font-label: "IBM Plex Sans", system-ui, sans-serif;
   --font-body: "Mukta", system-ui, sans-serif;
 
-  --radius-card: 10px;
+  /* One radius for every card/tile surface — no separate --radius-tile,
+     no shadow, no tinted background. See docs/DESIGN_LANGUAGE.md "Surface". */
+  --radius-card: 6px;
   --radius-badge: 6px;
   --radius-button: 8px;
+
+  /* Every tile (StatCard, SitesAttentionTile, EscalationsTile, StaffTile,
+     WorkflowTilesRow, "calls logged"/"recordings") is fixed to this height
+     via Card's `tile` prop, regardless of content — a stat tile and a list
+     tile sit in the same grid and must read as the same shape. List tiles
+     scroll internally past this height rather than growing the tile. Layout
+     mechanic only; unrelated to the surface/skin tokens above. */
+  --tile-height: 200px;
 }
 
 /* Retired float-glass theme — kept for a one-line revert, not currently applied. */

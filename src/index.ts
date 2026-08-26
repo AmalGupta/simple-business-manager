@@ -314,7 +314,7 @@ export default {
     if (recordingMatch && request.method === "GET") {
       const session = await requireSession(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
-      return handleGetCallRecording(request, env, recordingMatch[1]);
+      return handleGetCallRecording(request, env, recordingMatch[1], session);
     }
 
     const timelineMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/timeline$/);
