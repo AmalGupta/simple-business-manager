@@ -1,6 +1,7 @@
 @docs/BUILD_BRIEF.md
 @docs/SCAFFOLDING.md
 @docs/LOCAL_PROFILE.md
+@docs/DEPLOY_RUNBOOK.md
 
 # Simple Business Manager — project context for AI coding tools
 
@@ -22,6 +23,10 @@ One deployed Cloudflare Worker on `workers.dev` that serves both the API and the
 ## Build order
 
 Follow `docs/BUILD_BRIEF.md` "Build order" task-by-task; each task's verification must pass before starting the next. **Task 4 (webhook + transcript) is a hard checkpoint** — stop and show a real transcript before starting extraction (Task 5). The cron bucket scanner and digest email are explicitly out of scope for this milestone.
+
+## Deploying
+
+Follow `docs/DEPLOY_RUNBOOK.md` exactly, every time, regardless of which agent or session is doing the shipping. The single fact that governs everything in it: there is no separate staging/dev environment — `wrangler deploy` and `wrangler d1 migrations apply --remote` both hit the one live worker and database.
 
 ## Stack
 
