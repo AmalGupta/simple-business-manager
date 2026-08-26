@@ -40,6 +40,8 @@ import { CallHeading } from "./components/CallHeading.jsx";
 import { CommitmentsList } from "./components/CommitmentsList.jsx";
 import { CallTypeBadge } from "./components/CallTypeBadge.jsx";
 import { CallCard } from "./components/CallCard.jsx";
+import { StatCard } from "./components/StatCard.jsx";
+import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "./styles.js";
 import {
   fetchCalls,
   fetchCall,
@@ -581,70 +583,6 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage = true 
 /* ------------------------------------------------------------------ */
 /* ================================================================== */
 /* Tiles 1 & 2 — a plain number readout, same card language as tiles 3 & 4. */
-
-/* Same row rhythm as the list tiles (10px vertical padding, hairline top
-   border) so a stat card sitting next to a list card doesn't feel like a
-   different template. */
-const TILE_ROW_STYLE = {
-  padding: "10px 0",
-  borderTop: `1px solid ${t.frost}`,
-};
-
-/* The value row in a fixed-height number tile (StatCard, StaffTile,
-   WorkflowTilesRow, "calls logged", "recordings") — grows to fill the
-   tile's remaining --tile-height below the label and centers the number
-   in it, so every number tile looks the same regardless of row position. */
-const TILE_VALUE_ROW_STYLE = {
-  flex: 1,
-  display: "flex",
-  alignItems: "center",
-};
-
-/* The numeral itself, inside TILE_VALUE_ROW_STYLE — accent-blue and bold
-   rather than ink-black, so color reads as a deliberate signal on the one
-   thing worth it, not decoration applied everywhere. See
-   docs/DESIGN_LANGUAGE.md "Color". */
-const TILE_NUMBER_STYLE = {
-  fontFamily: t.display,
-  fontSize: 32,
-  fontWeight: 700,
-  lineHeight: 1,
-  color: t.accent,
-};
-
-const TEXT_INPUT_STYLE = {
-  minHeight: 40,
-  padding: "0 10px",
-  border: `1px solid ${t.frost}`,
-  borderRadius: t.radiusButton,
-  fontFamily: t.body,
-  fontSize: 14,
-  color: t.edge,
-  background: t.white,
-};
-
-const PRIMARY_BUTTON_STYLE = {
-  minHeight: 40,
-  padding: "0 16px",
-  border: "none",
-  borderRadius: t.radiusButton,
-  background: t.accent,
-  color: t.white,
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: "pointer",
-};
-
-function StatCard({ value, label }) {
-  return (
-    <Card tile>
-      <TileLabel>{label}</TileLabel>
-      <div style={TILE_VALUE_ROW_STYLE}>
-        <span style={TILE_NUMBER_STYLE}>{value}</span>
-      </div>
-    </Card>
-  );
-}
 
 /* Home-panel entry point into StaffDirectoryView — admin/superadmin only
    (migration 0011), same tile template as StatCard but clickable, matching
