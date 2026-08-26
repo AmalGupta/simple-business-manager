@@ -3,7 +3,7 @@
 // See docs/BUILD_BRIEF.md Task 2 and Task 3.
 
 import { getInsightsSummary, insertCall, setCallFailed, setCallSubmitted, type InsightsSummary } from "@sbm/core";
-import { submitRecording } from "../lib/sarvam";
+import { normalizeAudioContentType, submitRecording } from "../lib/sarvam";
 import type { Env } from "../index";
 
 // Recorder filenames look like "AUDIO-2026-08-20-22-05-33.m4a" — the
@@ -146,7 +146,7 @@ export async function handleUploadPost(
   const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
 
   await env.RECORDINGS.put(r2Key, file.stream(), {
-    httpMetadata: { contentType: file.type || "application/octet-stream" },
+    httpMetadata: { contentType: normalizeAudioContentType(file.type) },
   });
 
   await insertCall(env.DB, {

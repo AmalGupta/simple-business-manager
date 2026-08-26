@@ -1974,9 +1974,53 @@ function timelineEntryIcon(entry) {
   return <FileText size={13} />;
 }
 
-function SiteTimelineEntry({ entry, onOpenCall }) {
+function VoiceMemoDetail({ entryRef }) {
+  if (entryRef.transcript === undefined) return null; // not sent to this session (staff) — nothing to show
+  if (entryRef.transcript === null) return null; // still transcribing
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: t.edge2, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        Transcript
+      </div>
+      <div
+        style={{
+          fontSize: 13,
+          lineHeight: 1.6,
+          color: t.edge2,
+          background: t.frostSoft,
+          border: `1px solid ${t.frost}`,
+          borderRadius: t.radiusButton,
+          padding: "10px 12px",
+          maxHeight: 220,
+          overflowY: "auto",
+          whiteSpace: "pre-wrap",
+        }}
+      >
+        {entryRef.transcript}
+      </div>
+      {entryRef.todos?.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: t.edge2, marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            Todos
+          </div>
+          {entryRef.todos.map((td) => (
+            <TodoRow key={td.id} todo={td} readOnly />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SiteTimelineEntry({ entry, onOpenCall, canManage }) {
   const content = () => {
     if (entry.type === "call") {
+      // A site voice memo's transcript/todos are admin-only (see
+      // isCallAccessibleToUser) — staff get the plain summary line, not a
+      // link into a call detail the API would 403 on anyway.
+      if (entry.ref?.is_voice_memo && !canManage) {
+        return <span style={{ fontSize: 14, color: t.edge, lineHeight: 1.6 }}>{entry.summary}</span>;
+      }
       return (
         <button
           onClick={() => onOpenCall(entry.ref.call_id)}
@@ -2030,11 +2074,12 @@ function SiteTimelineEntry({ entry, onOpenCall }) {
       </div>
       {content()}
       {entry.type === "call" && entry.ref?.is_voice_memo && <AudioPlayer src={`/api/calls/${entry.ref.call_id}/recording`} />}
+      {entry.type === "call" && entry.ref?.is_voice_memo && canManage && <VoiceMemoDetail entryRef={entry.ref} />}
     </div>
   );
 }
 
-function SiteTimeline({ entries, onOpenCall }) {
+function SiteTimeline({ entries, onOpenCall, canManage }) {
   if (entries === null) return <p style={{ fontSize: 13, color: t.edge2 }}>Loading…</p>;
   if (entries.length === 0) {
     return (
@@ -2046,7 +2091,7 @@ function SiteTimeline({ entries, onOpenCall }) {
   return (
     <div style={{ borderLeft: `2px solid ${t.frost}`, marginLeft: 4 }}>
       {entries.map((entry) => (
-        <SiteTimelineEntry key={`${entry.type}-${entry.id}`} entry={entry} onOpenCall={onOpenCall} />
+        <SiteTimelineEntry key={`${entry.type}-${entry.id}`} entry={entry} onOpenCall={onOpenCall} canManage={canManage} />
       ))}
     </div>
   );
@@ -2316,7 +2361,7 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
 
       <TileLabel>Timeline</TileLabel>
       <div style={{ marginTop: 8 }}>
-        <SiteTimeline entries={timeline} onOpenCall={onOpen} />
+        <SiteTimeline entries={timeline} onOpenCall={onOpen} canManage={canManage} />
       </div>
 
       {showAssignModal && <AssignTeamModal onClose={() => setShowAssignModal(false)} onAdd={addTeamMember} />}

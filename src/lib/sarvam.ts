@@ -7,6 +7,20 @@ import type { Env } from "../index";
 
 const BASE = "https://api.sarvam.ai";
 
+/**
+ * Browser MediaRecorder blobs (the site-page voice-note recorder) carry a
+ * codec-qualified MIME type like "audio/mp4;codecs=opus" — Sarvam's job
+ * `/start` rejects anything outside its bare allow-list (audio/mp4,
+ * audio/webm, ...) with 400 "Invalid file type", so the codec parameter has
+ * to be stripped before it ever reaches R2's stored content-type / the
+ * presigned PUT's Content-Type header. Confirmed live: this was silently
+ * failing every site voice-note submit (stt_status stuck at 'failed').
+ */
+export function normalizeAudioContentType(rawType: string | null | undefined): string {
+  const base = (rawType ?? "").split(";")[0].trim();
+  return base || "application/octet-stream";
+}
+
 const headers = (env: Env) => ({
   "api-subscription-key": env.SARVAM_API_KEY!,
   "content-type": "application/json",
@@ -82,7 +96,7 @@ export async function submitRecording(
       // no error anywhere. Confirmed live 2026-08-21: identical audio,
       // identical job_parameters, only difference was this header, and it
       // was the difference between an empty result and a full transcript.
-      "Content-Type": object.httpMetadata?.contentType || "application/octet-stream",
+      "Content-Type": normalizeAudioContentType(object.httpMetadata?.contentType),
     },
     body: object.body, // streamed, never buffered
   });

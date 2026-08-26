@@ -23,6 +23,7 @@ import {
   handlePostEscalation,
   handlePostSitesBackfill,
   handlePostSiteTeamMember,
+  handleRetryCallStt,
 } from "./handlers/api";
 import {
   handleAdminCreateUser,
@@ -108,6 +109,12 @@ export default {
     if (callMatch && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetCall(request, env, callMatch[1]);
+    }
+
+    const retryMatch = url.pathname.match(/^\/api\/calls\/([^/]+)\/retry-stt$/);
+    if (retryMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleRetryCallStt(request, env, retryMatch[1]);
     }
 
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
@@ -277,7 +284,7 @@ export default {
       const session = await requireSession(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       if (!(await assertSiteMembership(env, session, timelineMatch[1]))) return new Response("Forbidden", { status: 403 });
-      return handleGetSiteTimeline(env, timelineMatch[1]);
+      return handleGetSiteTimeline(env, timelineMatch[1], session.user_role !== "staff");
     }
 
     return env.ASSETS.fetch(request);

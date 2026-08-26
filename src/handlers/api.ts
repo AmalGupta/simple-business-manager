@@ -9,6 +9,7 @@ import {
   closeEscalation,
   createEscalation,
   createSite,
+  getCallById,
   getCallWithTodos,
   getConfirmedSitesSummary,
   getSitesNeedingAttention,
@@ -22,12 +23,15 @@ import {
   listOpenEscalations,
   listSiteTeamMembers,
   listSites,
+  setCallFailed,
+  setCallSubmitted,
   updateSite,
   updateTodo,
   type SessionWithUser,
 } from "@sbm/core";
 import { scanCallForSites } from "../../packages/core/prompts/site-scan";
 import { requireSession } from "../lib/auth";
+import { submitRecording } from "../lib/sarvam";
 import type { Env } from "../index";
 
 function json(data: unknown, status = 200): Response {
@@ -72,6 +76,31 @@ export async function handleGetCall(request: Request, env: Env, id: string): Pro
   const call = await getCallWithTodos(env.DB, id);
   if (!call) return json({ error: "not found" }, 404);
   return json(call);
+}
+
+/**
+ * Manual recovery for a call stuck in stt_status='failed' (e.g. the
+ * codec-qualified content-type Sarvam rejected before normalizeAudioContentType
+ * existed — see src/lib/sarvam.ts). Re-runs the same submit path a fresh
+ * upload takes; the R2 object is untouched, so this is safe to call again.
+ */
+export async function handleRetryCallStt(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const call = await getCallById(env.DB, id);
+  if (!call) return json({ error: "not found" }, 404);
+  if (call.stt_status !== "failed") return json({ error: "call is not in a failed state" }, 400);
+
+  const callbackUrl = `${new URL(request.url).origin}/webhooks/sarvam`;
+  try {
+    const result = await submitRecording(env, call.r2_key, callbackUrl);
+    await setCallSubmitted(env.DB, id, result.jobId);
+    return json({ ok: true, jobId: result.jobId });
+  } catch (err) {
+    await setCallFailed(env.DB, id, `submit: ${String(err)}`);
+    return json({ error: String(err) }, 502);
+  }
 }
 
 const TODO_PATCH_KEYS = ["status", "completed_at", "snoozed_until"] as const;

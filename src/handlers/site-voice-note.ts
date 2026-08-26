@@ -7,7 +7,7 @@
 // extraction to infer a site from transcript content.
 
 import { insertCall, linkCallToSiteExplicit, setCallFailed, setCallSubmitted } from "@sbm/core";
-import { submitRecording } from "../lib/sarvam";
+import { normalizeAudioContentType, submitRecording } from "../lib/sarvam";
 import type { Env } from "../index";
 
 function json(data: unknown, status = 200): Response {
@@ -30,7 +30,7 @@ export async function handlePostSiteVoiceNote(
   const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
 
   await env.RECORDINGS.put(r2Key, file.stream(), {
-    httpMetadata: { contentType: file.type || "application/octet-stream" },
+    httpMetadata: { contentType: normalizeAudioContentType(file.type) },
   });
 
   await insertCall(env.DB, {

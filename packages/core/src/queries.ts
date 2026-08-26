@@ -687,12 +687,19 @@ export async function isUserAssignedToSite(db: D1Database, userId: string, siteI
 }
 
 /** True if `callId` is linked (call_sites) to any site `userId` is on the team roster for — lets a `staff` session open a call's transcript from their site's timeline. */
+/**
+ * Excludes site voice memos (`calls.recorded_for_site_id IS NOT NULL`)
+ * deliberately — their transcript and extracted todos are admin/superadmin
+ * only, unlike a real call that happens to be linked to a staff member's
+ * site via the site-scan pass, which stays visible to them as before.
+ */
 export async function isCallAccessibleToUser(db: D1Database, userId: string, callId: string): Promise<boolean> {
   const row = await db
     .prepare(
       `SELECT 1 FROM call_sites
+       JOIN calls ON calls.id = call_sites.call_id
        JOIN site_team_members ON site_team_members.site_id = call_sites.site_id
-       WHERE call_sites.call_id = ? AND site_team_members.user_id = ?
+       WHERE call_sites.call_id = ? AND site_team_members.user_id = ? AND calls.recorded_for_site_id IS NULL
        LIMIT 1`
     )
     .bind(callId, userId)
@@ -1196,17 +1203,30 @@ export interface SiteTimelineEntry {
   ref: unknown;
 }
 
-export async function getSiteTimeline(db: D1Database, siteId: string): Promise<SiteTimelineEntry[]> {
+/**
+ * `includeCallDetails` attaches the full transcript and todo list to each
+ * voice-memo entry's `ref` — gated by the caller to admin/superadmin only
+ * (see handleGetSiteTimeline), since transcripts and todos extracted from a
+ * site voice note are not staff-visible. Kept out of the shape by default so
+ * a staff response never carries the data at all, not just hides it in UI.
+ */
+export async function getSiteTimeline(
+  db: D1Database,
+  siteId: string,
+  includeCallDetails = false
+): Promise<SiteTimelineEntry[]> {
   const [{ results: callRows }, { results: mediaRows }, { results: teamRows }, { results: editRows }] =
     await Promise.all([
       db
         .prepare(
           `SELECT calls.id AS id, calls.recorded_at AS created_at, calls.summary AS summary,
                   calls.call_type AS call_type, calls.recorded_for_site_id AS recorded_for_site_id,
+                  transcripts.transcript AS transcript,
                   users.name AS actor_name
            FROM call_sites
            JOIN calls ON calls.id = call_sites.call_id
            LEFT JOIN users ON users.id = calls.uploaded_by_user_id
+           LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
            WHERE call_sites.site_id = ?`
         )
         .bind(siteId)
@@ -1216,6 +1236,7 @@ export async function getSiteTimeline(db: D1Database, siteId: string): Promise<S
           summary: string | null;
           call_type: CallType | null;
           recorded_for_site_id: string | null;
+          transcript: string | null;
           actor_name: string | null;
         }>(),
       db
@@ -1262,6 +1283,23 @@ export async function getSiteTimeline(db: D1Database, siteId: string): Promise<S
 
   const entries: SiteTimelineEntry[] = [];
 
+  const voiceMemoCallIds = includeCallDetails
+    ? callRows.filter((c) => c.recorded_for_site_id === siteId).map((c) => c.id)
+    : [];
+  const todosByVoiceMemoCall = new Map<string, TodoRow[]>();
+  if (voiceMemoCallIds.length > 0) {
+    const placeholders = voiceMemoCallIds.map(() => "?").join(",");
+    const { results: rawTodos } = await db
+      .prepare(`${TODO_SELECT} WHERE call_id IN (${placeholders}) ORDER BY created_at ASC`)
+      .bind(...voiceMemoCallIds)
+      .all<RawTodoRow>();
+    for (const rt of rawTodos) {
+      const list = todosByVoiceMemoCall.get(rt.call_id) ?? [];
+      list.push(toTodoRow(rt));
+      todosByVoiceMemoCall.set(rt.call_id, list);
+    }
+  }
+
   for (const c of callRows) {
     const isVoiceMemo = c.recorded_for_site_id === siteId;
     entries.push({
@@ -1270,7 +1308,13 @@ export async function getSiteTimeline(db: D1Database, siteId: string): Promise<S
       created_at: c.created_at ?? "",
       actor_name: c.actor_name,
       summary: c.summary ?? (isVoiceMemo ? "Voice note — transcribing…" : "Call recorded"),
-      ref: { call_id: c.id, is_voice_memo: isVoiceMemo },
+      ref: {
+        call_id: c.id,
+        is_voice_memo: isVoiceMemo,
+        ...(includeCallDetails && isVoiceMemo
+          ? { transcript: c.transcript ?? null, todos: todosByVoiceMemoCall.get(c.id) ?? [] }
+          : {}),
+      },
     });
   }
 
