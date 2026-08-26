@@ -26,6 +26,8 @@ import { SiteView } from "./views/sites/SiteView.jsx";
 import {
   fetchCalls,
   fetchCall,
+  fetchCallTranscripts,
+  fetchDashboardSummary,
   fetchEscalations,
   fetchSitesAttention,
   fetchSites,
@@ -38,8 +40,6 @@ import {
   postLogout,
   postResetPin,
   postUpdateMyPhone,
-  fetchStaffRoster,
-  fetchCallsCount,
   fetchOpenSiteTasks,
 } from "./lib/api.js";
 
@@ -50,6 +50,12 @@ export default function SimpleBusinessManager() {
   const [allSites, setAllSites] = useState([]);
   const [staffRoster, setStaffRoster] = useState([]);
   const [callsCount, setCallsCount] = useState(0);
+  /* Home open/closed tiles — from GET /api/dashboard/summary, not derived from
+     the (possibly still-loading) calls list. Kept in sync on todo toggles. */
+  const [openToday, setOpenToday] = useState(0);
+  const [closedToday, setClosedToday] = useState(0);
+  const [confirmedCount, setConfirmedCount] = useState(0);
+  const [unconfirmedCount, setUnconfirmedCount] = useState(0);
   /* Open (assigned, not done) site tasks — scoped server-side to "mine" for
      a staff session, or every open assignment business-wide for admin/
      superadmin. See fetchOpenSiteTasks and migration 0013. */
@@ -93,10 +99,9 @@ export default function SimpleBusinessManager() {
     };
   }, []);
 
-  /* Home paints as soon as `me` is known — do not wait on a Promise.all of
-     dashboard data. Each slice fills its own state when its request lands;
-     empty/zero tiles on first paint are intentional. A single failed sibling
-     must not blank the whole home. */
+  /* Home paints as soon as `me` is known. Tile data comes from one summary
+     request; lean calls (+ transcript hydrate) load in the background for
+     admin drilldowns and never block first paint. */
   useEffect(() => {
     if (!me) return;
     let cancelled = false;
@@ -109,64 +114,62 @@ export default function SimpleBusinessManager() {
     setAllSites([]);
     setStaffRoster([]);
     setCallsCount(0);
+    setOpenToday(0);
+    setClosedToday(0);
+    setConfirmedCount(0);
+    setUnconfirmedCount(0);
     setOpenSiteTasks([]);
 
+    const applySummary = (summary) => {
+      setAllSites(summary.sites ?? []);
+      setOpenSiteTasks(summary.open_site_tasks ?? []);
+      setConfirmedCount(summary.confirmed_count ?? 0);
+      setUnconfirmedCount(summary.unconfirmed_count ?? 0);
+      setOpenToday(summary.open_today ?? 0);
+      setClosedToday(summary.closed_today ?? 0);
+      setCallsCount(summary.calls_count ?? 0);
+      setSitesAttention(summary.sites_attention ?? []);
+      setEscalations(summary.escalations ?? []);
+      setStaffRoster(summary.staff_roster ?? []);
+    };
+
     if (me.role === "staff") {
-      // No calls/escalations/attention tile for staff — they only ever see
-      // their own assigned sites and their own open workflow tasks, both
-      // already filtered server-side.
       setView({ name: "staff-home" });
-      fetchSites()
-        .then((data) => {
-          if (!cancelled) setAllSites(data);
+      fetchDashboardSummary()
+        .then((summary) => {
+          if (!cancelled) applySummary(summary);
         })
-        .catch((err) => console.error("[sbm] failed to load sites", err));
-      fetchOpenSiteTasks()
-        .then((data) => {
-          if (!cancelled) setOpenSiteTasks(data);
-        })
-        .catch((err) => console.error("[sbm] failed to load open site tasks", err));
+        .catch((err) => console.error("[sbm] failed to load dashboard summary", err));
       return () => {
         cancelled = true;
       };
     }
 
     setView({ name: "home" });
-    fetchCalls()
-      .then((data) => {
-        if (!cancelled) setCalls(data);
+    fetchDashboardSummary()
+      .then((summary) => {
+        if (cancelled) return;
+        applySummary(summary);
+        fetchCalls()
+          .then((callsData) => {
+            if (cancelled) return null;
+            setCalls(callsData);
+            return fetchCallTranscripts();
+          })
+          .then((transcripts) => {
+            if (cancelled || !transcripts) return;
+            setCalls((cs) =>
+              cs.map((c) => {
+                if (!Object.prototype.hasOwnProperty.call(transcripts, c.id)) return c;
+                const text = transcripts[c.id];
+                return { ...c, transcript: text, has_transcript: text != null };
+              })
+            );
+          })
+          .catch((err) => console.error("[sbm] failed to load calls archive", err));
       })
-      .catch((err) => console.error("[sbm] failed to load calls", err));
-    fetchEscalations()
-      .then((data) => {
-        if (!cancelled) setEscalations(data);
-      })
-      .catch((err) => console.error("[sbm] failed to load escalations", err));
-    fetchSitesAttention()
-      .then((data) => {
-        if (!cancelled) setSitesAttention(data);
-      })
-      .catch((err) => console.error("[sbm] failed to load sites needing attention", err));
-    fetchSites()
-      .then((data) => {
-        if (!cancelled) setAllSites(data);
-      })
-      .catch((err) => console.error("[sbm] failed to load sites", err));
-    fetchStaffRoster()
-      .then((data) => {
-        if (!cancelled) setStaffRoster(data);
-      })
-      .catch((err) => console.error("[sbm] failed to load staff roster", err));
-    fetchCallsCount()
-      .then((data) => {
-        if (!cancelled) setCallsCount(data.count);
-      })
-      .catch((err) => console.error("[sbm] failed to load calls count", err));
-    fetchOpenSiteTasks()
-      .then((data) => {
-        if (!cancelled) setOpenSiteTasks(data);
-      })
-      .catch((err) => console.error("[sbm] failed to load open site tasks", err));
+      .catch((err) => console.error("[sbm] failed to load dashboard summary", err));
+
     return () => {
       cancelled = true;
     };
@@ -212,6 +215,8 @@ export default function SimpleBusinessManager() {
     const [sitesData, attentionData] = await Promise.all([fetchSites(), fetchSitesAttention()]);
     setAllSites(sitesData);
     setSitesAttention(attentionData);
+    setConfirmedCount(sitesData.filter((s) => s.is_confirmed === "Y").length);
+    setUnconfirmedCount(sitesData.filter((s) => s.is_confirmed === null).length);
   }, []);
 
   /* "Add new site": create, refresh the site list so SiteView can find the
@@ -243,18 +248,8 @@ export default function SimpleBusinessManager() {
     }
   }, []);
 
-  /* Tiles 1 & 2 — docs/ADDITIONAL_FEATURES_M0.md "Phase 1 home page".
-     "Open" is a live snapshot (open items don't have a single day); "closed"
-     is scoped to today specifically, via completed_at. */
-  const todayCounts = useMemo(() => {
-    const all = calls.flatMap((c) => c.todos);
-    const now = today();
-    const todayKey = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
-    return {
-      open: all.filter((td) => td.status === "open").length,
-      closed: all.filter((td) => td.status === "done" && dayKey(td.completed_at) === todayKey).length,
-    };
-  }, [calls]);
+  /* Tiles 1 & 2 — open/closed counts come from dashboard summary (and are
+     adjusted locally on todo toggles). Calendar still uses the calls list. */
 
   /* Calendar month currently browsed — defaults to this month. Full month,
      not a rolling window: a fixed 28-day window didn't show a complete
@@ -305,19 +300,39 @@ export default function SimpleBusinessManager() {
     setCalMonth({ year, month });
   }, []);
 
-  /* Optimistic write, rolled back if D1 rejects it. */
+  /* Optimistic write, rolled back if D1 rejects it. Also keeps home
+     open_today / closed_today in sync with the summary read model. */
   const mutate = useCallback(async (todo, patch) => {
     const prev = { status: todo.status, completed_at: todo.completed_at };
+    const todayKey = isoDate(today().getFullYear(), today().getMonth(), today().getDate());
+    const prevClosedToday = prev.status === "done" && dayKey(prev.completed_at) === todayKey;
+    const nextClosedToday = patch.status === "done" && dayKey(patch.completed_at) === todayKey;
+    const prevOpen = prev.status === "open";
+    const nextOpen = patch.status === "open";
+
+    const applyCountDelta = (fromPrev) => {
+      const wasOpen = fromPrev ? prevOpen : nextOpen;
+      const isOpen = fromPrev ? nextOpen : prevOpen;
+      const wasClosedToday = fromPrev ? prevClosedToday : nextClosedToday;
+      const isClosedToday = fromPrev ? nextClosedToday : prevClosedToday;
+      if (wasOpen && !isOpen) setOpenToday((n) => Math.max(0, n - 1));
+      if (!wasOpen && isOpen) setOpenToday((n) => n + 1);
+      if (wasClosedToday && !isClosedToday) setClosedToday((n) => Math.max(0, n - 1));
+      if (!wasClosedToday && isClosedToday) setClosedToday((n) => n + 1);
+    };
+
     setBusyIds((s) => new Set(s).add(todo.id));
     setCalls((cs) =>
       cs.map((c) => ({ ...c, todos: c.todos.map((td) => (td.id === todo.id ? { ...td, ...patch } : td)) }))
     );
+    applyCountDelta(true);
     try {
       await patchTodo(todo.id, patch);
     } catch {
       setCalls((cs) =>
         cs.map((c) => ({ ...c, todos: c.todos.map((td) => (td.id === todo.id ? { ...td, ...prev } : td)) }))
       );
+      applyCountDelta(false);
     } finally {
       setBusyIds((s) => {
         const n = new Set(s);
@@ -373,9 +388,14 @@ export default function SimpleBusinessManager() {
   }, []);
 
   const bulkCall = view.name === "call" ? calls.find((c) => c.id === view.id) : null;
+  /* Lean list rows may have has_transcript without the blob yet — treat as
+     not ready and fetch GET /api/calls/:id. No transcript expected
+     (has_transcript false) can use the lean row as-is. */
+  const bulkCallReady =
+    bulkCall && (bulkCall.transcript != null || bulkCall.has_transcript === false);
 
   useEffect(() => {
-    if (view.name !== "call" || bulkCall) {
+    if (view.name !== "call" || bulkCallReady) {
       setFetchedCall(null);
       return;
     }
@@ -395,9 +415,9 @@ export default function SimpleBusinessManager() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.name, view.id, bulkCall]);
+  }, [view.name, view.id, bulkCallReady]);
 
-  const openCall = bulkCall ?? (view.name === "call" ? fetchedCall : null);
+  const openCall = bulkCallReady ? bulkCall : view.name === "call" ? fetchedCall : null;
 
   const shell = (children) => (
     <div style={{ background: t.pane, minHeight: "100vh", fontFamily: t.body, color: t.edge }}>
@@ -532,7 +552,7 @@ export default function SimpleBusinessManager() {
     );
   }
 
-  if (view.name === "call" && !bulkCall && fetchedCall === undefined) {
+  if (view.name === "call" && !bulkCallReady && fetchedCall === undefined) {
     return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
   }
 
@@ -726,15 +746,15 @@ export default function SimpleBusinessManager() {
           marginBottom: "1.5rem",
         }}
       >
-        <StatCard value={todayCounts.closed} label="closed today" />
+        <StatCard value={closedToday} label="closed today" />
         <SitesAttentionTile
           sites={sitesAttention}
           onOpenSite={(site) => setView({ name: "site", site, from: { name: "home" } })}
           onReviewSites={() => setView({ name: "sites-review" })}
           onViewDirectory={() => setView({ name: "sites-directory" })}
           hasAnySites={allSites.length > 0}
-          unconfirmedCount={allSites.filter((s) => s.is_confirmed === null).length}
-          confirmedCount={allSites.filter((s) => s.is_confirmed === "Y").length}
+          unconfirmedCount={unconfirmedCount}
+          confirmedCount={confirmedCount}
         />
         <EscalationsTile
           escalations={escalations}
@@ -752,9 +772,9 @@ export default function SimpleBusinessManager() {
         <button
           onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
           style={{ all: "unset", cursor: "pointer", display: "block" }}
-          aria-label={`Open today — ${todayCounts.open}`}
+          aria-label={`Open today — ${openToday}`}
         >
-          <StatCard value={todayCounts.open} label="open today" />
+          <StatCard value={openToday} label="open today" />
         </button>
         <button
           onClick={() => setView({ name: "calls" })}

@@ -274,7 +274,10 @@ export interface CallRow {
   commitments: CommitmentRow[];
   unresolved: UnresolvedRow[];
   material_needs: string[];
+  /** Full text — present on GET /api/calls/:id and after client hydrate; null on lean list. */
   transcript: string | null;
+  /** True when a transcripts row exists for this call (lean list uses this instead of shipping the blob). */
+  has_transcript: boolean;
   todos: TodoRow[];
 }
 
@@ -317,6 +320,7 @@ interface RawCallJoinRow {
   material_needs: string | null;
   deadline: string | null;
   transcript: string | null;
+  has_transcript?: number | null;
   client_name: string;
   client_phone: string | null;
 }
@@ -352,6 +356,22 @@ const CALL_SELECT = `
          calls.call_type, calls.summary, calls.key_takeaways, calls.unresolved, calls.material_needs,
          calls.deadline,
          transcripts.transcript AS transcript,
+         CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
+         COALESCE(clients.name, 'Unknown caller') AS client_name,
+         clients.phone AS client_phone
+  FROM calls
+  LEFT JOIN clients ON calls.client_id = clients.id
+  LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
+`;
+
+/* Lean list for GET /api/calls — same joins/filters as CALL_SELECT but never
+   selects the transcript blob (home/drilldowns use has_transcript instead). */
+const CALL_LIST_SELECT = `
+  SELECT calls.id, calls.duration_s, calls.recorded_at, calls.recording_date, calls.source,
+         calls.call_type, calls.summary, calls.key_takeaways, calls.unresolved, calls.material_needs,
+         calls.deadline,
+         NULL AS transcript,
+         CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
          COALESCE(clients.name, 'Unknown caller') AS client_name,
          clients.phone AS client_phone
   FROM calls
@@ -398,6 +418,7 @@ function toCallRow(
   sites: string[],
   commitments: CommitmentRow[]
 ): CallRow {
+  const hasTranscript = c.has_transcript != null ? Boolean(c.has_transcript) : c.transcript != null;
   return {
     id: c.id,
     client_name: c.client_name,
@@ -416,6 +437,7 @@ function toCallRow(
     unresolved: parseUnresolvedArray(c.unresolved),
     material_needs: parseJsonArray(c.material_needs),
     transcript: c.transcript,
+    has_transcript: hasTranscript,
     todos,
   };
 }
@@ -433,7 +455,7 @@ function toCallRow(
  */
 export async function listCallsWithTodos(db: D1Database): Promise<CallRow[]> {
   const { results: calls } = await db
-    .prepare(`${CALL_SELECT} WHERE calls.call_type IS NULL OR calls.call_type != 'low_signal' ORDER BY calls.recorded_at DESC`)
+    .prepare(`${CALL_LIST_SELECT} WHERE calls.call_type IS NULL OR calls.call_type != 'low_signal' ORDER BY calls.recorded_at DESC`)
     .all<RawCallJoinRow>();
   if (calls.length === 0) return [];
 
@@ -1575,4 +1597,115 @@ export async function completeSiteTask(db: D1Database, id: string, completedByUs
 export async function getCallsCount(db: D1Database): Promise<number> {
   const row = await db.prepare(`SELECT COUNT(*) AS n FROM calls`).first<{ n: number }>();
   return row?.n ?? 0;
+}
+
+/**
+ * Transcript bodies for the lean call list — same call set as listCallsWithTodos
+ * (excludes low_signal). Keyed by call id; null when no transcripts row yet.
+ */
+export async function listCallTranscripts(db: D1Database): Promise<Record<string, string | null>> {
+  const { results } = await db
+    .prepare(
+      `SELECT calls.id AS id, transcripts.transcript AS transcript
+       FROM calls
+       LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
+       WHERE calls.call_type IS NULL OR calls.call_type != 'low_signal'`
+    )
+    .all<{ id: string; transcript: string | null }>();
+  const out: Record<string, string | null> = {};
+  for (const row of results) out[row.id] = row.transcript;
+  return out;
+}
+
+/**
+ * "Today" for closed_today — Asia/Kolkata, matching the office locale the
+ * dashboard formats dates in (en-IN). Compared against substr(completed_at,1,10)
+ * the same way the client compared dayKey(completed_at) to local today.
+ */
+function todayKeyKolkata(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+export interface DashboardSummary {
+  open_today: number;
+  closed_today: number;
+  calls_count: number;
+  sites_attention: SiteAttentionRow[];
+  escalations: EscalationRow[];
+  sites: SiteRow[];
+  staff_roster: StaffRosterRow[];
+  open_site_tasks: SiteTaskRow[];
+  confirmed_count: number;
+  unconfirmed_count: number;
+}
+
+/**
+ * Home-page read model — live aggregates + small lists, no call transcripts.
+ * `forUserId` set (staff) → only sites + open_site_tasks scoped to that user;
+ * admin fields are zero/empty. Omitted/null → full admin/superadmin payload.
+ */
+export async function getDashboardSummary(
+  db: D1Database,
+  forUserId?: string | null
+): Promise<DashboardSummary> {
+  if (forUserId) {
+    const [sites, open_site_tasks] = await Promise.all([
+      listSites(db, forUserId),
+      listOpenSiteTasks(db, forUserId),
+    ]);
+    return {
+      open_today: 0,
+      closed_today: 0,
+      calls_count: 0,
+      sites_attention: [],
+      escalations: [],
+      sites,
+      staff_roster: [],
+      open_site_tasks,
+      confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
+      unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
+    };
+  }
+
+  const todayKey = todayKeyKolkata();
+  const [
+    openRow,
+    closedRow,
+    calls_count,
+    sites_attention,
+    escalations,
+    sites,
+    staff_roster,
+    open_site_tasks,
+  ] = await Promise.all([
+    db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'open'`).first<{ n: number }>(),
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'done' AND substr(completed_at, 1, 10) = ?`)
+      .bind(todayKey)
+      .first<{ n: number }>(),
+    getCallsCount(db),
+    getSitesNeedingAttention(db),
+    listOpenEscalations(db),
+    listSites(db),
+    listStaffRoster(db),
+    listOpenSiteTasks(db),
+  ]);
+
+  return {
+    open_today: openRow?.n ?? 0,
+    closed_today: closedRow?.n ?? 0,
+    calls_count,
+    sites_attention,
+    escalations,
+    sites,
+    staff_roster,
+    open_site_tasks,
+    confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
+    unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
+  };
 }

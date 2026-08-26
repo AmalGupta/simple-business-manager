@@ -48,7 +48,7 @@ export function RecordingsPageView({ calls, onBack, onOpen }) {
               </div>
             </button>
 
-            {call.transcript == null ? (
+            {!call.has_transcript ? (
               <span style={{ display: "flex", alignItems: "center", gap: 8, color: t.edge2, fontSize: 13, marginTop: 8 }}>
                 <FileText size={16} />
                 Transcription in progress

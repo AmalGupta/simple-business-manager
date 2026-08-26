@@ -17,10 +17,21 @@ export async function fetchCalls() {
   return fetchJSON("/api/calls");
 }
 
+/** Background hydrate after lean fetchCalls() — map of call id → transcript text (or null). */
+export async function fetchCallTranscripts() {
+  return fetchJSON("/api/calls/transcripts");
+}
+
+/** Home tiles + small lists — no call transcripts. Role-scoped server-side. */
+export async function fetchDashboardSummary() {
+  return fetchJSON("/api/dashboard/summary");
+}
+
 /* Single-call fetch, on demand — the bulk fetchCalls() list is never loaded
    for a `staff` session (no office dashboard for them), so opening a call
    from their site's timeline needs its own fetch. Same endpoint the admin
-   dashboard would resolve from its already-loaded list. */
+   dashboard would resolve from its already-loaded list. Also used when a
+   lean list row has has_transcript but the blob is not hydrated yet. */
 export async function fetchCall(id) {
   return fetchJSON(`/api/calls/${id}`);
 }

@@ -13,6 +13,8 @@ import {
   handleGetCall,
   handleGetCalls,
   handleGetCallsCount,
+  handleGetCallTranscripts,
+  handleGetDashboardSummary,
   handleGetEscalations,
   handleGetSites,
   handlePostSite,
@@ -112,10 +114,20 @@ export default {
       return handleGetCalls(request, env);
     }
 
-    // Must come before callMatch below — "count" would otherwise parse as a call id.
+    // Must come before callMatch below — "count" / "transcripts" would otherwise parse as a call id.
     if (url.pathname === "/api/calls/count" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetCallsCount(request, env);
+    }
+
+    if (url.pathname === "/api/calls/transcripts" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallTranscripts(request, env);
+    }
+
+    if (url.pathname === "/api/dashboard/summary" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetDashboardSummary(request, env);
     }
 
     const callMatch = url.pathname.match(/^\/api\/calls\/([^/]+)$/);

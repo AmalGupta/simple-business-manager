@@ -14,12 +14,14 @@ import {
   getCallsCount,
   getCallWithTodos,
   getConfirmedSitesSummary,
+  getDashboardSummary,
   getSitesNeedingAttention,
   getUnreadActivityCounts,
   getUserById,
   isCallAccessibleToUser,
   isUserAssignedToSite,
   linkCallToSites,
+  listCallTranscripts,
   listCallsForSiteScan,
   listCallsWithTodos,
   listOpenEscalations,
@@ -67,6 +69,24 @@ export async function handleGetCallsCount(request: Request, env: Env): Promise<R
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
   return json({ count: await getCallsCount(env.DB) });
+}
+
+/** Admin-only map of call id → transcript text for background hydrate after the lean list. */
+export async function handleGetCallTranscripts(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  return json(await listCallTranscripts(env.DB));
+}
+
+/**
+ * Home read model — live tile counts + small lists, no call transcripts.
+ * Any logged-in role; staff get only their sites + open site tasks.
+ */
+export async function handleGetDashboardSummary(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  const forUserId = session.user_role === "staff" ? session.user_id : null;
+  return json(await getDashboardSummary(env.DB, forUserId));
 }
 
 /**

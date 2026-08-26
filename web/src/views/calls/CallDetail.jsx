@@ -67,7 +67,7 @@ export function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage 
               </span>
               <PhoneLink phone={call.client_phone} />
             </div>
-            {call.transcript != null && <AudioPlayer src={`/api/calls/${call.id}/recording`} />}
+            {call.has_transcript && <AudioPlayer src={`/api/calls/${call.id}/recording`} />}
           </div>
 
           <Section label="Summary">
@@ -158,7 +158,7 @@ export function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage 
               paddingTop: "1rem",
             }}
           >
-            {call.transcript == null ? (
+            {!call.has_transcript ? (
               <span style={{ display: "flex", alignItems: "center", gap: 8, color: t.edge2, fontSize: 13 }}>
                 <FileText size={16} />
                 Transcription in progress

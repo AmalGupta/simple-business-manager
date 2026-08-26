@@ -56,7 +56,7 @@ export function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0, s
         </div>
       )}
 
-      {call.transcript != null && (
+      {call.has_transcript && call.transcript != null && (
         <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.frost}` }}>
           <button
             onClick={() => setOpenTranscript((v) => !v)}
