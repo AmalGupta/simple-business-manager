@@ -223,9 +223,17 @@ export async function handleListStaff(request: Request, env: Env): Promise<Respo
  * and decrypting every row on every modal open was making it slow to open
  * for no reason.
  */
+/**
+ * Session required, but not admin-only — unlike every other staff-management
+ * route. Found live while testing migration 0013's staff handoff flow: a
+ * staff member completing their own stage needs this same lean roster
+ * (id/name/phone, no PIN) to pick who the next stage goes to, and the
+ * narrow handoff permission (isUserActiveOnSiteTasks) already limits what
+ * they can actually do with a name from this list.
+ */
 export async function handleListStaffRoster(request: Request, env: Env): Promise<Response> {
-  const gate = await requireAdmin(request, env);
-  if (gate instanceof Response) return gate;
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
   return json(await listStaffRoster(env.DB));
 }
 

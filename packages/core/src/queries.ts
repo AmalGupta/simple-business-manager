@@ -550,9 +550,18 @@ const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name, targe
  * who see everything, same as before roles existed.
  */
 export async function listSites(db: D1Database, forUserId?: string | null): Promise<SiteRow[]> {
-  const scoped = forUserId ? `AND id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)` : "";
+  // Same "team roster OR holds a site_task" rule as isUserAssignedToSite —
+  // otherwise a staff member with a workflow assignment but no team-roster
+  // row could open the site via a workflow tile yet not find it listed here.
+  const scoped = forUserId
+    ? `AND id IN (
+         SELECT site_id FROM site_team_members WHERE user_id = ?
+         UNION
+         SELECT site_id FROM site_tasks WHERE assigned_to_user_id = ?
+       )`
+    : "";
   const stmt = db.prepare(`${SITE_ROW_SELECT} WHERE 1=1 ${scoped} ORDER BY (is_confirmed IS NOT NULL), name ASC`);
-  const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<SiteRow>();
+  const { results } = await (forUserId ? stmt.bind(forUserId, forUserId) : stmt).all<SiteRow>();
   return results;
 }
 
@@ -680,11 +689,24 @@ export async function listSiteTeamMembers(db: D1Database, siteId: string): Promi
   return results;
 }
 
-/** True if `userId` is on `siteId`'s team roster — backs assertSiteMembership in src/lib/auth.ts. */
+/**
+ * True if `userId` is on `siteId`'s team roster, OR holds a site_task there
+ * — backs assertSiteMembership in src/lib/auth.ts (gates the site timeline,
+ * team roster, media, voice-note, and recording routes for a `staff`
+ * session). Found live while testing migration 0013: admin can assign a
+ * workflow stage to a staff member without also adding them to the site's
+ * team roster, and without this OR clause that staff member would see the
+ * site in their own workflow tiles but get a 403 wall opening it.
+ */
 export async function isUserAssignedToSite(db: D1Database, userId: string, siteId: string): Promise<boolean> {
   const row = await db
-    .prepare(`SELECT 1 FROM site_team_members WHERE site_id = ? AND user_id = ? LIMIT 1`)
-    .bind(siteId, userId)
+    .prepare(
+      `SELECT 1 FROM site_team_members WHERE site_id = ? AND user_id = ?
+       UNION
+       SELECT 1 FROM site_tasks WHERE site_id = ? AND assigned_to_user_id = ?
+       LIMIT 1`
+    )
+    .bind(siteId, userId, siteId, userId)
     .first();
   return row !== null;
 }
@@ -848,8 +870,15 @@ export interface ConfirmedSiteRow {
  */
 export async function getConfirmedSitesSummary(db: D1Database, forUserId?: string | null): Promise<ConfirmedSiteRow[]> {
   const confirmedClause = forUserId ? `sites.is_confirmed IS NOT 'N'` : `sites.is_confirmed = 'Y'`;
+  // Same "team roster OR holds a site_task" rule as isUserAssignedToSite —
+  // otherwise "All my sites" wouldn't list a site the workflow tiles already
+  // let this staff member open.
   const scoped = forUserId
-    ? `AND sites.id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)`
+    ? `AND sites.id IN (
+         SELECT site_id FROM site_team_members WHERE user_id = ?
+         UNION
+         SELECT site_id FROM site_tasks WHERE assigned_to_user_id = ?
+       )`
     : "";
   const stmt = db.prepare(
     `SELECT sites.id AS id, sites.name AS name, sites.target_closure_date AS target_closure_date,
@@ -861,7 +890,7 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
      GROUP BY sites.id, sites.name, sites.target_closure_date
      ORDER BY sites.name ASC`
   );
-  const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<ConfirmedSiteRow>();
+  const { results } = await (forUserId ? stmt.bind(forUserId, forUserId) : stmt).all<ConfirmedSiteRow>();
   return results;
 }
 

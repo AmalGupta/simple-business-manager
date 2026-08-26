@@ -1930,12 +1930,27 @@ function StageAssignRow({ task, onAssign }) {
     }
   };
 
-  const statusLine =
-    task.status === "done"
-      ? `Done by ${task.completed_by_name ?? task.assignee_name ?? "—"}${task.completed_at ? ` · ${fmtShort(task.completed_at)}` : ""}`
-      : task.assignee_name
-        ? `Assigned to ${task.assignee_name}${task.assigned_at ? ` · ${fmtShort(task.assigned_at)}` : ""}${task.due_date ? ` · due ${fmtShort(task.due_date)}` : ""}`
-        : "Unassigned";
+  const dueUrgent = task.status !== "done" && isTaskDueDateUrgent(task.due_date);
+
+  let statusLine;
+  if (task.status === "done") {
+    statusLine = `Done by ${task.completed_by_name ?? task.assignee_name ?? "—"}${task.completed_at ? ` · ${fmtShort(task.completed_at)}` : ""}`;
+  } else if (task.assignee_name) {
+    statusLine = (
+      <>
+        Assigned to {task.assignee_name}
+        {task.assigned_at ? ` · ${fmtShort(task.assigned_at)}` : ""}
+        {task.due_date && (
+          <span style={{ color: dueUrgent ? t.signal : "inherit", fontWeight: dueUrgent ? 700 : 400 }}>
+            {" "}
+            · due {fmtShort(task.due_date)}
+          </span>
+        )}
+      </>
+    );
+  } else {
+    statusLine = "Unassigned";
+  }
 
   return (
     <div style={TILE_ROW_STYLE}>
@@ -1988,7 +2003,7 @@ function StageAssignRow({ task, onAssign }) {
    all 23 stages for this site, grouped by category (display order only, not
    a pipeline — see migration 0013), each with status/assignee/timestamps
    and an inline assign control. */
-function WorkTimelinePopup({ site, onClose }) {
+function WorkTimelinePopup({ site, onClose, onAssigned = () => {} }) {
   const [tasks, setTasks] = useState(null);
 
   const reload = useCallback(() => {
@@ -2007,7 +2022,10 @@ function WorkTimelinePopup({ site, onClose }) {
 
   const assign = async (taskId, patch) => {
     await patchSiteTask(taskId, patch);
-    await reload();
+    // Refreshes this popup's own list AND the app-level open-tasks cache the
+    // home-page workflow tiles read from — without the second call, an
+    // assignment made here doesn't show up on home until a full reload.
+    await Promise.all([reload(), onAssigned()]);
   };
 
   const doneCount = tasks?.filter((tk) => tk.status === "done").length ?? 0;
@@ -2104,21 +2122,26 @@ function MyTaskBanner({ siteId, myTasks, onChanged }) {
   const [staffId, setStaffId] = useState("");
   const [saving, setSaving] = useState(false);
 
-  if (!myTasks || myTasks.length === 0) return null;
-
   const markDone = async (task) => {
     setCompletingId(task.id);
     try {
       await patchSiteTask(task.id, { status: "done" });
-      const [openStages, staffRoster] = await Promise.all([fetchUnassignedSiteTasks(siteId), fetchStaffRoster()]);
-      if (openStages.length > 0) {
-        setUnassigned(openStages);
-        setStaff(staffRoster);
-        setPickedStageId(openStages[0].id);
-        setStaffId("");
-        setHandoffFor(task);
-      }
+      // Completion itself is done regardless of what follows — refresh
+      // immediately so the app-level tile counts and this banner reflect it
+      // even if the handoff picker below can't be offered for some reason.
       await onChanged();
+      try {
+        const [openStages, staffRoster] = await Promise.all([fetchUnassignedSiteTasks(siteId), fetchStaffRoster()]);
+        if (openStages.length > 0) {
+          setUnassigned(openStages);
+          setStaff(staffRoster);
+          setPickedStageId(openStages[0].id);
+          setStaffId("");
+          setHandoffFor(task);
+        }
+      } catch (err) {
+        console.error("[sbm] failed to load handoff options — completion still succeeded", err);
+      }
     } catch (err) {
       console.error("[sbm] failed to mark task done", err);
     } finally {
@@ -2131,6 +2154,7 @@ function MyTaskBanner({ siteId, myTasks, onChanged }) {
     setSaving(true);
     try {
       await patchSiteTask(pickedStageId, { assigned_to_user_id: staffId });
+      await onChanged();
       setHandoffFor(null);
     } catch (err) {
       console.error("[sbm] failed to hand off stage", err);
@@ -2139,8 +2163,11 @@ function MyTaskBanner({ siteId, myTasks, onChanged }) {
     }
   };
 
+  const hasTasks = myTasks && myTasks.length > 0;
+
   return (
     <>
+      {hasTasks && (
       <Card style={{ marginBottom: 12, borderColor: t.accent }}>
         <TileLabel>Your task{myTasks.length > 1 ? "s" : ""} here</TileLabel>
         {myTasks.map((task) => (
@@ -2163,6 +2190,7 @@ function MyTaskBanner({ siteId, myTasks, onChanged }) {
           </div>
         ))}
       </Card>
+      )}
 
       {handoffFor && (
         <div
@@ -2922,7 +2950,9 @@ function SiteView({
       </div>
 
       {showAssignModal && <AssignTeamModal onClose={() => setShowAssignModal(false)} onAdd={addTeamMember} />}
-      {showWorkTimeline && <WorkTimelinePopup site={siteRecord} onClose={() => setShowWorkTimeline(false)} />}
+      {showWorkTimeline && (
+        <WorkTimelinePopup site={siteRecord} onClose={() => setShowWorkTimeline(false)} onAssigned={onTasksChanged} />
+      )}
     </div>
   );
 }
