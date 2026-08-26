@@ -19,6 +19,7 @@ import { CallsPageView } from "./views/calls/CallsPageView.jsx";
 import { RecordingsPageView } from "./views/calls/RecordingsPageView.jsx";
 import { CallDetail } from "./views/calls/CallDetail.jsx";
 import { OpenTodosView } from "./views/calls/OpenTodosView.jsx";
+import { MyOpenTodosView } from "./views/calls/MyOpenTodosView.jsx";
 import { StaffDirectoryView } from "./views/staff/StaffDirectoryView.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { SitesReviewView } from "./views/sites/SitesReviewView.jsx";
@@ -60,6 +61,7 @@ export default function SimpleBusinessManager() {
      a staff session, or every open assignment business-wide for admin/
      superadmin. See fetchOpenSiteTasks and migration 0013. */
   const [openSiteTasks, setOpenSiteTasks] = useState([]);
+  const [myOpenTodos, setMyOpenTodos] = useState([]);
   const [view, setView] = useState({ name: "home" });
   const [busyIds, setBusyIds] = useState(new Set());
 
@@ -119,10 +121,12 @@ export default function SimpleBusinessManager() {
     setConfirmedCount(0);
     setUnconfirmedCount(0);
     setOpenSiteTasks([]);
+    setMyOpenTodos([]);
 
     const applySummary = (summary) => {
       setAllSites(summary.sites ?? []);
       setOpenSiteTasks(summary.open_site_tasks ?? []);
+      setMyOpenTodos(summary.my_open_todos ?? []);
       setConfirmedCount(summary.confirmed_count ?? 0);
       setUnconfirmedCount(summary.unconfirmed_count ?? 0);
       setOpenToday(summary.open_today ?? 0);
@@ -325,6 +329,11 @@ export default function SimpleBusinessManager() {
     setCalls((cs) =>
       cs.map((c) => ({ ...c, todos: c.todos.map((td) => (td.id === todo.id ? { ...td, ...patch } : td)) }))
     );
+    setMyOpenTodos((list) => {
+      if (!list.some((td) => td.id === todo.id)) return list;
+      if (patch.status === "open") return list.map((td) => (td.id === todo.id ? { ...td, ...patch } : td));
+      return list.filter((td) => td.id !== todo.id);
+    });
     applyCountDelta(true);
     try {
       await patchTodo(todo.id, patch);
@@ -332,6 +341,14 @@ export default function SimpleBusinessManager() {
       setCalls((cs) =>
         cs.map((c) => ({ ...c, todos: c.todos.map((td) => (td.id === todo.id ? { ...td, ...prev } : td)) }))
       );
+      setMyOpenTodos((list) => {
+        // Restore only if this todo belonged on the personal queue before.
+        if (prev.status !== "open") return list.filter((td) => td.id !== todo.id);
+        if (list.some((td) => td.id === todo.id)) {
+          return list.map((td) => (td.id === todo.id ? { ...td, ...prev } : td));
+        }
+        return [...list, { ...todo, ...prev }];
+      });
       applyCountDelta(false);
     } finally {
       setBusyIds((s) => {
@@ -605,6 +622,8 @@ export default function SimpleBusinessManager() {
         canManage={me.role !== "staff"}
         myOpenTasks={openSiteTasks.filter((tk) => tk.site_name === view.site)}
         onTasksChanged={refreshOpenSiteTasks}
+        staffRoster={staffRoster}
+        onAssignTodo={onAssignTodo}
       />
     );
 
@@ -684,13 +703,27 @@ export default function SimpleBusinessManager() {
             marginBottom: "1.5rem",
           }}
         >
+          {myOpenTodos.length > 0 && (
+            <button
+              onClick={() => setView({ name: "my-open-todos", from: { name: "staff-home" } })}
+              style={{ all: "unset", cursor: "pointer", display: "block" }}
+              aria-label={`My call tasks — ${myOpenTodos.length} open`}
+            >
+              <Card tile>
+                <TileLabel>My call tasks</TileLabel>
+                <div style={TILE_VALUE_ROW_STYLE}>
+                  <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length}</span>
+                </div>
+              </Card>
+            </button>
+          )}
           <WorkflowTilesRow
             tasks={openSiteTasks}
             onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "staff-home" } })}
           />
         </div>
 
-        {openSiteTasks.length === 0 && (
+        {openSiteTasks.length === 0 && myOpenTodos.length === 0 && (
           <p style={{ fontSize: 14, color: t.edge2, marginBottom: "1.5rem" }}>Nothing assigned right now.</p>
         )}
 
@@ -701,6 +734,18 @@ export default function SimpleBusinessManager() {
           All my sites →
         </button>
       </>
+    );
+
+  if (view.name === "my-open-todos")
+    return shell(
+      <MyOpenTodosView
+        todos={myOpenTodos}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-open-todos" } })}
+        onToggle={onToggle}
+        onPark={onPark}
+        busyIds={busyIds}
+      />
     );
 
   return shell(

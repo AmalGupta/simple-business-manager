@@ -31,6 +31,8 @@ export function SiteView({
   canManage = true,
   myOpenTasks = [],
   onTasksChanged = () => {},
+  staffRoster = [],
+  onAssignTodo,
 }) {
   const [showWorkTimeline, setShowWorkTimeline] = useState(false);
   const siteCalls = useMemo(
@@ -115,6 +117,12 @@ export function SiteView({
   const addTeamMember = async (userId) => {
     const member = await postSiteTeamMember(siteRecord.id, userId);
     setTeam((current) => [...(current ?? []), member]);
+  };
+
+  const handleAssignTodo = async (todoId, staffId) => {
+    if (!onAssignTodo) return;
+    await onAssignTodo(todoId, staffId);
+    await loadTimeline();
   };
 
   return (
@@ -301,7 +309,13 @@ export function SiteView({
 
       <TileLabel>Timeline</TileLabel>
       <div style={{ marginTop: 8 }}>
-        <SiteTimeline entries={timeline} onOpenCall={onOpen} canManage={canManage} />
+        <SiteTimeline
+          entries={timeline}
+          onOpenCall={onOpen}
+          canManage={canManage}
+          staffRoster={staffRoster}
+          onAssignTodo={handleAssignTodo}
+        />
       </div>
 
       {showAssignModal && <AssignTeamModal onClose={() => setShowAssignModal(false)} onAdd={addTeamMember} />}

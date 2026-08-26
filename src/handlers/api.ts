@@ -17,6 +17,7 @@ import {
   getConfirmedSitesSummary,
   getDashboardSummary,
   getSitesNeedingAttention,
+  getTodoById,
   getUnreadActivityCounts,
   getUserById,
   isCallAccessibleToUser,
@@ -28,6 +29,7 @@ import {
   listOpenEscalations,
   listSiteTeamMembers,
   listSites,
+  autoAssignOpenTodosByOwner,
   replaceExtraction,
   setCallFailed,
   setCallSubmitted,
@@ -171,9 +173,13 @@ export async function handleReExtractCall(request: Request, env: Env, id: string
 
 const TODO_PATCH_KEYS = ["status", "completed_at", "snoozed_until"] as const;
 
+/**
+ * Admin: assign or patch any todo. Staff: status/completed_at/snoozed_until
+ * only on todos assigned to them (personal work queue).
+ */
 export async function handlePatchTodo(request: Request, env: Env, id: string): Promise<Response> {
-  const gate = await requireAdmin(request, env);
-  if (gate instanceof Response) return gate;
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
 
   let body: unknown;
   try {
@@ -184,10 +190,24 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
   if (typeof body !== "object" || body === null) return json({ error: "invalid body" }, 400);
   const record = body as Record<string, unknown>;
 
+  if (session.user_role === "staff") {
+    if ("assigned_to_user_id" in record) return json({ error: "forbidden" }, 403);
+    const existing = await getTodoById(env.DB, id);
+    if (!existing) return json({ error: "not found" }, 404);
+    if (existing.assigned_to_user_id !== session.user_id) return json({ error: "forbidden" }, 403);
+    const patch: Partial<Record<(typeof TODO_PATCH_KEYS)[number], string | null>> = {};
+    for (const key of TODO_PATCH_KEYS) {
+      if (key in record) patch[key] = record[key] as string | null;
+    }
+    const updated = await updateTodo(env.DB, id, patch);
+    if (!updated) return json({ error: "not found" }, 404);
+    return json(updated);
+  }
+
   if (typeof record.assigned_to_user_id === "string" && record.assigned_to_user_id) {
     const assigned = await assignTodo(env.DB, id, {
       assignedToUserId: record.assigned_to_user_id,
-      assignedByUserId: gate.user_id,
+      assignedByUserId: session.user_id,
     });
     if (!assigned) return json({ error: "not found" }, 404);
     return json(assigned);
@@ -203,6 +223,14 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
   const updated = await updateTodo(env.DB, id, patch);
   if (!updated) return json({ error: "not found" }, 404);
   return json(updated);
+}
+
+/** Admin one-shot: match open unassigned todos to staff by owner name. */
+export async function handleAutoAssignTodos(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const updated = await autoAssignOpenTodosByOwner(env.DB);
+  return json({ ok: true, updated });
 }
 
 /**

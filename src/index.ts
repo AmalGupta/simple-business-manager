@@ -26,6 +26,7 @@ import {
   handlePostEscalation,
   handlePostSitesBackfill,
   handlePostSiteTeamMember,
+  handleAutoAssignTodos,
   handleReExtractCall,
   handleRetryCallStt,
 } from "./handlers/api";
@@ -153,6 +154,11 @@ export default {
     if (todoMatch && request.method === "PATCH") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handlePatchTodo(request, env, todoMatch[1]);
+    }
+
+    if (url.pathname === "/api/todos/auto-assign" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleAutoAssignTodos(request, env);
     }
 
     if (url.pathname === "/api/sites" && request.method === "GET") {

@@ -1,5 +1,6 @@
 // All D1 access lives here — see docs/SCAFFOLDING.md §1 ("no SQL outside queries.ts").
 
+import { matchStaffByOwner } from "./assignment";
 import type {
   Call,
   CallExtraction,
@@ -171,7 +172,8 @@ export async function linkCallToSiteExplicit(db: D1Database, callId: string, sit
   await db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId).run();
 }
 
-/** Task 5 — extraction landed. Writes the extracted fields, prompt_version, sites, todos, and commitments. */
+/** Task 5 — extraction landed. Writes the extracted fields, prompt_version, sites, todos, and commitments.
+ * Auto-assigns each todo to a staff account when owner matches the roster (see matchStaffByOwner). */
 export async function saveExtraction(
   db: D1Database,
   callId: string,
@@ -180,6 +182,7 @@ export async function saveExtraction(
 ): Promise<void> {
   const siteNames = [...new Set(extraction.sites.map((s) => s.trim()).filter(Boolean))];
   const siteIds = await Promise.all(siteNames.map((name) => upsertSite(db, name)));
+  const staff = await listStaffRoster(db);
 
   const statements = [
     db
@@ -210,10 +213,22 @@ export async function saveExtraction(
   }
 
   for (const todo of extraction.todos) {
+    const matched = matchStaffByOwner(todo.owner, staff);
     statements.push(
       db
-        .prepare(`INSERT INTO todos (id, call_id, owner, text, due_date, origin) VALUES (?, ?, ?, ?, ?, 'llm')`)
-        .bind(crypto.randomUUID(), callId, todo.owner, todo.text, todo.due_date || null)
+        .prepare(
+          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, assigned_to_user_id, assigned_at)
+           VALUES (?, ?, ?, ?, ?, 'llm', ?, ?)`
+        )
+        .bind(
+          crypto.randomUUID(),
+          callId,
+          todo.owner,
+          todo.text,
+          todo.due_date || null,
+          matched?.id ?? null,
+          matched ? new Date().toISOString() : null
+        )
     );
   }
 
@@ -228,6 +243,33 @@ export async function saveExtraction(
   }
 
   await db.batch(statements);
+}
+
+/**
+ * One-shot / recovery: assign open todos that still have no assigned_to_user_id
+ * when owner matches a staff name. Returns how many rows were updated.
+ */
+export async function autoAssignOpenTodosByOwner(db: D1Database): Promise<number> {
+  const staff = await listStaffRoster(db);
+  if (staff.length === 0) return 0;
+  const { results } = await db
+    .prepare(
+      `SELECT id, owner FROM todos WHERE status = 'open' AND assigned_to_user_id IS NULL AND owner IS NOT NULL`
+    )
+    .all<{ id: string; owner: string }>();
+  let updated = 0;
+  for (const row of results ?? []) {
+    const matched = matchStaffByOwner(row.owner, staff);
+    if (!matched) continue;
+    await db
+      .prepare(
+        `UPDATE todos SET assigned_to_user_id = ?, assigned_at = datetime('now') WHERE id = ? AND assigned_to_user_id IS NULL`
+      )
+      .bind(matched.id, row.id)
+      .run();
+    updated += 1;
+  }
+  return updated;
 }
 
 /**
@@ -816,7 +858,13 @@ export async function isCallAccessibleToUser(db: D1Database, userId: string, cal
     )
     .bind(callId, userId)
     .first();
-  return row !== null;
+  if (row !== null) return true;
+  // Staff with an assigned call-todo can open that call for context (incl. voice memos).
+  const assigned = await db
+    .prepare(`SELECT 1 FROM todos WHERE call_id = ? AND assigned_to_user_id = ? LIMIT 1`)
+    .bind(callId, userId)
+    .first();
+  return assigned !== null;
 }
 
 /**
@@ -1687,13 +1735,50 @@ export interface DashboardSummary {
   sites: SiteRow[];
   staff_roster: StaffRosterRow[];
   open_site_tasks: SiteTaskRow[];
+  /** Open call todos assigned to this user — staff home tile; empty for admin summary. */
+  my_open_todos: AssignedTodoRow[];
   confirmed_count: number;
   unconfirmed_count: number;
 }
 
+export interface AssignedTodoRow {
+  id: string;
+  call_id: string;
+  owner: TodoOwner;
+  text: string;
+  due_date: string | null;
+  status: Todo["status"];
+  client_name: string;
+  recorded_at: string | null;
+}
+
+/** Open call todos assigned to a staff user — personal work queue. */
+export async function listMyOpenTodos(db: D1Database, userId: string): Promise<AssignedTodoRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT todos.id AS id,
+              todos.call_id AS call_id,
+              todos.owner AS owner,
+              todos.text AS text,
+              todos.due_date AS due_date,
+              todos.status AS status,
+              COALESCE(clients.name, 'Unknown caller') AS client_name,
+              calls.recorded_at AS recorded_at
+       FROM todos
+       JOIN calls ON calls.id = todos.call_id
+       LEFT JOIN clients ON clients.id = calls.client_id
+       WHERE todos.status = 'open'
+         AND todos.assigned_to_user_id = ?
+       ORDER BY (todos.due_date IS NULL), todos.due_date ASC, calls.recorded_at DESC`
+    )
+    .bind(userId)
+    .all<AssignedTodoRow>();
+  return results ?? [];
+}
+
 /**
  * Home-page read model — live aggregates + small lists, no call transcripts.
- * `forUserId` set (staff) → only sites + open_site_tasks scoped to that user;
+ * `forUserId` set (staff) → only sites + open_site_tasks + my_open_todos scoped to that user;
  * admin fields are zero/empty. Omitted/null → full admin/superadmin payload.
  */
 export async function getDashboardSummary(
@@ -1701,9 +1786,10 @@ export async function getDashboardSummary(
   forUserId?: string | null
 ): Promise<DashboardSummary> {
   if (forUserId) {
-    const [sites, open_site_tasks] = await Promise.all([
+    const [sites, open_site_tasks, my_open_todos] = await Promise.all([
       listSites(db, forUserId),
       listOpenSiteTasks(db, forUserId),
+      listMyOpenTodos(db, forUserId),
     ]);
     return {
       open_today: 0,
@@ -1714,6 +1800,7 @@ export async function getDashboardSummary(
       sites,
       staff_roster: [],
       open_site_tasks,
+      my_open_todos,
       confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
       unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
     };
@@ -1752,6 +1839,7 @@ export async function getDashboardSummary(
     sites,
     staff_roster,
     open_site_tasks,
+    my_open_todos: [],
     confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
     unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
   };

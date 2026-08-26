@@ -2,7 +2,7 @@ import { t } from "../../theme.js";
 import { Card } from "../../components/Card.jsx";
 import { SiteTimelineEntry } from "./SiteTimelineEntry.jsx";
 
-export function SiteTimeline({ entries, onOpenCall, canManage }) {
+export function SiteTimeline({ entries, onOpenCall, canManage, staffRoster = [], onAssignTodo }) {
   if (entries === null) return <p style={{ fontSize: 13, color: t.edge2 }}>Loading…</p>;
   if (entries.length === 0) {
     return (
@@ -14,7 +14,14 @@ export function SiteTimeline({ entries, onOpenCall, canManage }) {
   return (
     <div style={{ borderLeft: `2px solid ${t.frost}`, marginLeft: 4 }}>
       {entries.map((entry) => (
-        <SiteTimelineEntry key={`${entry.type}-${entry.id}`} entry={entry} onOpenCall={onOpenCall} canManage={canManage} />
+        <SiteTimelineEntry
+          key={`${entry.type}-${entry.id}`}
+          entry={entry}
+          onOpenCall={onOpenCall}
+          canManage={canManage}
+          staffRoster={staffRoster}
+          onAssignTodo={onAssignTodo}
+        />
       ))}
     </div>
   );

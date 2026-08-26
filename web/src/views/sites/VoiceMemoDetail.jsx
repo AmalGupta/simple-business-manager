@@ -1,7 +1,8 @@
 import { t } from "../../theme.js";
 import { TodoRow } from "../../components/TodoRow.jsx";
+import { TodoAssignControl } from "../calls/TodoAssignControl.jsx";
 
-export function VoiceMemoDetail({ entryRef }) {
+export function VoiceMemoDetail({ entryRef, canManage = false, staffRoster = [], onAssign }) {
   if (entryRef.transcript === undefined) return null; // not sent to this session (staff) — nothing to show
   if (entryRef.transcript === null) return null; // still transcribing
   return (
@@ -31,7 +32,14 @@ export function VoiceMemoDetail({ entryRef }) {
             Todos
           </div>
           {entryRef.todos.map((td) => (
-            <TodoRow key={td.id} todo={td} readOnly />
+            <div key={td.id}>
+              <TodoRow todo={td} readOnly />
+              {canManage && onAssign && (
+                <div style={{ padding: "0 10px 8px" }}>
+                  <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} />
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}

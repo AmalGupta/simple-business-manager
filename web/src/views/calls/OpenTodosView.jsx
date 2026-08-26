@@ -18,6 +18,10 @@ export function OpenTodosView({ calls, staffRoster, onBack, onOpen, onAssign }) 
       calls
         .flatMap((c) => c.todos.filter((td) => td.status === "open").map((td) => ({ ...td, call: c })))
         .sort((a, b) => {
+          // Unassigned first so the assign pane is what admin works through.
+          const aUn = a.assigned_to_user_id ? 1 : 0;
+          const bUn = b.assigned_to_user_id ? 1 : 0;
+          if (aUn !== bUn) return aUn - bUn;
           const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity;
           const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity;
           return ad - bd;
