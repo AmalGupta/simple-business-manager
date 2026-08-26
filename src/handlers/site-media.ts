@@ -5,6 +5,8 @@
 
 import { addSiteMedia, getCallById, getSiteMediaById, isCallRecordingAccessibleToUser, listSiteMedia, type SessionWithUser } from "@sbm/core";
 import { streamR2Object } from "../lib/r2-stream";
+import { assertSiteMembership } from "../lib/auth";
+import type { SessionWithUser } from "@sbm/core";
 import type { Env } from "../index";
 
 const MEDIA_PREFIX = "site-media/";
@@ -50,9 +52,15 @@ export async function handlePostSiteMedia(request: Request, env: Env, siteId: st
   return json(media, 201);
 }
 
-export async function handleGetMedia(request: Request, env: Env, mediaId: string): Promise<Response> {
+export async function handleGetMedia(
+  request: Request,
+  env: Env,
+  mediaId: string,
+  session: SessionWithUser
+): Promise<Response> {
   const media = await getSiteMediaById(env.DB, mediaId);
   if (!media) return new Response("Not found", { status: 404 });
+  if (!(await assertSiteMembership(env, session, media.site_id))) return new Response("Forbidden", { status: 403 });
   return streamR2Object(env.RECORDINGS, media.r2_key, media.content_type, request);
 }
 
