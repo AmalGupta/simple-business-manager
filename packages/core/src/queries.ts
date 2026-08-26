@@ -732,28 +732,6 @@ export async function isCallAccessibleToUser(db: D1Database, userId: string, cal
   return row !== null;
 }
 
-/**
- * True if `callId` is linked (call_sites) to any site `userId` is on the
- * team roster for — unlike isCallAccessibleToUser above, this INCLUDES site
- * voice memos: playing back a staff member's own site voice memo is
- * intentional (see AudioPlayer in SiteTimelineEntry, web/src/Dashboard.jsx),
- * only the memo's transcript/todos stay admin-only. Used to scope
- * GET /api/calls/:id/recording so a `staff` session can't stream another
- * site's raw audio just by guessing/knowing a call id.
- */
-export async function isCallRecordingAccessibleToUser(db: D1Database, userId: string, callId: string): Promise<boolean> {
-  const row = await db
-    .prepare(
-      `SELECT 1 FROM call_sites
-       JOIN site_team_members ON site_team_members.site_id = call_sites.site_id
-       WHERE call_sites.call_id = ? AND site_team_members.user_id = ?
-       LIMIT 1`
-    )
-    .bind(callId, userId)
-    .first();
-  return row !== null;
-}
-
 /** `memberUserId` links this row to a real login account (the admin "choose from dropdown" flow) — see migration 0011. */
 export async function addSiteTeamMember(
   db: D1Database,
