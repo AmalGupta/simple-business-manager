@@ -6,6 +6,7 @@
 
 import {
   addSiteTeamMember,
+  assignTodo,
   closeEscalation,
   createEscalation,
   createSite,
@@ -124,11 +125,21 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
     return json({ error: "invalid JSON body" }, 400);
   }
   if (typeof body !== "object" || body === null) return json({ error: "invalid body" }, 400);
+  const record = body as Record<string, unknown>;
+
+  if (typeof record.assigned_to_user_id === "string" && record.assigned_to_user_id) {
+    const assigned = await assignTodo(env.DB, id, {
+      assignedToUserId: record.assigned_to_user_id,
+      assignedByUserId: gate.user_id,
+    });
+    if (!assigned) return json({ error: "not found" }, 404);
+    return json(assigned);
+  }
 
   const patch: Partial<Record<(typeof TODO_PATCH_KEYS)[number], string | null>> = {};
   for (const key of TODO_PATCH_KEYS) {
-    if (key in (body as Record<string, unknown>)) {
-      patch[key] = (body as Record<string, unknown>)[key] as string | null;
+    if (key in record) {
+      patch[key] = record[key] as string | null;
     }
   }
 

@@ -155,6 +155,10 @@ export interface Todo {
 
   closed_by_call_id: string | null; // M1 placeholder — unused in M0
   created_at: string;
+
+  assigned_to_user_id: string | null;
+  assigned_by_user_id: string | null;
+  assigned_at: string | null;
 }
 
 /** One row per call's fetched transcript, linked by r2_key — see schema.sql. */

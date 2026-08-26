@@ -123,7 +123,12 @@ CREATE TABLE todos (
   -- Column exists now so M1 needs no migration against live data.
   closed_by_call_id TEXT REFERENCES calls(id),
 
-  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+
+  -- Assignment (migration 0015) — mirrors site_tasks' assigned_to_user_id.
+  assigned_to_user_id TEXT REFERENCES users(id),
+  assigned_by_user_id TEXT REFERENCES users(id),
+  assigned_at         TEXT
 );
 
 -- One row per call's fetched transcript, linked by r2_key rather than a

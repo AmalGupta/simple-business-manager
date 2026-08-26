@@ -242,6 +242,7 @@ export interface TodoRow {
   status: Todo["status"];
   completed_at: string | null;
   closed_by_call_id: string | null;
+  assigned_to_user_id: string | null;
 }
 
 export interface CommitmentRow {
@@ -330,6 +331,7 @@ interface RawTodoRow {
   completed_at: string | null;
   closed_by_call_id: string | null;
   customer_waiting: 0 | 1;
+  assigned_to_user_id: string | null;
 }
 
 interface RawCommitmentRow {
@@ -358,7 +360,7 @@ const CALL_SELECT = `
 `;
 
 const TODO_SELECT = `
-  SELECT id, call_id, owner, text, due_date, status, completed_at, closed_by_call_id, customer_waiting
+  SELECT id, call_id, owner, text, due_date, status, completed_at, closed_by_call_id, customer_waiting, assigned_to_user_id
   FROM todos
 `;
 
@@ -385,6 +387,7 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     status: t.status,
     completed_at: t.completed_at,
     closed_by_call_id: t.closed_by_call_id,
+    assigned_to_user_id: t.assigned_to_user_id,
   };
 }
 
@@ -524,6 +527,21 @@ export async function updateTodo(
   await db
     .prepare(`UPDATE todos SET ${setClause} WHERE id = ?`)
     .bind(...values, id)
+    .run();
+  return getTodoById(db, id);
+}
+
+/** Assign or reassign one todo to a real staff account. Mirrors assignSiteTask. */
+export async function assignTodo(
+  db: D1Database,
+  id: string,
+  input: { assignedToUserId: string; assignedByUserId: string }
+): Promise<Todo | null> {
+  await db
+    .prepare(
+      `UPDATE todos SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now') WHERE id = ?`
+    )
+    .bind(input.assignedToUserId, input.assignedByUserId, id)
     .run();
   return getTodoById(db, id);
 }

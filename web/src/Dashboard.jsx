@@ -18,6 +18,7 @@ import { DayView } from "./views/calls/DayView.jsx";
 import { CallsPageView } from "./views/calls/CallsPageView.jsx";
 import { RecordingsPageView } from "./views/calls/RecordingsPageView.jsx";
 import { CallDetail } from "./views/calls/CallDetail.jsx";
+import { OpenTodosView } from "./views/calls/OpenTodosView.jsx";
 import { StaffDirectoryView } from "./views/staff/StaffDirectoryView.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { SitesReviewView } from "./views/sites/SitesReviewView.jsx";
@@ -46,7 +47,7 @@ export default function SimpleBusinessManager() {
   const [escalations, setEscalations] = useState([]);
   const [sitesAttention, setSitesAttention] = useState([]);
   const [allSites, setAllSites] = useState([]);
-  const [staffCount, setStaffCount] = useState(0);
+  const [staffRoster, setStaffRoster] = useState([]);
   const [callsCount, setCallsCount] = useState(0);
   /* Open (assigned, not done) site tasks — scoped server-side to "mine" for
      a staff session, or every open assignment business-wide for admin/
@@ -130,7 +131,7 @@ export default function SimpleBusinessManager() {
         setEscalations(escalationsData);
         setSitesAttention(attentionData);
         setAllSites(sitesData);
-        setStaffCount(staffData.length);
+        setStaffRoster(staffData);
         setCallsCount(callsCountData.count);
         setOpenSiteTasks(tasksData);
       })
@@ -301,6 +302,35 @@ export default function SimpleBusinessManager() {
     [mutate]
   );
 
+  /* Optimistic write, rolled back if D1 rejects it — same shape as `mutate`
+     above, kept separate since assignment patches a different field and
+     rollback needs the todo's own prior assigned_to_user_id, not the
+     {status, completed_at} pair `mutate` restores. */
+  const onAssignTodo = useCallback(async (todoId, staffId) => {
+    let prevAssignedToUserId;
+    setCalls((cs) =>
+      cs.map((c) => ({
+        ...c,
+        todos: c.todos.map((td) => {
+          if (td.id !== todoId) return td;
+          prevAssignedToUserId = td.assigned_to_user_id;
+          return { ...td, assigned_to_user_id: staffId };
+        }),
+      }))
+    );
+    try {
+      await patchTodo(todoId, { assigned_to_user_id: staffId });
+    } catch (err) {
+      setCalls((cs) =>
+        cs.map((c) => ({
+          ...c,
+          todos: c.todos.map((td) => (td.id === todoId ? { ...td, assigned_to_user_id: prevAssignedToUserId } : td)),
+        }))
+      );
+      throw err;
+    }
+  }, []);
+
   const bulkCall = view.name === "call" ? calls.find((c) => c.id === view.id) : null;
 
   useEffect(() => {
@@ -344,6 +374,14 @@ export default function SimpleBusinessManager() {
 
         .sbm-day{transition:border-color 140ms ease,background 140ms ease}
         @media (hover:hover){.sbm-day:hover{border-color:rgba(255,255,255,0.4)}}
+
+        /* Call detail — transcript/details column, todos column. Single
+           column stacked on mobile per this repo's mobile-first rule;
+           side-by-side from 768px up (docs/BUILD_BRIEF.md). */
+        .sbm-call-grid{display:flex;flex-direction:column;gap:1.5rem}
+        @media (min-width:768px){
+          .sbm-call-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:1.5rem;align-items:start}
+        }
 
         .sbm-tooltip{
           position:absolute;bottom:100%;left:50%;
@@ -400,6 +438,8 @@ export default function SimpleBusinessManager() {
         onPark={onPark}
         busyIds={busyIds}
         canManage={me.role !== "staff"}
+        staffRoster={staffRoster}
+        onAssign={onAssignTodo}
       />
     );
 
@@ -460,6 +500,17 @@ export default function SimpleBusinessManager() {
         onToggle={onToggle}
         onPark={onPark}
         busyIds={busyIds}
+      />
+    );
+
+  if (view.name === "open-todos")
+    return shell(
+      <OpenTodosView
+        calls={calls}
+        staffRoster={staffRoster}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpen={(id) => setView({ name: "call", id, from: { name: "open-todos" } })}
+        onAssign={onAssignTodo}
       />
     );
 
@@ -585,13 +636,19 @@ export default function SimpleBusinessManager() {
           busyIds={busyIds}
         />
         {(me.role === "admin" || me.role === "superadmin") && (
-          <StaffTile count={staffCount} onOpen={() => setView({ name: "staff-directory" })} />
+          <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />
         )}
         <WorkflowTilesRow
           tasks={openSiteTasks}
           onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}
         />
-        <StatCard value={todayCounts.open} label="open today" />
+        <button
+          onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
+          style={{ all: "unset", cursor: "pointer", display: "block" }}
+          aria-label={`Open today — ${todayCounts.open}`}
+        >
+          <StatCard value={todayCounts.open} label="open today" />
+        </button>
         <button
           onClick={() => setView({ name: "calls" })}
           style={{ all: "unset", cursor: "pointer", display: "block" }}
