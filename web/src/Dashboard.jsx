@@ -35,6 +35,7 @@ import { BackLink } from "./components/BackLink.jsx";
 import { PhoneLink } from "./components/PhoneLink.jsx";
 import { EmptyState } from "./components/EmptyState.jsx";
 import { AudioPlayer } from "./components/AudioPlayer.jsx";
+import { TileLabel } from "./components/TileLabel.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -853,28 +854,6 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage = true 
 /* ------------------------------------------------------------------ */
 /* ================================================================== */
 /* Tiles 1 & 2 — a plain number readout, same card language as tiles 3 & 4. */
-/* Shared header row for all four home-panel tiles — one label style, one
-   optional right-aligned action, so the tiles read as one family rather
-   than four separately-styled cards. */
-function TileLabel({ children, action }) {
-  return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-      <span
-        style={{
-          fontFamily: t.label,
-          fontSize: 11,
-          fontWeight: 700,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-          color: t.edge,
-        }}
-      >
-        {children}
-      </span>
-      {action}
-    </div>
-  );
-}
 
 /* Same row rhythm as the list tiles (10px vertical padding, hairline top
    border) so a stat card sitting next to a list card doesn't feel like a
