@@ -46,7 +46,7 @@ import {
   TEXT_INPUT_STYLE,
   PRIMARY_BUTTON_STYLE,
 } from "./styles.js";
-import { AccountMenu } from "./components/account/AccountMenu.jsx";
+import { AppHeader } from "./components/AppHeader.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -3449,14 +3449,7 @@ export default function SimpleBusinessManager() {
     return shell(
       <>
         {me.role === "staff" && (
-          <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
-            <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
-                Simple Business Manager
-              </span>
-              <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
-            </header>
-          </div>
+          <AppHeader me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
         )}
         <SitesDirectoryView
           onBack={() => setView(homeView)}
@@ -3473,14 +3466,7 @@ export default function SimpleBusinessManager() {
   if (view.name === "staff-home")
     return shell(
       <>
-        <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
-          <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
-              Simple Business Manager
-            </span>
-            <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
-          </header>
-        </div>
+        <AppHeader me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
 
         <div
           style={{
@@ -3511,24 +3497,13 @@ export default function SimpleBusinessManager() {
 
   return shell(
     <>
-      <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
-        <header
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            marginBottom: "1.25rem",
-          }}
-        >
-          <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
-            Simple Business Manager
-          </span>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
-            <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
-          </div>
-        </header>
-
+      <AppHeader
+        me={me}
+        onLogout={onLogout}
+        onResetPin={onResetPin}
+        onUpdatePhone={onUpdatePhone}
+        right={<span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>}
+      >
         <StreakWall
           days={monthDays}
           onSelectDay={(date) => setView({ name: "day", date })}
@@ -3542,7 +3517,7 @@ export default function SimpleBusinessManager() {
           onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
           todayIso={isoDate(today().getFullYear(), today().getMonth(), today().getDate())}
         />
-      </div>
+      </AppHeader>
 
       {/* Home tile panel. Order (top to bottom): sites needing attention,
           escalations, staff, the dynamic workflow-category tiles (business-
