@@ -2,7 +2,6 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import {
   Circle,
   Check,
-  CircleDashed,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -34,6 +33,7 @@ import { WaitingTag } from "./components/WaitingTag.jsx";
 import { Card } from "./components/Card.jsx";
 import { BackLink } from "./components/BackLink.jsx";
 import { PhoneLink } from "./components/PhoneLink.jsx";
+import { EmptyState } from "./components/EmptyState.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -850,20 +850,6 @@ function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage = true 
 }
 
 /* ------------------------------------------------------------------ */
-function EmptyState() {
-  return (
-    <Card style={{ textAlign: "center", padding: "3rem 1.5rem" }}>
-      <CircleDashed size={28} strokeWidth={1.25} color={t.edge2} />
-      <p style={{ fontFamily: t.display, fontSize: 18, color: t.edge, margin: "1rem 0 6px" }}>
-        Nothing recorded yet
-      </p>
-      <p style={{ fontSize: 14, color: t.edge2, margin: 0, lineHeight: 1.7 }}>
-        The first call you record will show up here within fifteen minutes.
-      </p>
-    </Card>
-  );
-}
-
 /* ================================================================== */
 /* Tiles 1 & 2 — a plain number readout, same card language as tiles 3 & 4. */
 /* Shared header row for all four home-panel tiles — one label style, one
