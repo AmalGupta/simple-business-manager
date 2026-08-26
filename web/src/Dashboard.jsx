@@ -90,6 +90,31 @@ const isUrgent = (todo) => {
   return d !== null && d <= 1;
 };
 
+/* Same urgency rule, applied to a site task's due_date rather than a todo's. */
+const isTaskDueDateUrgent = (dueDate) => {
+  if (!dueDate) return false;
+  const d = daysUntil(dueDate);
+  return d !== null && d <= 1;
+};
+
+/* ------------------------------------------------------------------
+   The 8 workflow categories a site task can fall under — see migration
+   0013. Display order only, not a pipeline: stages within and across
+   categories carry no sequence, so this is just a stable, readable order
+   for the home-page tiles and the "View work timeline" popup.
+   ------------------------------------------------------------------ */
+const WORKFLOW_CATEGORIES = [
+  { key: "admin_intake", label: "Admin & Intake" },
+  { key: "measurement", label: "Measurement" },
+  { key: "procurement", label: "Procurement" },
+  { key: "production", label: "Production" },
+  { key: "quality_control", label: "Quality Control" },
+  { key: "installation", label: "Installation" },
+  { key: "handover", label: "Handover" },
+  { key: "billing_delivery", label: "Billing & Delivery" },
+];
+const WORKFLOW_CATEGORY_LABEL = Object.fromEntries(WORKFLOW_CATEGORIES.map((c) => [c.key, c.label]));
+
 /* Sort rule — §4. Customer-waiting beats deadline proximity, beats recency. */
 const sortCalls = (calls) =>
   [...calls].sort((a, b) => {
@@ -355,6 +380,43 @@ async function postSiteVoiceNote(siteId, blob, fileName) {
 async function fetchSiteTimeline(siteId) {
   const res = await fetch(`/api/sites/${siteId}/timeline`);
   if (!res.ok) throw new Error(`GET /api/sites/${siteId}/timeline → ${res.status}`);
+  return res.json();
+}
+
+/* Site-task workflow system — migration 0013. See WORKFLOW_CATEGORIES below
+   for the tile grouping; these fetchers back the home-page workflow tiles,
+   the admin "View work timeline" popup, and the staff mark-done/handoff flow. */
+
+/** Home-page "Calls logged" tile — total count, including low_signal. */
+async function fetchCallsCount() {
+  return fetchJSON("/api/calls/count");
+}
+
+/** Open (assigned, not done) site tasks — `staff` gets their own only, admin/superadmin get every one, scoped server-side. */
+async function fetchOpenSiteTasks() {
+  return fetchJSON("/api/site-tasks/open");
+}
+
+/** All 23 stages for one site — the admin "View work timeline" popup. */
+async function fetchSiteTasks(siteId) {
+  return fetchJSON(`/api/sites/${siteId}/tasks`);
+}
+
+/** Every still-unassigned stage at one site — the handoff picker shown after marking a stage done. */
+async function fetchUnassignedSiteTasks(siteId) {
+  return fetchJSON(`/api/sites/${siteId}/tasks/unassigned`);
+}
+
+async function patchSiteTask(id, patch) {
+  const res = await fetch(`/api/site-tasks/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/site-tasks/${id} → ${res.status}`);
+  }
   return res.json();
 }
 
@@ -880,7 +942,30 @@ function CommitmentsList({ commitments }) {
 }
 
 /* ------------------------------------------------------------------ */
-function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0 }) {
+/* "Important" = call_type client/internal (already got a card on the old
+   home feed); "Regular" = low_signal (never surfaced anywhere before the
+   Calls Transcripts page existed). Neutral colours, not urgency-red — this
+   is a classification, not a warning. */
+function CallTypeBadge({ callType }) {
+  const isImportant = callType !== "low_signal";
+  return (
+    <span
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        padding: "2px 8px",
+        borderRadius: t.radius,
+        color: isImportant ? t.accent : t.edge2,
+        background: isImportant ? "color-mix(in srgb, var(--color-accent) 12%, transparent)" : t.frostSoft,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {isImportant ? "Important" : "Regular"}
+    </span>
+  );
+}
+
+function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0, showTypeBadge = false }) {
   const visible = call.todos.filter((td) => td.status !== "done");
   const done = call.todos.filter((td) => td.status === "done");
   const [openTranscript, setOpenTranscript] = useState(false);
@@ -905,7 +990,10 @@ function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0 }) {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
           <CallHeading call={call} />
-          {call.customer_waiting ? <WaitingTag /> : null}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {showTypeBadge && <CallTypeBadge callType={call.call_type} />}
+            {call.customer_waiting ? <WaitingTag /> : null}
+          </div>
         </div>
         <div style={{ fontSize: 13, color: t.edge2, marginTop: 2 }}>
           {fmtDate(call.recorded_at)} · {Math.round(call.duration_s / 60)} min
@@ -1364,6 +1452,94 @@ function StaffTile({ count, onOpen }) {
 }
 
 /* ------------------------------------------------------------------
+   Workflow-category tiles — migration 0013. Same template as StaffTile:
+   count + label, clickable. `tasks` is the flat open-site-tasks list (see
+   fetchOpenSiteTasks) already scoped server-side to "mine" for a staff
+   session or "everyone" for admin — this component just groups it by
+   category and renders one tile per non-empty category, hidden at zero
+   rather than shown as a permanent 0 (same rule as the escalations tile).
+   ------------------------------------------------------------------ */
+function WorkflowTilesRow({ tasks, onOpenCategory }) {
+  const counts = useMemo(() => {
+    const m = new Map();
+    for (const task of tasks) m.set(task.category, (m.get(task.category) ?? 0) + 1);
+    return m;
+  }, [tasks]);
+
+  return WORKFLOW_CATEGORIES.filter((c) => counts.get(c.key) > 0).map((c) => (
+    <button
+      key={c.key}
+      onClick={() => onOpenCategory(c.key)}
+      style={{ all: "unset", cursor: "pointer", display: "block" }}
+      aria-label={`${c.label} — ${counts.get(c.key)} open`}
+    >
+      <Card>
+        <TileLabel>{c.label}</TileLabel>
+        <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
+          <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
+            {counts.get(c.key)}
+          </span>
+        </div>
+      </Card>
+    </button>
+  ));
+}
+
+/* Drilldown from a workflow tile — every site with an open task in this one
+   category, showing which stage, who has it, and the due date (same
+   urgency-red rule as everywhere else). */
+function WorkflowCategorySiteList({ tasks, category, onBack, onOpenSite }) {
+  const rows = useMemo(
+    () =>
+      [...tasks]
+        .filter((task) => task.category === category)
+        .sort((a, b) => {
+          const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity;
+          const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity;
+          return ad - bd;
+        }),
+    [tasks, category]
+  );
+
+  return (
+    <div>
+      <BackLink onClick={onBack}>Back</BackLink>
+      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
+        {WORKFLOW_CATEGORY_LABEL[category] ?? category}
+      </h1>
+      {rows.length === 0 ? (
+        <p style={{ fontSize: 14, color: t.edge2 }}>Nothing open in this category right now.</p>
+      ) : (
+        rows.map((task) => {
+          const urgent = isTaskDueDateUrgent(task.due_date);
+          return (
+            <Card key={task.id} style={{ marginBottom: 10 }}>
+              <button
+                onClick={() => onOpenSite(task.site_name)}
+                style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 500, color: t.edge }}>{task.site_name}</span>
+                  {task.due_date && (
+                    <span style={{ fontSize: 12, fontWeight: 700, color: urgent ? t.signal : t.edge2 }}>
+                      {fmtShort(task.due_date)}
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: 13, color: t.edge2, marginTop: 2 }}>{task.stage_label}</div>
+                <div style={{ fontSize: 12, color: t.edge2, marginTop: 2 }}>
+                  {task.assignee_name ? `Assigned to ${task.assignee_name}` : "Unassigned"}
+                </div>
+              </button>
+            </Card>
+          );
+        })
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------
    Tile 3 — sites needing attention. See docs/ADDITIONAL_FEATURES_M0.md
    "Phase 1 home page". Inclusion/sort/age is computed server-side
    (packages/core/src/queries.ts getSitesNeedingAttention). Always
@@ -1697,6 +1873,391 @@ function AssignTeamModal({ onClose, onAdd }) {
         </div>
       </div>
     </div>
+  );
+}
+
+const SMALL_SECONDARY_BUTTON_STYLE = {
+  padding: "6px 12px",
+  border: `1px solid ${t.frost}`,
+  borderRadius: t.radiusButton,
+  background: t.white,
+  color: t.edge,
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+};
+
+/* One stage row inside WorkTimelinePopup — status/assignee/timestamps, plus
+   an inline assign-or-reassign control. Kept as its own component so each
+   row manages its own "editing" state independently. */
+function StageAssignRow({ task, onAssign }) {
+  const [editing, setEditing] = useState(false);
+  const [staff, setStaff] = useState(null);
+  const [staffId, setStaffId] = useState(task.assigned_to_user_id ?? "");
+  const [dueDate, setDueDate] = useState(task.due_date ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!editing || staff !== null) return;
+    fetchStaffRoster()
+      .then((data) => {
+        setStaff(data);
+        setStaffId((current) => current || task.assigned_to_user_id || data[0]?.id || "");
+      })
+      .catch((err) => {
+        console.error("[sbm] failed to load staff", err);
+        setStaff([]);
+      });
+  }, [editing, staff, task.assigned_to_user_id]);
+
+  const submit = async () => {
+    if (!staffId) {
+      setError("Choose a staff member.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      await onAssign(task.id, { assigned_to_user_id: staffId, due_date: dueDate || null });
+      setEditing(false);
+    } catch (err) {
+      console.error("[sbm] failed to assign stage", err);
+      setError(err.message || "Failed to save — try again.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const dueUrgent = task.status !== "done" && isTaskDueDateUrgent(task.due_date);
+
+  let statusLine;
+  if (task.status === "done") {
+    statusLine = `Done by ${task.completed_by_name ?? task.assignee_name ?? "—"}${task.completed_at ? ` · ${fmtShort(task.completed_at)}` : ""}`;
+  } else if (task.assignee_name) {
+    statusLine = (
+      <>
+        Assigned to {task.assignee_name}
+        {task.assigned_at ? ` · ${fmtShort(task.assigned_at)}` : ""}
+        {task.due_date && (
+          <span style={{ color: dueUrgent ? t.signal : "inherit", fontWeight: dueUrgent ? 700 : 400 }}>
+            {" "}
+            · due {fmtShort(task.due_date)}
+          </span>
+        )}
+      </>
+    );
+  } else {
+    statusLine = "Unassigned";
+  }
+
+  return (
+    <div style={TILE_ROW_STYLE}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 14, color: t.edge }}>{task.stage_label}</div>
+          <div style={{ fontSize: 12, color: t.edge2, marginTop: 2 }}>{statusLine}</div>
+        </div>
+        <button onClick={() => setEditing((v) => !v)} style={SMALL_SECONDARY_BUTTON_STYLE}>
+          {editing ? "Cancel" : task.assignee_name ? "Reassign" : "Assign"}
+        </button>
+      </div>
+      {editing && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+          {staff === null ? (
+            <p style={{ fontSize: 13, color: t.edge2, margin: 0 }}>Loading staff…</p>
+          ) : staff.length === 0 ? (
+            <p style={{ fontSize: 13, color: t.edge2, margin: 0 }}>No staff yet — add one from the Staff page first.</p>
+          ) : (
+            <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={TEXT_INPUT_STYLE}>
+              <option value="" disabled>
+                Choose a staff member…
+              </option>
+              {staff.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: t.edge2 }}>
+            Due date (optional)
+            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={TEXT_INPUT_STYLE} />
+          </label>
+          {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+          <button
+            onClick={submit}
+            disabled={saving || !staff?.length}
+            style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving || !staff?.length ? 0.6 : 1, alignSelf: "flex-start" }}
+          >
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Admin/superadmin-only popup from SiteView's "View work timeline" button —
+   all 23 stages for this site, grouped by category (display order only, not
+   a pipeline — see migration 0013), each with status/assignee/timestamps
+   and an inline assign control. */
+function WorkTimelinePopup({ site, onClose, onAssigned = () => {} }) {
+  const [tasks, setTasks] = useState(null);
+
+  const reload = useCallback(() => {
+    if (!site?.id) return Promise.resolve();
+    return fetchSiteTasks(site.id)
+      .then(setTasks)
+      .catch((err) => {
+        console.error("[sbm] failed to load site tasks", err);
+        setTasks([]);
+      });
+  }, [site?.id]);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  const assign = async (taskId, patch) => {
+    await patchSiteTask(taskId, patch);
+    // Refreshes this popup's own list AND the app-level open-tasks cache the
+    // home-page workflow tiles read from — without the second call, an
+    // assignment made here doesn't show up on home until a full reload.
+    await Promise.all([reload(), onAssigned()]);
+  };
+
+  const doneCount = tasks?.filter((tk) => tk.status === "done").length ?? 0;
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="View work timeline"
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(20,24,31,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "1.25rem",
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "100%",
+          maxWidth: 480,
+          maxHeight: "85vh",
+          overflowY: "auto",
+          background: t.white,
+          borderRadius: t.radiusCard,
+          padding: "1.25rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+          <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Work timeline</span>
+          {tasks && (
+            <span style={{ fontSize: 12, color: t.edge2 }}>
+              {doneCount}/{tasks.length} done
+            </span>
+          )}
+        </div>
+        {tasks === null ? (
+          <p style={{ fontSize: 13, color: t.edge2 }}>Loading…</p>
+        ) : (
+          WORKFLOW_CATEGORIES.map((cat) => {
+            const rows = tasks.filter((tk) => tk.category === cat.key);
+            if (rows.length === 0) return null;
+            return (
+              <div key={cat.key}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                    color: t.edge2,
+                    margin: "10px 0 0",
+                  }}
+                >
+                  {cat.label}
+                </div>
+                {rows.map((task) => (
+                  <StageAssignRow key={task.id} task={task} onAssign={assign} />
+                ))}
+              </div>
+            );
+          })
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+          <button onClick={onClose} style={SMALL_SECONDARY_BUTTON_STYLE}>
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* Staff-facing banner on their own SiteView — their open task(s) at this
+   site, with a one-tap "Mark done" that then offers an immediate handoff to
+   any other still-unassigned stage at the same site (no admin required for
+   this specific handoff — see the narrow permission in
+   isUserActiveOnSiteTasks). Stages carry no order, so the handoff picker
+   lists every unassigned stage, not a system-computed "next" one. */
+function MyTaskBanner({ siteId, myTasks, onChanged }) {
+  const [completingId, setCompletingId] = useState(null);
+  const [handoffFor, setHandoffFor] = useState(null); // the just-completed task, while picking a handoff
+  const [unassigned, setUnassigned] = useState(null);
+  const [pickedStageId, setPickedStageId] = useState("");
+  const [staff, setStaff] = useState(null);
+  const [staffId, setStaffId] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const markDone = async (task) => {
+    setCompletingId(task.id);
+    try {
+      await patchSiteTask(task.id, { status: "done" });
+      // Completion itself is done regardless of what follows — refresh
+      // immediately so the app-level tile counts and this banner reflect it
+      // even if the handoff picker below can't be offered for some reason.
+      await onChanged();
+      try {
+        const [openStages, staffRoster] = await Promise.all([fetchUnassignedSiteTasks(siteId), fetchStaffRoster()]);
+        if (openStages.length > 0) {
+          setUnassigned(openStages);
+          setStaff(staffRoster);
+          setPickedStageId(openStages[0].id);
+          setStaffId("");
+          setHandoffFor(task);
+        }
+      } catch (err) {
+        console.error("[sbm] failed to load handoff options — completion still succeeded", err);
+      }
+    } catch (err) {
+      console.error("[sbm] failed to mark task done", err);
+    } finally {
+      setCompletingId(null);
+    }
+  };
+
+  const submitHandoff = async () => {
+    if (!pickedStageId || !staffId) return;
+    setSaving(true);
+    try {
+      await patchSiteTask(pickedStageId, { assigned_to_user_id: staffId });
+      await onChanged();
+      setHandoffFor(null);
+    } catch (err) {
+      console.error("[sbm] failed to hand off stage", err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const hasTasks = myTasks && myTasks.length > 0;
+
+  return (
+    <>
+      {hasTasks && (
+      <Card style={{ marginBottom: 12, borderColor: t.accent }}>
+        <TileLabel>Your task{myTasks.length > 1 ? "s" : ""} here</TileLabel>
+        {myTasks.map((task) => (
+          <div key={task.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", ...TILE_ROW_STYLE }}>
+            <div>
+              <div style={{ fontSize: 14, color: t.edge }}>{task.stage_label}</div>
+              {task.due_date && (
+                <div style={{ fontSize: 12, color: isTaskDueDateUrgent(task.due_date) ? t.signal : t.edge2, marginTop: 2 }}>
+                  Due {fmtShort(task.due_date)}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => markDone(task)}
+              disabled={completingId === task.id}
+              style={{ ...PRIMARY_BUTTON_STYLE, opacity: completingId === task.id ? 0.6 : 1, minHeight: 34, padding: "0 12px" }}
+            >
+              {completingId === task.id ? "Saving…" : "Mark done"}
+            </button>
+          </div>
+        ))}
+      </Card>
+      )}
+
+      {handoffFor && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Hand off next stage"
+          onClick={() => setHandoffFor(null)}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(20,24,31,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "1.25rem",
+            zIndex: 100,
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: "100%",
+              maxWidth: 360,
+              background: t.white,
+              borderRadius: t.radiusCard,
+              padding: "1.25rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>
+              {handoffFor.stage_label} — done. Hand off the next stage?
+            </span>
+            <select value={pickedStageId} onChange={(e) => setPickedStageId(e.target.value)} style={TEXT_INPUT_STYLE}>
+              {unassigned.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.stage_label}
+                </option>
+              ))}
+            </select>
+            <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={TEXT_INPUT_STYLE}>
+              <option value="" disabled>
+                Choose a staff member…
+              </option>
+              {(staff ?? []).map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+              <button onClick={() => setHandoffFor(null)} style={SMALL_SECONDARY_BUTTON_STYLE}>
+                Skip
+              </button>
+              <button
+                onClick={submitHandoff}
+                disabled={saving || !staffId}
+                style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving || !staffId ? 0.6 : 1 }}
+              >
+                {saving ? "Assigning…" : "Assign"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -2104,7 +2665,19 @@ function SiteTimeline({ entries, onOpenCall, canManage }) {
    and an always-editable team roster — see the conversation that added
    this: "Always available, not conditional" on call/item count.
    ------------------------------------------------------------------ */
-function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, autoEditDetails = false, canManage = true }) {
+function SiteView({
+  site,
+  siteRecord,
+  calls,
+  onBack,
+  onOpen,
+  onSiteUpdated,
+  autoEditDetails = false,
+  canManage = true,
+  myOpenTasks = [],
+  onTasksChanged = () => {},
+}) {
+  const [showWorkTimeline, setShowWorkTimeline] = useState(false);
   const siteCalls = useMemo(
     () => sortCalls(calls.filter((c) => c.sites?.includes(site))),
     [calls, site]
@@ -2359,12 +2932,27 @@ function SiteView({ site, siteRecord, calls, onBack, onOpen, onSiteUpdated, auto
         </Card>
       )}
 
+      {siteRecord?.id && canManage && (
+        <div style={{ marginBottom: 12 }}>
+          <button onClick={() => setShowWorkTimeline(true)} style={SMALL_SECONDARY_BUTTON_STYLE}>
+            View work timeline
+          </button>
+        </div>
+      )}
+
+      {siteRecord?.id && !canManage && (
+        <MyTaskBanner siteId={siteRecord.id} myTasks={myOpenTasks} onChanged={onTasksChanged} />
+      )}
+
       <TileLabel>Timeline</TileLabel>
       <div style={{ marginTop: 8 }}>
         <SiteTimeline entries={timeline} onOpenCall={onOpen} canManage={canManage} />
       </div>
 
       {showAssignModal && <AssignTeamModal onClose={() => setShowAssignModal(false)} onAdd={addTeamMember} />}
+      {showWorkTimeline && (
+        <WorkTimelinePopup site={siteRecord} onClose={() => setShowWorkTimeline(false)} onAssigned={onTasksChanged} />
+      )}
     </div>
   );
 }
@@ -3463,12 +4051,89 @@ function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone }) {
   );
 }
 
+/* Calls Transcripts page — everything that used to sit directly on the
+   admin home feed, relocated behind the "Calls logged" tile. Adds the two
+   summary tiles (Important/Regular — see CallTypeBadge above for the same
+   split) and per-card badges; todo toggling, park, and download are
+   unchanged from the old home feed. */
+function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds }) {
+  const [filter, setFilter] = useState(null); // null = all, "important", "regular"
+
+  const importantCalls = useMemo(() => calls.filter((c) => c.call_type !== "low_signal"), [calls]);
+  const regularCalls = useMemo(() => calls.filter((c) => c.call_type === "low_signal"), [calls]);
+  const shown = filter === "important" ? importantCalls : filter === "regular" ? regularCalls : calls;
+  const ordered = useMemo(() => sortCalls(shown), [shown]);
+
+  const toggle = (key) => setFilter((current) => (current === key ? null : key));
+
+  return (
+    <div>
+      <BackLink onClick={onBack}>Back</BackLink>
+      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>Calls</h1>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: "1.5rem" }}>
+        <button onClick={() => toggle("important")} style={{ all: "unset", cursor: "pointer", display: "block" }}>
+          <Card style={{ borderColor: filter === "important" ? t.accent : t.frost }}>
+            <TileLabel>Important calls</TileLabel>
+            <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
+              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
+                {importantCalls.length}
+              </span>
+            </div>
+          </Card>
+        </button>
+        <button onClick={() => toggle("regular")} style={{ all: "unset", cursor: "pointer", display: "block" }}>
+          <Card style={{ borderColor: filter === "regular" ? t.accent : t.frost }}>
+            <TileLabel>Regular calls</TileLabel>
+            <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
+              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
+                {regularCalls.length}
+              </span>
+            </div>
+          </Card>
+        </button>
+      </div>
+
+      {calls.length === 0 ? (
+        <EmptyState />
+      ) : ordered.length === 0 ? (
+        <p style={{ fontSize: 14, color: t.edge2 }}>No {filter} calls.</p>
+      ) : (
+        <>
+          {ordered.map((call, i) => (
+            <CallCard
+              key={call.id}
+              index={i}
+              call={call}
+              showTypeBadge
+              onOpen={onOpen}
+              onToggle={onToggle}
+              onPark={onPark}
+              busyIds={busyIds}
+            />
+          ))}
+          <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "flex-end" }}>
+            <DownloadButton calls={ordered} label={filter ?? "all"}>
+              Download {filter ?? "everything"}
+            </DownloadButton>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function SimpleBusinessManager() {
   const [calls, setCalls] = useState([]);
   const [escalations, setEscalations] = useState([]);
   const [sitesAttention, setSitesAttention] = useState([]);
   const [allSites, setAllSites] = useState([]);
   const [staffCount, setStaffCount] = useState(0);
+  const [callsCount, setCallsCount] = useState(0);
+  /* Open (assigned, not done) site tasks — scoped server-side to "mine" for
+     a staff session, or every open assignment business-wide for admin/
+     superadmin. See fetchOpenSiteTasks and migration 0013. */
+  const [openSiteTasks, setOpenSiteTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState({ name: "home" });
@@ -3484,9 +4149,10 @@ export default function SimpleBusinessManager() {
      the whole dashboard is now gated behind it. */
   const [me, setMe] = useState(undefined);
 
-  /* `staff` lands on a filtered Sites view instead of the office dashboard —
-     migration 0011. admin/superadmin get the dashboard unchanged. */
-  const homeView = me?.role === "staff" ? { name: "sites-directory" } : { name: "home" };
+  /* `staff` lands on their personal workflow tiles instead of the office
+     dashboard — migration 0011 (role split) plus migration 0013 (the
+     workflow tiles themselves). admin/superadmin get the dashboard unchanged. */
+  const homeView = me?.role === "staff" ? { name: "staff-home" } : { name: "home" };
 
   useEffect(() => {
     let cancelled = false;
@@ -3509,11 +4175,14 @@ export default function SimpleBusinessManager() {
 
     if (me.role === "staff") {
       // No calls/escalations/attention tile for staff — they only ever see
-      // their own assigned sites, already filtered server-side.
-      setView({ name: "sites-directory" });
-      fetchSites()
-        .then((sitesData) => {
-          if (!cancelled) setAllSites(sitesData);
+      // their own assigned sites and their own open workflow tasks, both
+      // already filtered server-side.
+      setView({ name: "staff-home" });
+      Promise.all([fetchSites(), fetchOpenSiteTasks()])
+        .then(([sitesData, tasksData]) => {
+          if (cancelled) return;
+          setAllSites(sitesData);
+          setOpenSiteTasks(tasksData);
         })
         .catch((err) => {
           console.error("[sbm] failed to load sites", err);
@@ -3528,14 +4197,24 @@ export default function SimpleBusinessManager() {
     }
 
     setView({ name: "home" });
-    Promise.all([fetchCalls(), fetchEscalations(), fetchSitesAttention(), fetchSites(), fetchStaffRoster()])
-      .then(([callsData, escalationsData, attentionData, sitesData, staffData]) => {
+    Promise.all([
+      fetchCalls(),
+      fetchEscalations(),
+      fetchSitesAttention(),
+      fetchSites(),
+      fetchStaffRoster(),
+      fetchCallsCount(),
+      fetchOpenSiteTasks(),
+    ])
+      .then(([callsData, escalationsData, attentionData, sitesData, staffData, callsCountData, tasksData]) => {
         if (cancelled) return;
         setCalls(callsData);
         setEscalations(escalationsData);
         setSitesAttention(attentionData);
         setAllSites(sitesData);
         setStaffCount(staffData.length);
+        setCallsCount(callsCountData.count);
+        setOpenSiteTasks(tasksData);
       })
       .catch((err) => {
         console.error("[sbm] failed to load calls", err);
@@ -3548,6 +4227,11 @@ export default function SimpleBusinessManager() {
       cancelled = true;
     };
   }, [me]);
+
+  const refreshOpenSiteTasks = useCallback(async () => {
+    const tasksData = await fetchOpenSiteTasks();
+    setOpenSiteTasks(tasksData);
+  }, []);
 
   const onLogout = useCallback(async () => {
     await postLogout();
@@ -3725,7 +4409,6 @@ export default function SimpleBusinessManager() {
   }, [view.name, view.id, bulkCall]);
 
   const openCall = bulkCall ?? (view.name === "call" ? fetchedCall : null);
-  const ordered = useMemo(() => sortCalls(calls), [calls]);
 
   const shell = (children) => (
     <div style={{ background: t.pane, minHeight: "100vh", fontFamily: t.body, color: t.edge }}>
@@ -3835,6 +4518,30 @@ export default function SimpleBusinessManager() {
         onSiteUpdated={refreshSites}
         autoEditDetails={Boolean(view.autoEdit)}
         canManage={me.role !== "staff"}
+        myOpenTasks={openSiteTasks.filter((tk) => tk.site_name === view.site)}
+        onTasksChanged={refreshOpenSiteTasks}
+      />
+    );
+
+  if (view.name === "workflow-site-list")
+    return shell(
+      <WorkflowCategorySiteList
+        tasks={openSiteTasks}
+        category={view.category}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenSite={(site) => setView({ name: "site", site, from: view })}
+      />
+    );
+
+  if (view.name === "calls")
+    return shell(
+      <CallsPageView
+        calls={calls}
+        onBack={() => setView(homeView)}
+        onOpen={(id) => setView({ name: "call", id, from: { name: "calls" } })}
+        onToggle={onToggle}
+        onPark={onPark}
+        busyIds={busyIds}
       />
     );
 
@@ -3865,6 +4572,45 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "staff-directory") return shell(<StaffDirectoryView onBack={() => setView(homeView)} />);
+
+  if (view.name === "staff-home")
+    return shell(
+      <>
+        <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
+          <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
+              Simple Business Manager
+            </span>
+            <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
+          </header>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 12,
+            marginBottom: "1.5rem",
+          }}
+        >
+          <WorkflowTilesRow
+            tasks={openSiteTasks}
+            onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "staff-home" } })}
+          />
+        </div>
+
+        {openSiteTasks.length === 0 && (
+          <p style={{ fontSize: 14, color: t.edge2, marginBottom: "1.5rem" }}>Nothing assigned right now.</p>
+        )}
+
+        <button
+          onClick={() => setView({ name: "sites-directory" })}
+          style={{ all: "unset", cursor: "pointer", fontSize: 13, fontWeight: 600, color: t.accent }}
+        >
+          All my sites →
+        </button>
+      </>
+    );
 
   return shell(
     <>
@@ -3901,11 +4647,16 @@ export default function SimpleBusinessManager() {
         />
       </div>
 
-      {/* The 4-tile panel — docs/ADDITIONAL_FEATURES_M0.md "Phase 1 home page".
-          2 columns on a phone; auto-widens toward one row as space allows,
-          so desktop gets a single row without a separate breakpoint.
-          align-items:start keeps each card its own natural height instead of
-          stretching short stat cards to match the taller list cards. */}
+      {/* Home tile panel. Order (top to bottom): sites needing attention,
+          escalations, staff, the dynamic workflow-category tiles (business-
+          wide counts — see WorkflowTilesRow), then "open today" and "calls
+          logged" at the very bottom. "Open today" moved off the top and the
+          call-card feed moved to its own page (see "calls" view) — both per
+          the admin-overview revision to this plan; "closed today" kept its
+          original position. 2 columns on a phone; auto-widens toward one
+          row as space allows. align-items:start keeps each card its own
+          natural height instead of stretching short stat cards to match the
+          taller list cards. */}
       <div
         style={{
           display: "grid",
@@ -3915,7 +4666,6 @@ export default function SimpleBusinessManager() {
           marginBottom: "1.5rem",
         }}
       >
-        <StatCard value={todayCounts.open} label="open today" />
         <StatCard value={todayCounts.closed} label="closed today" />
         <SitesAttentionTile
           sites={sitesAttention}
@@ -3935,30 +4685,26 @@ export default function SimpleBusinessManager() {
         {(me.role === "admin" || me.role === "superadmin") && (
           <StaffTile count={staffCount} onOpen={() => setView({ name: "staff-directory" })} />
         )}
+        <WorkflowTilesRow
+          tasks={openSiteTasks}
+          onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}
+        />
+        <StatCard value={todayCounts.open} label="open today" />
+        <button
+          onClick={() => setView({ name: "calls" })}
+          style={{ all: "unset", cursor: "pointer", display: "block" }}
+          aria-label={`Calls logged — ${callsCount}`}
+        >
+          <Card>
+            <TileLabel>calls logged</TileLabel>
+            <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
+              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
+                {callsCount}
+              </span>
+            </div>
+          </Card>
+        </button>
       </div>
-
-      {ordered.length === 0 ? (
-        <EmptyState />
-      ) : (
-        <>
-          {ordered.map((call, i) => (
-            <CallCard
-              key={call.id}
-              index={i}
-              call={call}
-              onOpen={(id) => setView({ name: "call", id, from: { name: "home" } })}
-              onToggle={onToggle}
-              onPark={onPark}
-              busyIds={busyIds}
-            />
-          ))}
-          <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "flex-end" }}>
-            <DownloadButton calls={ordered} label="all">
-              Download everything
-            </DownloadButton>
-          </div>
-        </>
-      )}
     </>
   );
 }

@@ -9,10 +9,12 @@ import type {
   EscalationStatus,
   SiteMedia,
   SiteMediaType,
+  SiteTaskStatus,
   Todo,
   TodoOwner,
   User,
   UserRole,
+  WorkflowCategory,
 } from "./types";
 
 export interface NewCallInput {
@@ -548,9 +550,18 @@ const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name, targe
  * who see everything, same as before roles existed.
  */
 export async function listSites(db: D1Database, forUserId?: string | null): Promise<SiteRow[]> {
-  const scoped = forUserId ? `AND id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)` : "";
+  // Same "team roster OR holds a site_task" rule as isUserAssignedToSite —
+  // otherwise a staff member with a workflow assignment but no team-roster
+  // row could open the site via a workflow tile yet not find it listed here.
+  const scoped = forUserId
+    ? `AND id IN (
+         SELECT site_id FROM site_team_members WHERE user_id = ?
+         UNION
+         SELECT site_id FROM site_tasks WHERE assigned_to_user_id = ?
+       )`
+    : "";
   const stmt = db.prepare(`${SITE_ROW_SELECT} WHERE 1=1 ${scoped} ORDER BY (is_confirmed IS NOT NULL), name ASC`);
-  const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<SiteRow>();
+  const { results } = await (forUserId ? stmt.bind(forUserId, forUserId) : stmt).all<SiteRow>();
   return results;
 }
 
@@ -643,6 +654,7 @@ export async function createSite(
       .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, 'Site added')`)
       .bind(crypto.randomUUID(), id, actorUserId ?? null),
   ]);
+  await seedSiteTasks(db, id);
   const row = await db.prepare(`${SITE_ROW_SELECT} WHERE id = ?`).bind(id).first<SiteRow>();
   return row!;
 }
@@ -677,11 +689,24 @@ export async function listSiteTeamMembers(db: D1Database, siteId: string): Promi
   return results;
 }
 
-/** True if `userId` is on `siteId`'s team roster — backs assertSiteMembership in src/lib/auth.ts. */
+/**
+ * True if `userId` is on `siteId`'s team roster, OR holds a site_task there
+ * — backs assertSiteMembership in src/lib/auth.ts (gates the site timeline,
+ * team roster, media, voice-note, and recording routes for a `staff`
+ * session). Found live while testing migration 0013: admin can assign a
+ * workflow stage to a staff member without also adding them to the site's
+ * team roster, and without this OR clause that staff member would see the
+ * site in their own workflow tiles but get a 403 wall opening it.
+ */
 export async function isUserAssignedToSite(db: D1Database, userId: string, siteId: string): Promise<boolean> {
   const row = await db
-    .prepare(`SELECT 1 FROM site_team_members WHERE site_id = ? AND user_id = ? LIMIT 1`)
-    .bind(siteId, userId)
+    .prepare(
+      `SELECT 1 FROM site_team_members WHERE site_id = ? AND user_id = ?
+       UNION
+       SELECT 1 FROM site_tasks WHERE site_id = ? AND assigned_to_user_id = ?
+       LIMIT 1`
+    )
+    .bind(siteId, userId, siteId, userId)
     .first();
   return row !== null;
 }
@@ -845,8 +870,15 @@ export interface ConfirmedSiteRow {
  */
 export async function getConfirmedSitesSummary(db: D1Database, forUserId?: string | null): Promise<ConfirmedSiteRow[]> {
   const confirmedClause = forUserId ? `sites.is_confirmed IS NOT 'N'` : `sites.is_confirmed = 'Y'`;
+  // Same "team roster OR holds a site_task" rule as isUserAssignedToSite —
+  // otherwise "All my sites" wouldn't list a site the workflow tiles already
+  // let this staff member open.
   const scoped = forUserId
-    ? `AND sites.id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)`
+    ? `AND sites.id IN (
+         SELECT site_id FROM site_team_members WHERE user_id = ?
+         UNION
+         SELECT site_id FROM site_tasks WHERE assigned_to_user_id = ?
+       )`
     : "";
   const stmt = db.prepare(
     `SELECT sites.id AS id, sites.name AS name, sites.target_closure_date AS target_closure_date,
@@ -858,7 +890,7 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
      GROUP BY sites.id, sites.name, sites.target_closure_date
      ORDER BY sites.name ASC`
   );
-  const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<ConfirmedSiteRow>();
+  const { results } = await (forUserId ? stmt.bind(forUserId, forUserId) : stmt).all<ConfirmedSiteRow>();
   return results;
 }
 
@@ -1352,4 +1384,155 @@ export async function getSiteTimeline(
   }
 
   return entries.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+}
+
+/* ------------------------------------------------------------------
+   Site-task workflow system — migration 0013. workflow_stages is a fixed,
+   pre-seeded catalog (no write path); site_tasks is the per-site instance
+   of each stage. Deliberately no ordering between stages — see the
+   migration header — so "what's next" is always a human choice, never
+   computed.
+   ------------------------------------------------------------------ */
+
+/** Seeds every catalog stage for one site, unassigned. Called once from createSite; the 0013 migration backfills existing sites the same way. */
+export async function seedSiteTasks(db: D1Database, siteId: string): Promise<void> {
+  const { results: stages } = await db.prepare(`SELECT id FROM workflow_stages`).all<{ id: string }>();
+  if (stages.length === 0) return;
+  await db.batch(
+    stages.map((s) =>
+      db
+        .prepare(`INSERT INTO site_tasks (id, site_id, stage_id, status) VALUES (?, ?, ?, 'unassigned')`)
+        .bind(crypto.randomUUID(), siteId, s.id)
+    )
+  );
+}
+
+export interface SiteTaskRow {
+  id: string;
+  site_id: string;
+  site_name: string;
+  stage_id: string;
+  stage_label: string;
+  category: WorkflowCategory;
+  status: SiteTaskStatus;
+  assigned_to_user_id: string | null;
+  assignee_name: string | null;
+  assigned_at: string | null;
+  due_date: string | null;
+  completed_at: string | null;
+  completed_by_name: string | null;
+}
+
+const SITE_TASK_ROW_SELECT = `
+  SELECT site_tasks.id AS id,
+         site_tasks.site_id AS site_id,
+         sites.name AS site_name,
+         site_tasks.stage_id AS stage_id,
+         workflow_stages.label AS stage_label,
+         workflow_stages.category AS category,
+         site_tasks.status AS status,
+         site_tasks.assigned_to_user_id AS assigned_to_user_id,
+         assignee.name AS assignee_name,
+         site_tasks.assigned_at AS assigned_at,
+         site_tasks.due_date AS due_date,
+         site_tasks.completed_at AS completed_at,
+         completer.name AS completed_by_name
+  FROM site_tasks
+  JOIN sites ON sites.id = site_tasks.site_id
+  JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+  LEFT JOIN users AS assignee ON assignee.id = site_tasks.assigned_to_user_id
+  LEFT JOIN users AS completer ON completer.id = site_tasks.completed_by_user_id
+`;
+
+/** All 23 stages for one site — backs the admin "View work timeline" popup. */
+export async function listSiteTasks(db: D1Database, siteId: string): Promise<SiteTaskRow[]> {
+  const { results } = await db.prepare(`${SITE_TASK_ROW_SELECT} WHERE site_tasks.site_id = ?`).bind(siteId).all<SiteTaskRow>();
+  return results;
+}
+
+/**
+ * Open (status = 'assigned') tasks, scoped by role: `forUserId` set → just
+ * that person's own assignments (staff home tiles); omitted/null → every
+ * open assignment business-wide (admin home tiles). Same query backs both,
+ * per docs — the dashboard groups the flat list into category tiles client-side.
+ */
+export async function listOpenSiteTasks(db: D1Database, forUserId?: string | null): Promise<SiteTaskRow[]> {
+  const scoped = forUserId ? `AND site_tasks.assigned_to_user_id = ?` : "";
+  const stmt = db.prepare(
+    `${SITE_TASK_ROW_SELECT} WHERE site_tasks.status = 'assigned' ${scoped}
+     ORDER BY (site_tasks.due_date IS NULL) ASC, site_tasks.due_date ASC`
+  );
+  const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<SiteTaskRow>();
+  return results;
+}
+
+/** Every still-unassigned stage at one site — the handoff picker shown after marking a stage done. */
+export async function listUnassignedSiteTasksForSite(db: D1Database, siteId: string): Promise<SiteTaskRow[]> {
+  const { results } = await db
+    .prepare(`${SITE_TASK_ROW_SELECT} WHERE site_tasks.site_id = ? AND site_tasks.status = 'unassigned'`)
+    .bind(siteId)
+    .all<SiteTaskRow>();
+  return results;
+}
+
+export async function getSiteTaskById(db: D1Database, id: string): Promise<SiteTaskRow | null> {
+  const row = await db.prepare(`${SITE_TASK_ROW_SELECT} WHERE site_tasks.id = ?`).bind(id).first<SiteTaskRow>();
+  return row ?? null;
+}
+
+/**
+ * True if `userId` currently holds (or has completed) another task on
+ * `siteId` — the narrow permission that lets a staff member hand a stage
+ * off to a teammate without an admin, but only on a site they're already
+ * actively working. See docs conversation on the assign-next flow.
+ */
+export async function isUserActiveOnSiteTasks(db: D1Database, userId: string, siteId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM site_tasks
+       WHERE site_id = ? AND assigned_to_user_id = ? AND status IN ('assigned', 'done')
+       LIMIT 1`
+    )
+    .bind(siteId, userId)
+    .first();
+  return row !== null;
+}
+
+/** Assign or reassign one stage. `dueDate` is optional and cleared with null. */
+export async function assignSiteTask(
+  db: D1Database,
+  id: string,
+  input: { assignedToUserId: string; assignedByUserId: string; dueDate?: string | null }
+): Promise<SiteTaskRow | null> {
+  // `dueDate` is genuinely tri-state: undefined ("not touched by this
+  // patch") must leave the existing value alone, which COALESCE(?, due_date)
+  // cannot do — it treats a bound NULL (an explicit clear) as "keep the old
+  // value" too, so a clear would silently never apply.
+  const touchesDueDate = input.dueDate !== undefined;
+  const dueDateClause = touchesDueDate ? `, due_date = ?` : "";
+  const stmt = db.prepare(
+    `UPDATE site_tasks
+     SET status = 'assigned', assigned_to_user_id = ?, assigned_by_user_id = ?,
+         assigned_at = datetime('now') ${dueDateClause}
+     WHERE id = ?`
+  );
+  const bound = touchesDueDate
+    ? stmt.bind(input.assignedToUserId, input.assignedByUserId, input.dueDate, id)
+    : stmt.bind(input.assignedToUserId, input.assignedByUserId, id);
+  await bound.run();
+  return getSiteTaskById(db, id);
+}
+
+export async function completeSiteTask(db: D1Database, id: string, completedByUserId: string): Promise<SiteTaskRow | null> {
+  await db
+    .prepare(`UPDATE site_tasks SET status = 'done', completed_at = datetime('now'), completed_by_user_id = ? WHERE id = ?`)
+    .bind(completedByUserId, id)
+    .run();
+  return getSiteTaskById(db, id);
+}
+
+/** Total row count in `calls`, including low_signal — the home-page "Calls logged" tile. */
+export async function getCallsCount(db: D1Database): Promise<number> {
+  const row = await db.prepare(`SELECT COUNT(*) AS n FROM calls`).first<{ n: number }>();
+  return row?.n ?? 0;
 }

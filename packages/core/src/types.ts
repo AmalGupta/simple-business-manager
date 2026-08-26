@@ -201,3 +201,36 @@ export interface SarvamResult {
   language_code: string;
   diarized_transcript?: { entries: DiarizedEntry[] };
 }
+
+/** See migration 0013 — the "Process Aluminium" catalog, grouped for the home-page tiles. Not a pipeline order. */
+export type WorkflowCategory =
+  | "admin_intake"
+  | "measurement"
+  | "procurement"
+  | "production"
+  | "quality_control"
+  | "installation"
+  | "handover"
+  | "billing_delivery";
+
+export interface WorkflowStage {
+  id: string;
+  label: string;
+  category: WorkflowCategory;
+}
+
+export type SiteTaskStatus = "unassigned" | "assigned" | "done";
+
+export interface SiteTask {
+  id: string;
+  site_id: string;
+  stage_id: string;
+  status: SiteTaskStatus;
+  assigned_to_user_id: string | null;
+  assigned_by_user_id: string | null;
+  assigned_at: string | null;
+  due_date: string | null;
+  completed_at: string | null;
+  completed_by_user_id: string | null;
+  created_at: string;
+}
