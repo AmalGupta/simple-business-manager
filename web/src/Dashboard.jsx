@@ -36,6 +36,10 @@ import { EmptyState } from "./components/EmptyState.jsx";
 import { AudioPlayer } from "./components/AudioPlayer.jsx";
 import { TileLabel } from "./components/TileLabel.jsx";
 import { TodoRow, formatTodoSentence } from "./components/TodoRow.jsx";
+import { CallHeading } from "./components/CallHeading.jsx";
+import { CommitmentsList } from "./components/CommitmentsList.jsx";
+import { CallTypeBadge } from "./components/CallTypeBadge.jsx";
+import { CallCard } from "./components/CallCard.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -262,168 +266,6 @@ function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, on
 }
 
 /* ------------------------------------------------------------------ */
-/* Sentence-format rendering of a structured todo — same {owner, text,
-   due_date} the extraction pipeline already produces via forced tool-use
-   (TodoRow below renders it as a checklist row); this just phrases it as a
-   sentence for the admin Recordings review panel. No change to extraction
-   itself — see docs/SCAFFOLDING.md §6. */
-/* Site chips for internal calls, client name for client calls — the
-   organising unit in speech is the site, not the client, for the 9-of-11
-   internal-ops majority. Falls back to client_name for legacy rows
-   recorded before call_type existed. See docs/ADDITIONAL_FEATURES_M0.md. */
-function CallHeading({ call }) {
-  const showSites = call.call_type === "internal" && call.sites?.length > 0;
-  if (!showSites) {
-    return (
-      <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>
-        {call.client_name}
-      </span>
-    );
-  }
-  return (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-      {call.sites.map((site) => (
-        <span
-          key={site}
-          style={{
-            fontFamily: t.display,
-            fontSize: 14,
-            fontWeight: 500,
-            padding: "3px 9px",
-            border: `1px solid ${t.frost}`,
-            borderRadius: t.radius,
-            color: t.edge,
-          }}
-        >
-          {site}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function CommitmentsList({ commitments }) {
-  if (!commitments || commitments.length === 0) return null;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {commitments.map((c) => (
-        <div key={c.id} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: 13 }}>
-          <span style={{ color: t.edge2, fontStyle: "italic" }}>{c.raw_phrase}</span>
-          {c.resolved_datetime && (
-            <>
-              <span style={{ color: t.edge2 }}>→</span>
-              <span style={{ color: t.edge }}>{fmtShort(c.resolved_datetime)}</span>
-            </>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* "Important" = call_type client/internal (already got a card on the old
-   home feed); "Regular" = low_signal (never surfaced anywhere before the
-   Calls Transcripts page existed). Neutral colours, not urgency-red — this
-   is a classification, not a warning. */
-function CallTypeBadge({ callType }) {
-  const isImportant = callType !== "low_signal";
-  return (
-    <span
-      style={{
-        fontSize: 11,
-        fontWeight: 700,
-        padding: "2px 8px",
-        borderRadius: t.radius,
-        color: isImportant ? t.accent : t.edge2,
-        background: isImportant ? "color-mix(in srgb, var(--color-accent) 12%, transparent)" : t.frostSoft,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {isImportant ? "Important" : "Regular"}
-    </span>
-  );
-}
-
-function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0, showTypeBadge = false }) {
-  const visible = call.todos.filter((td) => td.status !== "done");
-  const done = call.todos.filter((td) => td.status === "done");
-  const [openTranscript, setOpenTranscript] = useState(false);
-
-  return (
-    <Card
-      className="sbm-rise"
-      style={{ marginBottom: 12, animationDelay: `${index * 40}ms` }}
-    >
-      <button
-        onClick={() => onOpen(call.id)}
-        style={{
-          display: "block",
-          width: "100%",
-          textAlign: "left",
-          padding: 0,
-          border: "none",
-          background: "none",
-          cursor: "pointer",
-          marginBottom: 12,
-        }}
-      >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-          <CallHeading call={call} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {showTypeBadge && <CallTypeBadge callType={call.call_type} />}
-            {call.customer_waiting ? <WaitingTag /> : null}
-          </div>
-        </div>
-        <div style={{ fontSize: 13, color: t.edge2, marginTop: 2 }}>
-          {fmtDate(call.recorded_at)} · {Math.round(call.duration_s / 60)} min
-        </div>
-      </button>
-
-      {call.summary && <p style={{ fontSize: 13, lineHeight: 1.6, color: t.edge2, margin: "0 0 10px" }}>{call.summary}</p>}
-
-      {[...visible, ...done].map((todo) => (
-        <TodoRow key={todo.id} todo={todo} onToggle={onToggle} onPark={onPark} busy={busyIds.has(todo.id)} />
-      ))}
-
-      {call.commitments?.length > 0 && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.frost}` }}>
-          <CommitmentsList commitments={call.commitments} />
-        </div>
-      )}
-
-      {call.transcript != null && (
-        <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${t.frost}` }}>
-          <button
-            onClick={() => setOpenTranscript((v) => !v)}
-            aria-expanded={openTranscript}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              padding: 0,
-              border: "none",
-              background: "none",
-              cursor: "pointer",
-              color: t.edge2,
-              fontSize: 12,
-              fontWeight: 600,
-            }}
-          >
-            <FileText size={14} />
-            {openTranscript ? "Hide transcript" : "Show transcript"}
-          </button>
-          {openTranscript && (
-            <p style={{ fontSize: 13, lineHeight: 1.8, color: t.edge2, marginTop: 8, whiteSpace: "pre-wrap" }}>
-              {call.transcript}
-            </p>
-          )}
-        </div>
-      )}
-    </Card>
-  );
-}
-
 /* ------------------------------------------------------------------
    Day view — calls recorded that day, plus everything closed that day
    regardless of which call it came from.
