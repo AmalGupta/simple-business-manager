@@ -10,6 +10,7 @@ import {
   createEscalation,
   createSite,
   getCallById,
+  getCallsCount,
   getCallWithTodos,
   getConfirmedSitesSummary,
   getSitesNeedingAttention,
@@ -58,6 +59,13 @@ export async function handleGetCalls(request: Request, env: Env): Promise<Respon
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
   return json(await listCallsWithTodos(env.DB));
+}
+
+/** Home-page "Calls logged" tile — total row count, including low_signal calls the feed itself never shows a card for. */
+export async function handleGetCallsCount(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  return json({ count: await getCallsCount(env.DB) });
 }
 
 /**

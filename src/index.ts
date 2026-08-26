@@ -12,6 +12,7 @@ import {
   handleCloseEscalation,
   handleGetCall,
   handleGetCalls,
+  handleGetCallsCount,
   handleGetEscalations,
   handleGetSites,
   handlePostSite,
@@ -25,6 +26,12 @@ import {
   handlePostSiteTeamMember,
   handleRetryCallStt,
 } from "./handlers/api";
+import {
+  handleGetSiteTasks,
+  handleListOpenSiteTasks,
+  handleListUnassignedSiteTasks,
+  handlePatchSiteTask,
+} from "./handlers/site-tasks";
 import {
   handleAdminCreateUser,
   handleAdminRevokeSessions,
@@ -105,6 +112,12 @@ export default {
       return handleGetCalls(request, env);
     }
 
+    // Must come before callMatch below — "count" would otherwise parse as a call id.
+    if (url.pathname === "/api/calls/count" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallsCount(request, env);
+    }
+
     const callMatch = url.pathname.match(/^\/api\/calls\/([^/]+)$/);
     if (callMatch && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
@@ -162,6 +175,31 @@ export default {
     if (siteTeamMatch && request.method === "POST") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handlePostSiteTeamMember(request, env, siteTeamMatch[1]);
+    }
+
+    // --- Site-task workflow system — migration 0013. ---
+
+    if (url.pathname === "/api/site-tasks/open" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleListOpenSiteTasks(request, env);
+    }
+
+    const siteTasksMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/tasks$/);
+    if (siteTasksMatch && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetSiteTasks(request, env, siteTasksMatch[1]);
+    }
+
+    const siteTasksUnassignedMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/tasks\/unassigned$/);
+    if (siteTasksUnassignedMatch && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleListUnassignedSiteTasks(request, env, siteTasksUnassignedMatch[1]);
+    }
+
+    const siteTaskMatch = url.pathname.match(/^\/api\/site-tasks\/([^/]+)$/);
+    if (siteTaskMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePatchSiteTask(request, env, siteTaskMatch[1]);
     }
 
     if (url.pathname === "/api/escalations" && request.method === "GET") {

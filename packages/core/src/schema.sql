@@ -220,3 +220,30 @@ CREATE TABLE site_edits (
 );
 CREATE INDEX idx_site_edits_site ON site_edits(site_id, created_at DESC);
 CREATE INDEX idx_calls_recorded_for_site ON calls(recorded_for_site_id);
+
+-- Site-task workflow system — migration 0013. A fixed catalog of production
+-- task types (workflow_stages, seeded in the migration) instantiated once
+-- per site (site_tasks). These are independent task types, not sequential
+-- pipeline steps — deliberately no ordering column between them.
+CREATE TABLE workflow_stages (
+  id        TEXT PRIMARY KEY,
+  label     TEXT NOT NULL,
+  category  TEXT NOT NULL
+);
+
+CREATE TABLE site_tasks (
+  id                    TEXT PRIMARY KEY,
+  site_id               TEXT NOT NULL REFERENCES sites(id),
+  stage_id              TEXT NOT NULL REFERENCES workflow_stages(id),
+  status                TEXT NOT NULL DEFAULT 'unassigned',  -- unassigned | assigned | done
+  assigned_to_user_id   TEXT REFERENCES users(id),
+  assigned_by_user_id   TEXT REFERENCES users(id),
+  assigned_at           TEXT,
+  due_date              TEXT,
+  completed_at          TEXT,
+  completed_by_user_id  TEXT REFERENCES users(id),
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(site_id, stage_id)
+);
+CREATE INDEX idx_site_tasks_site ON site_tasks(site_id);
+CREATE INDEX idx_site_tasks_assignee ON site_tasks(assigned_to_user_id, status);
