@@ -8,7 +8,6 @@ import {
   ChevronDown,
   FileText,
   Clock,
-  Phone,
   Image,
   Video,
   Mic,
@@ -34,6 +33,7 @@ import { DownloadButton } from "./components/DownloadButton.jsx";
 import { WaitingTag } from "./components/WaitingTag.jsx";
 import { Card } from "./components/Card.jsx";
 import { BackLink } from "./components/BackLink.jsx";
+import { PhoneLink } from "./components/PhoneLink.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -377,30 +377,6 @@ function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
         </button>
       )}
     </div>
-  );
-}
-
-function PhoneLink({ phone }) {
-  if (!phone) return null;
-  return (
-    <a
-      href={`tel:${phone.replace(/\s/g, "")}`}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        fontSize: 13,
-        fontWeight: 700,
-        padding: "7px 12px",
-        borderRadius: t.radiusButton,
-        background: t.accent,
-        color: t.white,
-        textDecoration: "none",
-      }}
-    >
-      <Phone size={14} />
-      Call {phone}
-    </a>
   );
 }
 
