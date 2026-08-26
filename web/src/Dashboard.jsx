@@ -27,10 +27,9 @@ import { WaitingTag } from "./components/WaitingTag.jsx";
 import { Card } from "./components/Card.jsx";
 import { BackLink } from "./components/BackLink.jsx";
 import { PhoneLink } from "./components/PhoneLink.jsx";
-import { EmptyState } from "./components/EmptyState.jsx";
 import { AudioPlayer } from "./components/AudioPlayer.jsx";
 import { TileLabel } from "./components/TileLabel.jsx";
-import { TodoRow, formatTodoSentence } from "./components/TodoRow.jsx";
+import { TodoRow } from "./components/TodoRow.jsx";
 import { CallHeading } from "./components/CallHeading.jsx";
 import { CommitmentsList } from "./components/CommitmentsList.jsx";
 import { CallTypeBadge } from "./components/CallTypeBadge.jsx";
@@ -52,6 +51,8 @@ import { SitesAttentionTile } from "./views/home/SitesAttentionTile.jsx";
 import { EscalationsTile } from "./views/home/EscalationsTile.jsx";
 import { StreakWall } from "./views/calls/StreakWall.jsx";
 import { DayView } from "./views/calls/DayView.jsx";
+import { CallsPageView } from "./views/calls/CallsPageView.jsx";
+import { RecordingsPageView } from "./views/calls/RecordingsPageView.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -2210,141 +2211,6 @@ function SitesReviewView({ sites, onBack, onSaved }) {
         </button>
         {saved && !dirty && <span style={{ fontSize: 13, color: t.edge2 }}>Updated.</span>}
       </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------
-   Login gate — name + short PIN, session cookie set by POST /api/login.
-   See src/lib/auth.ts. Shown in place of the whole dashboard until
-   GET /api/me succeeds.
-   ------------------------------------------------------------------ */
-/* Calls Transcripts page — everything that used to sit directly on the
-   admin home feed, relocated behind the "Calls logged" tile. Adds the two
-   summary tiles (Important/Regular — see CallTypeBadge above for the same
-   split) and per-card badges; todo toggling, park, and download are
-   unchanged from the old home feed. */
-function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds }) {
-  const [filter, setFilter] = useState(null); // null = all, "important", "regular"
-
-  const importantCalls = useMemo(() => calls.filter((c) => c.call_type !== "low_signal"), [calls]);
-  const regularCalls = useMemo(() => calls.filter((c) => c.call_type === "low_signal"), [calls]);
-  const shown = filter === "important" ? importantCalls : filter === "regular" ? regularCalls : calls;
-  const ordered = useMemo(() => sortCalls(shown), [shown]);
-
-  const toggle = (key) => setFilter((current) => (current === key ? null : key));
-
-  return (
-    <div>
-      <BackLink onClick={onBack}>Back</BackLink>
-      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>Calls</h1>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: "1.5rem" }}>
-        <button onClick={() => toggle("important")} style={{ all: "unset", cursor: "pointer", display: "block" }}>
-          <Card style={{ borderColor: filter === "important" ? t.accent : t.frost }}>
-            <TileLabel>Important calls</TileLabel>
-            <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={TILE_NUMBER_STYLE}>{importantCalls.length}</span>
-            </div>
-          </Card>
-        </button>
-        <button onClick={() => toggle("regular")} style={{ all: "unset", cursor: "pointer", display: "block" }}>
-          <Card style={{ borderColor: filter === "regular" ? t.accent : t.frost }}>
-            <TileLabel>Regular calls</TileLabel>
-            <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={TILE_NUMBER_STYLE}>{regularCalls.length}</span>
-            </div>
-          </Card>
-        </button>
-      </div>
-
-      {calls.length === 0 ? (
-        <EmptyState />
-      ) : ordered.length === 0 ? (
-        <p style={{ fontSize: 14, color: t.edge2 }}>No {filter} calls.</p>
-      ) : (
-        <>
-          {ordered.map((call, i) => (
-            <CallCard
-              key={call.id}
-              index={i}
-              call={call}
-              showTypeBadge
-              onOpen={onOpen}
-              onToggle={onToggle}
-              onPark={onPark}
-              busyIds={busyIds}
-            />
-          ))}
-          <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "flex-end" }}>
-            <DownloadButton calls={ordered} label={filter ?? "all"}>
-              Download {filter ?? "everything"}
-            </DownloadButton>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/* Recordings — admin/superadmin-only control, separate from the Calls page
-   above. Where Calls is day-to-day todo triage (checklist rows, park/close),
-   this is a review surface over the raw recordings themselves: play the
-   audio back, see each extracted todo phrased as a plain sentence
-   (formatTodoSentence) rather than a checkbox. Reuses the same `calls` list
-   already loaded for an admin session — no separate fetch. Recording
-   playback itself is scoped server-side (GET /api/calls/:id/recording,
-   src/handlers/site-media.ts); this view is only ever reachable by
-   admin/superadmin in the first place, same as CallsPageView. */
-function RecordingsPageView({ calls, onBack, onOpen }) {
-  const ordered = useMemo(() => sortCalls(calls), [calls]);
-
-  return (
-    <div>
-      <BackLink onClick={onBack}>Back</BackLink>
-      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
-        Recordings
-      </h1>
-
-      {ordered.length === 0 ? (
-        <EmptyState />
-      ) : (
-        ordered.map((call) => (
-          <Card key={call.id} style={{ marginBottom: 12 }}>
-            <button
-              onClick={() => onOpen(call.id)}
-              style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 500, color: t.edge }}>
-                  {call.client_name}
-                </span>
-                <span style={{ fontSize: 12, color: t.edge2, whiteSpace: "nowrap" }}>
-                  {fmtDate(call.recorded_at)}
-                  {call.duration_s ? ` · ${Math.round(call.duration_s / 60)} min` : ""}
-                </span>
-              </div>
-            </button>
-
-            {call.transcript == null ? (
-              <span style={{ display: "flex", alignItems: "center", gap: 8, color: t.edge2, fontSize: 13, marginTop: 8 }}>
-                <FileText size={16} />
-                Transcription in progress
-              </span>
-            ) : (
-              <AudioPlayer src={`/api/calls/${call.id}/recording`} />
-            )}
-
-            {call.todos.length > 0 && (
-              <ul style={{ margin: "10px 0 0", paddingLeft: 18, fontSize: 13, lineHeight: 1.8, color: t.edge2 }}>
-                {call.todos.map((td) => (
-                  <li key={td.id}>{formatTodoSentence(td)}</li>
-                ))}
-              </ul>
-            )}
-          </Card>
-        ))
-      )}
     </div>
   );
 }

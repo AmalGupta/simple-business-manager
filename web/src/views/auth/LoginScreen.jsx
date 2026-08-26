@@ -3,6 +3,11 @@ import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
 import { postLogin } from "../../lib/api.js";
 
+/* ------------------------------------------------------------------
+   Login gate — name + short PIN, session cookie set by POST /api/login.
+   See src/lib/auth.ts. Shown in place of the whole dashboard until
+   GET /api/me succeeds.
+   ------------------------------------------------------------------ */
 export function LoginScreen({ onLogin }) {
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
