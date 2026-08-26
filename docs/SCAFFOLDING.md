@@ -371,6 +371,8 @@ System prompt principles worth holding: extract only what was actually said, nev
 
 ## 7. Design
 
+**Surfaces, radius, and label/number typography are superseded as of 2026-08-26 — see `docs/DESIGN_LANGUAGE.md`.** The canvas/ink/slate/line/accent/warn/danger palette and the motion table below are unaffected and still current. Kept here for history rather than folded in, since this section already documents one reversal (float-glass → control room) and a second inline rewrite would bury that record.
+
 **Revised 2026-08-22.** The original float-glass palette (cool green, near-colorless page, "frosted" completion) is retired. This was a deliberate reversal, not a drive-by restyle: the earlier reference material was his trade (glass fabrication) read as a calm, therapeutic surface; the working direction now is a "control room" for someone doing hardcore sales and customer-facing work — a tool that pushes toward the next call, not one that soothes. The retired palette is not deleted, only demoted: it ships as an inactive second theme block in `web/src/theme.css` so it can be swapped back in one line if this reversal itself gets reversed. See `docs/BUILD_BRIEF.md`'s design-canvas exploration history for the intermediate steps (a warm/glow variant was tried and rejected before landing here).
 
 **What did not change:** the behavioral acceptance criteria — four todo states, streak grid, CSV export, day drilldown (see `CLAUDE.md`) — and the rule that a saturated warning color earns its place only at genuine urgency, never decoratively. Only the palette, type, radius, and a few structural touches (a dark header bar, solid-fill badges instead of outline pills) changed.

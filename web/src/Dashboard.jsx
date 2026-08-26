@@ -28,6 +28,7 @@ import {
 const t = {
   pane: "var(--color-canvas)",
   edge: "var(--color-ink)",
+  edgeStrong: "var(--color-ink-emphasis)",
   edge2: "var(--color-slate)",
   frost: "var(--color-line)",
   frostSoft: "var(--color-line-soft)",
@@ -39,6 +40,7 @@ const t = {
   unread: "var(--color-unread)",
   white: "var(--color-surface)",
   display: "var(--font-display)",
+  label: "var(--font-label)",
   body: "var(--font-body)",
   radius: "var(--radius-badge)",
   radiusCard: "var(--radius-card)",
@@ -835,28 +837,23 @@ function WaitingTag() {
   );
 }
 
-/* `tile` swaps the flat white + hairline-border look for the modern
-   accent-tinted surface + shadow treatment (see --color-surface-tile and
-   friends in theme.css) — used only by the stat/entry tiles (StatCard,
-   SitesAttentionTile, EscalationsTile, StaffTile, WorkflowTilesRow, the
-   "calls logged"/"recordings" tiles). Every other Card usage (call rows,
-   detail sections, forms) is unaffected.
-
-   Also fixes every tile to the same --tile-height and lays it out as a
-   column flexbox, so the grid stays symmetrical regardless of content —
-   a tile with a variable-length list (SitesAttentionTile, EscalationsTile)
-   must scroll internally rather than growing taller than its neighbours.
-   See those components for the `flex: 1; overflowY: auto` content wrapper
-   that makes that scrolling work. */
+/* Flat white surface, hairline border, one shared radius — every Card
+   usage renders the same skin now (see docs/DESIGN_LANGUAGE.md "Surface").
+   `tile` no longer changes the skin; it only fixes the card to
+   --tile-height and lays it out as a column flexbox, so the home-grid
+   tiles stay symmetrical regardless of content — a tile with a
+   variable-length list (SitesAttentionTile, EscalationsTile) scrolls
+   internally rather than growing taller than its neighbours. See those
+   components for the `flex: 1; overflowY: auto` content wrapper that
+   makes that scrolling work. */
 function Card({ children, style, className, tile = false }) {
   return (
     <div
       className={className}
       style={{
-        background: tile ? "var(--color-surface-tile)" : t.white,
-        border: tile ? "none" : `1px solid ${t.frost}`,
-        borderRadius: tile ? "var(--radius-tile)" : t.radiusCard,
-        boxShadow: tile ? "var(--shadow-tile)" : "none",
+        background: t.white,
+        border: `1px solid ${t.frost}`,
+        borderRadius: t.radiusCard,
         padding: "1rem 1.25rem",
         ...(tile ? { height: "var(--tile-height)", display: "flex", flexDirection: "column" } : {}),
         ...style,
@@ -1405,7 +1402,18 @@ function EmptyState() {
 function TileLabel({ children, action }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-      <span style={{ fontFamily: t.display, fontSize: 13, fontWeight: 700, color: t.edge2 }}>{children}</span>
+      <span
+        style={{
+          fontFamily: t.label,
+          fontSize: 11,
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.04em",
+          color: t.edge,
+        }}
+      >
+        {children}
+      </span>
       {action}
     </div>
   );
@@ -1427,6 +1435,18 @@ const TILE_VALUE_ROW_STYLE = {
   flex: 1,
   display: "flex",
   alignItems: "center",
+};
+
+/* The numeral itself, inside TILE_VALUE_ROW_STYLE — accent-blue and bold
+   rather than ink-black, so color reads as a deliberate signal on the one
+   thing worth it, not decoration applied everywhere. See
+   docs/DESIGN_LANGUAGE.md "Color". */
+const TILE_NUMBER_STYLE = {
+  fontFamily: t.display,
+  fontSize: 32,
+  fontWeight: 700,
+  lineHeight: 1,
+  color: t.accent,
 };
 
 const TEXT_INPUT_STYLE = {
@@ -1457,9 +1477,7 @@ function StatCard({ value, label }) {
     <Card tile>
       <TileLabel>{label}</TileLabel>
       <div style={TILE_VALUE_ROW_STYLE}>
-        <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-          {value}
-        </span>
+        <span style={TILE_NUMBER_STYLE}>{value}</span>
       </div>
     </Card>
   );
@@ -1478,9 +1496,7 @@ function StaffTile({ count, onOpen }) {
       <Card tile>
         <TileLabel action={<Users size={14} color={t.edge2} />}>staff</TileLabel>
         <div style={TILE_VALUE_ROW_STYLE}>
-          <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-            {count}
-          </span>
+          <span style={TILE_NUMBER_STYLE}>{count}</span>
         </div>
       </Card>
     </button>
@@ -1512,9 +1528,7 @@ function WorkflowTilesRow({ tasks, onOpenCategory }) {
       <Card tile>
         <TileLabel>{c.label}</TileLabel>
         <div style={TILE_VALUE_ROW_STYLE}>
-          <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-            {counts.get(c.key)}
-          </span>
+          <span style={TILE_NUMBER_STYLE}>{counts.get(c.key)}</span>
         </div>
       </Card>
     </button>
@@ -1619,7 +1633,7 @@ function SitesAttentionTile({ sites, onOpenSite, onReviewSites, onViewDirectory,
               fontFamily: t.body,
             }}
           >
-            <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
+            <span style={{ fontSize: 14, fontWeight: 500, color: t.edgeStrong }}>{s.name}</span>
             <span style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: t.edge2 }}>
               <span>
                 {s.open_count} open · {s.oldest_age_days}d
@@ -3220,7 +3234,7 @@ function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated, canManage = tru
                       {s.unread_count}
                     </span>
                   )}
-                  <span style={{ fontSize: 14, color: t.edge }}>{s.name}</span>
+                  <span style={{ fontSize: 14, fontWeight: 500, color: t.edgeStrong }}>{s.name}</span>
                   {s.target_closure_date && (
                     <span style={{ fontSize: 12, color: missed ? t.signal : t.edge2, fontWeight: missed ? 700 : 400 }}>
                       Due {fmtShort(s.target_closure_date)}
@@ -4123,9 +4137,7 @@ function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds }) {
           <Card style={{ borderColor: filter === "important" ? t.accent : t.frost }}>
             <TileLabel>Important calls</TileLabel>
             <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-                {importantCalls.length}
-              </span>
+              <span style={TILE_NUMBER_STYLE}>{importantCalls.length}</span>
             </div>
           </Card>
         </button>
@@ -4133,9 +4145,7 @@ function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds }) {
           <Card style={{ borderColor: filter === "regular" ? t.accent : t.frost }}>
             <TileLabel>Regular calls</TileLabel>
             <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-                {regularCalls.length}
-              </span>
+              <span style={TILE_NUMBER_STYLE}>{regularCalls.length}</span>
             </div>
           </Card>
         </button>
@@ -4816,9 +4826,7 @@ export default function SimpleBusinessManager() {
           <Card tile>
             <TileLabel>calls logged</TileLabel>
             <div style={TILE_VALUE_ROW_STYLE}>
-              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-                {callsCount}
-              </span>
+              <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
             </div>
           </Card>
         </button>
@@ -4833,9 +4841,7 @@ export default function SimpleBusinessManager() {
           <Card tile>
             <TileLabel>recordings</TileLabel>
             <div style={TILE_VALUE_ROW_STYLE}>
-              <span style={{ fontFamily: t.display, fontSize: 32, fontWeight: 500, lineHeight: 1, color: t.edge }}>
-                {callsCount}
-              </span>
+              <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
             </div>
           </Card>
         </button>
