@@ -19,58 +19,23 @@ import {
   Plus,
 } from "lucide-react";
 import { t } from "./theme.js";
+import {
+  today,
+  dayKey,
+  isoDate,
+  daysUntil,
+  fmtDate,
+  fmtShort,
+  fmtLong,
+  isUrgent,
+  isTaskDueDateUrgent,
+} from "./lib/dates.js";
 
 /* Same-origin API, gated by the X-SBM-Key shared secret — see
    docs/BUILD_BRIEF.md "No Cloudflare Access on this worker". Baked in at
    build time (web/.env, gitignored) since this is a static SPA with no
    login step. */
 const SBM_KEY = import.meta.env.VITE_SBM_API_KEY ?? "";
-
-/* ------------------------------------------------------------------
-   Dates. Everything is an ISO yyyy-mm-dd string, matching D1.
-   ------------------------------------------------------------------ */
-const DAY = 86400000;
-const today = () => {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
-const dayKey = (iso) => (iso ? String(iso).slice(0, 10) : null);
-/* Local Y/M/D -> "yyyy-mm-dd" without a toISOString() round trip — that
-   round trip goes through UTC and silently shifts the date by a day in
-   any timezone that isn't UTC itself (bit us for the calendar grid). */
-const isoDate = (year, month, day) =>
-  `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-const daysUntil = (iso) => (iso ? Math.round((new Date(iso) - today()) / DAY) : null);
-const fmtDate = (iso) =>
-  iso
-    ? new Date(iso).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })
-    : "";
-const fmtShort = (iso) =>
-  iso ? new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short" }) : "";
-const fmtLong = (iso) =>
-  iso
-    ? new Date(iso).toLocaleDateString("en-IN", {
-        weekday: "long",
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      })
-    : "";
-
-/* Urgency is the ONLY thing allowed to produce colour. */
-const isUrgent = (todo) => {
-  if (todo.status !== "open" || !todo.due_date) return false;
-  const d = daysUntil(todo.due_date);
-  return d !== null && d <= 1;
-};
-
-/* Same urgency rule, applied to a site task's due_date rather than a todo's. */
-const isTaskDueDateUrgent = (dueDate) => {
-  if (!dueDate) return false;
-  const d = daysUntil(dueDate);
-  return d !== null && d <= 1;
-};
 
 /* ------------------------------------------------------------------
    The 8 workflow categories a site task can fall under — see migration
