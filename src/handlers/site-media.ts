@@ -6,7 +6,6 @@
 import { addSiteMedia, getCallById, getSiteMediaById, isCallRecordingAccessibleToUser, listSiteMedia, type SessionWithUser } from "@sbm/core";
 import { streamR2Object } from "../lib/r2-stream";
 import { assertSiteMembership } from "../lib/auth";
-import type { SessionWithUser } from "@sbm/core";
 import type { Env } from "../index";
 
 const MEDIA_PREFIX = "site-media/";
