@@ -192,6 +192,7 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
 
   if (session.user_role === "staff") {
     if ("assigned_to_user_id" in record) return json({ error: "forbidden" }, 403);
+    if (record.status === "snoozed") return json({ error: "staff cannot park todos" }, 403);
     const existing = await getTodoById(env.DB, id);
     if (!existing) return json({ error: "not found" }, 404);
     if (existing.assigned_to_user_id !== session.user_id) return json({ error: "forbidden" }, 403);

@@ -4,45 +4,57 @@ import { fmtShort, isUrgent } from "../../lib/dates.js";
 import { TILE_ROW_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
+import { TodoRow } from "../../components/TodoRow.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
 
-/* "Open today" tile drilldown — every currently-open todo business-wide
-   (the tile's count is a live snapshot, not date-scoped — see
-   Dashboard.jsx's todayCounts comment), with its call and assignee. Rows in
-   one hairline-divided Card rather than a literal <table>, matching
-   StaffDirectoryView/SitesReviewView — this app has no table element
-   anywhere and the Studio design language is flat cards + hairline rules. */
-export function OpenTodosView({ calls, staffRoster, onBack, onOpen, onAssign }) {
-  const openTodos = useMemo(
+/* Admin drilldown from the "open today" / "parked" home tiles.
+   `status` is "open" or "snoozed". Parked list uses TodoRow so admin can
+   unpark or complete; open list keeps assign-first layout. */
+export function OpenTodosView({
+  calls,
+  staffRoster,
+  onBack,
+  onOpen,
+  onAssign,
+  onToggle,
+  onPark,
+  busyIds,
+  status = "open",
+}) {
+  const todos = useMemo(
     () =>
       calls
-        .flatMap((c) => c.todos.filter((td) => td.status === "open").map((td) => ({ ...td, call: c })))
+        .flatMap((c) => c.todos.filter((td) => td.status === status).map((td) => ({ ...td, call: c })))
         .sort((a, b) => {
-          // Unassigned first so the assign pane is what admin works through.
-          const aUn = a.assigned_to_user_id ? 1 : 0;
-          const bUn = b.assigned_to_user_id ? 1 : 0;
-          if (aUn !== bUn) return aUn - bUn;
+          if (status === "open") {
+            const aUn = a.assigned_to_user_id ? 1 : 0;
+            const bUn = b.assigned_to_user_id ? 1 : 0;
+            if (aUn !== bUn) return aUn - bUn;
+          }
           const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity;
           const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity;
           return ad - bd;
         }),
-    [calls]
+    [calls, status]
   );
+
+  const title = status === "snoozed" ? "Parked" : "Open today";
+  const empty = status === "snoozed" ? "Nothing parked right now." : "Nothing open right now.";
 
   return (
     <div>
       <BackLink onClick={onBack}>Back</BackLink>
       <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
-        Open today
+        {title}
       </h1>
 
-      {openTodos.length === 0 ? (
+      {todos.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
-          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>Nothing open right now.</p>
+          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>{empty}</p>
         </Card>
       ) : (
         <Card>
-          {openTodos.map((td) => {
+          {todos.map((td) => {
             const urgent = isUrgent(td);
             return (
               <div key={td.id} style={{ ...TILE_ROW_STYLE, display: "flex", flexDirection: "column", gap: 4 }}>
@@ -69,8 +81,14 @@ export function OpenTodosView({ calls, staffRoster, onBack, onOpen, onAssign }) 
                     </span>
                   )}
                 </div>
-                <span style={{ fontSize: 14, color: t.edge, lineHeight: 1.5 }}>{td.text}</span>
-                <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} alwaysEditing />
+                {status === "snoozed" ? (
+                  <TodoRow todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds?.has(td.id)} />
+                ) : (
+                  <>
+                    <span style={{ fontSize: 14, color: t.edge, lineHeight: 1.5 }}>{td.text}</span>
+                    <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} alwaysEditing />
+                  </>
+                )}
               </div>
             );
           })}

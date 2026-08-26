@@ -4,9 +4,9 @@ import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { TodoRow } from "../../components/TodoRow.jsx";
 
-/* Staff personal queue — open call todos assigned to this user (from
-   dashboard summary my_open_todos). Mark done here; park is available too. */
-export function MyOpenTodosView({ todos, onBack, onOpenCall, onToggle, onPark, busyIds }) {
+/* Staff personal queue — open call todos assigned to this user.
+   Staff can mark done; parking is admin-only. */
+export function MyOpenTodosView({ todos, onBack, onOpenCall, onToggle, busyIds }) {
   const sorted = useMemo(
     () =>
       [...todos].sort((a, b) => {
@@ -46,7 +46,7 @@ export function MyOpenTodosView({ todos, onBack, onOpenCall, onToggle, onPark, b
               >
                 {td.client_name}
               </button>
-              <TodoRow todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds?.has(td.id)} />
+              <TodoRow todo={td} onToggle={onToggle} busy={busyIds?.has(td.id)} />
             </div>
           ))}
         </Card>

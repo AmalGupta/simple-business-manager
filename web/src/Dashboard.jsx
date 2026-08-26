@@ -55,6 +55,7 @@ export default function SimpleBusinessManager() {
      the (possibly still-loading) calls list. Kept in sync on todo toggles. */
   const [openToday, setOpenToday] = useState(0);
   const [closedToday, setClosedToday] = useState(0);
+  const [parkedCount, setParkedCount] = useState(0);
   const [confirmedCount, setConfirmedCount] = useState(0);
   const [unconfirmedCount, setUnconfirmedCount] = useState(0);
   /* Open (assigned, not done) site tasks — scoped server-side to "mine" for
@@ -118,6 +119,7 @@ export default function SimpleBusinessManager() {
     setCallsCount(0);
     setOpenToday(0);
     setClosedToday(0);
+    setParkedCount(0);
     setConfirmedCount(0);
     setUnconfirmedCount(0);
     setOpenSiteTasks([]);
@@ -131,6 +133,7 @@ export default function SimpleBusinessManager() {
       setUnconfirmedCount(summary.unconfirmed_count ?? 0);
       setOpenToday(summary.open_today ?? 0);
       setClosedToday(summary.closed_today ?? 0);
+      setParkedCount(summary.parked_count ?? 0);
       setCallsCount(summary.calls_count ?? 0);
       setSitesAttention(summary.sites_attention ?? []);
       setEscalations(summary.escalations ?? []);
@@ -313,16 +316,22 @@ export default function SimpleBusinessManager() {
     const nextClosedToday = patch.status === "done" && dayKey(patch.completed_at) === todayKey;
     const prevOpen = prev.status === "open";
     const nextOpen = patch.status === "open";
+    const prevParked = prev.status === "snoozed";
+    const nextParked = patch.status === "snoozed";
 
     const applyCountDelta = (fromPrev) => {
       const wasOpen = fromPrev ? prevOpen : nextOpen;
       const isOpen = fromPrev ? nextOpen : prevOpen;
       const wasClosedToday = fromPrev ? prevClosedToday : nextClosedToday;
       const isClosedToday = fromPrev ? nextClosedToday : prevClosedToday;
+      const wasParked = fromPrev ? prevParked : nextParked;
+      const isParked = fromPrev ? nextParked : prevParked;
       if (wasOpen && !isOpen) setOpenToday((n) => Math.max(0, n - 1));
       if (!wasOpen && isOpen) setOpenToday((n) => n + 1);
       if (wasClosedToday && !isClosedToday) setClosedToday((n) => Math.max(0, n - 1));
       if (!wasClosedToday && isClosedToday) setClosedToday((n) => n + 1);
+      if (wasParked && !isParked) setParkedCount((n) => Math.max(0, n - 1));
+      if (!wasParked && isParked) setParkedCount((n) => n + 1);
     };
 
     setBusyIds((s) => new Set(s).add(todo.id));
@@ -657,6 +666,22 @@ export default function SimpleBusinessManager() {
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "open-todos" } })}
         onAssign={onAssignTodo}
+        status="open"
+      />
+    );
+
+  if (view.name === "parked-todos")
+    return shell(
+      <OpenTodosView
+        calls={calls}
+        staffRoster={staffRoster}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpen={(id) => setView({ name: "call", id, from: { name: "parked-todos" } })}
+        onAssign={onAssignTodo}
+        onToggle={onToggle}
+        onPark={onPark}
+        busyIds={busyIds}
+        status="snoozed"
       />
     );
 
@@ -743,7 +768,6 @@ export default function SimpleBusinessManager() {
         onBack={() => setView(view.from ?? homeView)}
         onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-open-todos" } })}
         onToggle={onToggle}
-        onPark={onPark}
         busyIds={busyIds}
       />
     );
@@ -821,6 +845,15 @@ export default function SimpleBusinessManager() {
         >
           <StatCard value={openToday} label="open today" />
         </button>
+        {parkedCount > 0 && (
+          <button
+            onClick={() => setView({ name: "parked-todos", from: { name: "home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label={`Parked — ${parkedCount}`}
+          >
+            <StatCard value={parkedCount} label="parked" />
+          </button>
+        )}
         <button
           onClick={() => setView({ name: "calls" })}
           style={{ all: "unset", cursor: "pointer", display: "block" }}

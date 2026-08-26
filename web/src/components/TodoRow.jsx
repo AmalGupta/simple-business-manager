@@ -18,6 +18,7 @@ export function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
   const parked = todo.status === "snoozed";
   const urgent = isUrgent(todo);
   const Icon = done ? Check : parked ? Clock : Circle;
+  const canPark = Boolean(onPark) && !readOnly;
 
   return (
     <div
@@ -98,7 +99,7 @@ export function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
         </span>
       )}
 
-      {!done && !readOnly && (
+      {!done && canPark && (
         <button
           onClick={() => onPark(todo)}
           disabled={busy}

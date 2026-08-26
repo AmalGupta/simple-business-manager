@@ -207,7 +207,13 @@ export function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage 
               </div>
               {[...openTodos, ...doneTodos].map((td) => (
                 <div key={td.id}>
-                  <TodoRow todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds.has(td.id)} readOnly={!canManage} />
+                  <TodoRow
+                    todo={td}
+                    onToggle={onToggle}
+                    onPark={canManage ? onPark : undefined}
+                    busy={busyIds.has(td.id)}
+                    readOnly={!canManage}
+                  />
                   {canManage && <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} />}
                 </div>
               ))}

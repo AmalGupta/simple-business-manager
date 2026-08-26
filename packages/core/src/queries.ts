@@ -1729,6 +1729,7 @@ function todayKeyKolkata(now = new Date()): string {
 export interface DashboardSummary {
   open_today: number;
   closed_today: number;
+  parked_count: number;
   calls_count: number;
   sites_attention: SiteAttentionRow[];
   escalations: EscalationRow[];
@@ -1794,6 +1795,7 @@ export async function getDashboardSummary(
     return {
       open_today: 0,
       closed_today: 0,
+      parked_count: 0,
       calls_count: 0,
       sites_attention: [],
       escalations: [],
@@ -1810,6 +1812,7 @@ export async function getDashboardSummary(
   const [
     openRow,
     closedRow,
+    parkedRow,
     calls_count,
     sites_attention,
     escalations,
@@ -1822,6 +1825,7 @@ export async function getDashboardSummary(
       .prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'done' AND substr(completed_at, 1, 10) = ?`)
       .bind(todayKey)
       .first<{ n: number }>(),
+    db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'snoozed'`).first<{ n: number }>(),
     getCallsCount(db),
     getSitesNeedingAttention(db),
     listOpenEscalations(db),
@@ -1833,6 +1837,7 @@ export async function getDashboardSummary(
   return {
     open_today: openRow?.n ?? 0,
     closed_today: closedRow?.n ?? 0,
+    parked_count: parkedRow?.n ?? 0,
     calls_count,
     sites_attention,
     escalations,
