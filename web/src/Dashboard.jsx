@@ -34,6 +34,7 @@ import { Card } from "./components/Card.jsx";
 import { BackLink } from "./components/BackLink.jsx";
 import { PhoneLink } from "./components/PhoneLink.jsx";
 import { EmptyState } from "./components/EmptyState.jsx";
+import { AudioPlayer } from "./components/AudioPlayer.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -1783,14 +1784,6 @@ function MyTaskBanner({ siteId, myTasks, onChanged }) {
    wrapper, no custom scrubber; the browser issues Range requests against
    the streaming endpoint (see src/lib/r2-stream.ts) for seeking.
    ------------------------------------------------------------------ */
-function AudioPlayer({ src }) {
-  return (
-    <audio controls src={src} style={{ width: "100%", height: 36, marginTop: 6 }}>
-      Your browser can't play this audio.
-    </audio>
-  );
-}
-
 function pickRecorderMimeType() {
   const candidates = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm", "audio/ogg"];
   for (const c of candidates) {
