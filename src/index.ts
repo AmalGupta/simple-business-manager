@@ -299,7 +299,7 @@ export default {
     if (mediaMatch && request.method === "GET") {
       const session = await requireSession(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
-      return handleGetMedia(request, env, mediaMatch[1]);
+      return handleGetMedia(request, env, mediaMatch[1], session);
     }
 
     const voiceNoteMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/voice-note$/);
