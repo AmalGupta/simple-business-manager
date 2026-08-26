@@ -53,8 +53,6 @@ export default function SimpleBusinessManager() {
      a staff session, or every open assignment business-wide for admin/
      superadmin. See fetchOpenSiteTasks and migration 0013. */
   const [openSiteTasks, setOpenSiteTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState(null);
   const [view, setView] = useState({ name: "home" });
   const [busyIds, setBusyIds] = useState(new Set());
 
@@ -88,60 +86,80 @@ export default function SimpleBusinessManager() {
     };
   }, []);
 
+  /* Home paints as soon as `me` is known — do not wait on a Promise.all of
+     dashboard data. Each slice fills its own state when its request lands;
+     empty/zero tiles on first paint are intentional. A single failed sibling
+     must not blank the whole home. */
   useEffect(() => {
     if (!me) return;
     let cancelled = false;
+
+    // Clear prior session slices so a re-login does not flash stale tiles
+    // while the new requests are in flight.
+    setCalls([]);
+    setEscalations([]);
+    setSitesAttention([]);
+    setAllSites([]);
+    setStaffRoster([]);
+    setCallsCount(0);
+    setOpenSiteTasks([]);
 
     if (me.role === "staff") {
       // No calls/escalations/attention tile for staff — they only ever see
       // their own assigned sites and their own open workflow tasks, both
       // already filtered server-side.
       setView({ name: "staff-home" });
-      Promise.all([fetchSites(), fetchOpenSiteTasks()])
-        .then(([sitesData, tasksData]) => {
-          if (cancelled) return;
-          setAllSites(sitesData);
-          setOpenSiteTasks(tasksData);
+      fetchSites()
+        .then((data) => {
+          if (!cancelled) setAllSites(data);
         })
-        .catch((err) => {
-          console.error("[sbm] failed to load sites", err);
-          if (!cancelled) setLoadError(err.message);
+        .catch((err) => console.error("[sbm] failed to load sites", err));
+      fetchOpenSiteTasks()
+        .then((data) => {
+          if (!cancelled) setOpenSiteTasks(data);
         })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
+        .catch((err) => console.error("[sbm] failed to load open site tasks", err));
       return () => {
         cancelled = true;
       };
     }
 
     setView({ name: "home" });
-    Promise.all([
-      fetchCalls(),
-      fetchEscalations(),
-      fetchSitesAttention(),
-      fetchSites(),
-      fetchStaffRoster(),
-      fetchCallsCount(),
-      fetchOpenSiteTasks(),
-    ])
-      .then(([callsData, escalationsData, attentionData, sitesData, staffData, callsCountData, tasksData]) => {
-        if (cancelled) return;
-        setCalls(callsData);
-        setEscalations(escalationsData);
-        setSitesAttention(attentionData);
-        setAllSites(sitesData);
-        setStaffRoster(staffData);
-        setCallsCount(callsCountData.count);
-        setOpenSiteTasks(tasksData);
+    fetchCalls()
+      .then((data) => {
+        if (!cancelled) setCalls(data);
       })
-      .catch((err) => {
-        console.error("[sbm] failed to load calls", err);
-        if (!cancelled) setLoadError(err.message);
+      .catch((err) => console.error("[sbm] failed to load calls", err));
+    fetchEscalations()
+      .then((data) => {
+        if (!cancelled) setEscalations(data);
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+      .catch((err) => console.error("[sbm] failed to load escalations", err));
+    fetchSitesAttention()
+      .then((data) => {
+        if (!cancelled) setSitesAttention(data);
+      })
+      .catch((err) => console.error("[sbm] failed to load sites needing attention", err));
+    fetchSites()
+      .then((data) => {
+        if (!cancelled) setAllSites(data);
+      })
+      .catch((err) => console.error("[sbm] failed to load sites", err));
+    fetchStaffRoster()
+      .then((data) => {
+        if (!cancelled) setStaffRoster(data);
+      })
+      .catch((err) => console.error("[sbm] failed to load staff roster", err));
+    fetchCallsCount()
+      .then((data) => {
+        if (!cancelled) setCallsCount(data.count);
+      })
+      .catch((err) => console.error("[sbm] failed to load calls count", err));
+    fetchOpenSiteTasks()
+      .then((data) => {
+        if (!cancelled) setOpenSiteTasks(data);
+      })
+      .catch((err) => console.error("[sbm] failed to load open site tasks", err));
     return () => {
       cancelled = true;
     };
@@ -421,9 +439,6 @@ export default function SimpleBusinessManager() {
 
   if (me === undefined) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
   if (me === null) return <LoginScreen onLogin={setMe} />;
-
-  if (loading) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
-  if (loadError) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Couldn't load calls: {loadError}</p>);
 
   if (view.name === "call" && !bulkCall && fetchedCall === undefined) {
     return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
