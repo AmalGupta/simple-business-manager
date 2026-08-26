@@ -27,6 +27,22 @@
   --radius-card: 10px;
   --radius-badge: 6px;
   --radius-button: 8px;
+
+  /* Modern tile treatment — the home-grid stat/entry tiles (StatCard,
+     SitesAttentionTile, EscalationsTile, StaffTile, WorkflowTilesRow, the
+     "calls logged"/"recordings" tiles) only, via Card's `tile` prop. A soft
+     accent-tinted surface + layered shadow instead of the flat white +
+     hairline border every other card still uses, so a tile reads as raised
+     rather than merely outlined. Tied to --color-accent via color-mix so it
+     stays in step if the accent ever changes. */
+  --color-surface-tile: color-mix(in srgb, var(--color-accent) 5%, #FFFFFF);
+  --shadow-tile: 0 1px 2px rgba(20, 24, 31, 0.04), 0 8px 20px -4px rgba(20, 24, 31, 0.10);
+  --radius-tile: 14px;
+  /* Every tile is exactly this tall, regardless of content — a stat tile
+     and a list tile (Sites needing attention, Escalations) sit in the same
+     grid and must read as the same shape. List tiles scroll internally
+     past this height rather than growing the tile. */
+  --tile-height: 200px;
 }
 
 /* Retired float-glass theme — kept for a one-line revert, not currently applied. */

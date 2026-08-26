@@ -3,7 +3,7 @@
 // session-cookie-gated (see src/lib/auth.ts header comment: <img>/<video>/
 // <audio> tags can't attach the X-SBM-Key header the rest of /api/* uses).
 
-import { addSiteMedia, getCallById, getSiteMediaById, listSiteMedia } from "@sbm/core";
+import { addSiteMedia, getCallById, getSiteMediaById, isCallRecordingAccessibleToUser, listSiteMedia, type SessionWithUser } from "@sbm/core";
 import { streamR2Object } from "../lib/r2-stream";
 import type { Env } from "../index";
 
@@ -56,9 +56,23 @@ export async function handleGetMedia(request: Request, env: Env, mediaId: string
   return streamR2Object(env.RECORDINGS, media.r2_key, media.content_type, request);
 }
 
-export async function handleGetCallRecording(request: Request, env: Env, callId: string): Promise<Response> {
+/**
+ * Session-gated, but not merely session-gated: a `staff` session must also
+ * be on the team roster for a site this call is linked to (recording, not
+ * transcript/todos — see isCallRecordingAccessibleToUser). Previously any
+ * authenticated session could stream any call's raw audio by call id alone.
+ */
+export async function handleGetCallRecording(
+  request: Request,
+  env: Env,
+  callId: string,
+  session: SessionWithUser
+): Promise<Response> {
   const call = await getCallById(env.DB, callId);
   if (!call) return new Response("Not found", { status: 404 });
+  if (session.user_role === "staff" && !(await isCallRecordingAccessibleToUser(env.DB, session.user_id, callId))) {
+    return new Response("Forbidden", { status: 403 });
+  }
   // No content-type column on `calls` — streamR2Object falls back to
   // whatever was set on the object at upload time (see r2-stream.ts).
   return streamR2Object(env.RECORDINGS, call.r2_key, undefined, request);
