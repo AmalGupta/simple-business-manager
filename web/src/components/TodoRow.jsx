@@ -2,6 +2,11 @@ import { Circle, Check, Clock } from "lucide-react";
 import { t } from "../theme.js";
 import { fmtShort, isUrgent } from "../lib/dates.js";
 
+/* Sentence-format rendering of a structured todo — same {owner, text,
+   due_date} the extraction pipeline already produces via forced tool-use
+   (TodoRow below renders it as a checklist row); this just phrases it as a
+   sentence for the admin Recordings review panel. No change to extraction
+   itself — see docs/SCAFFOLDING.md §6. */
 export function formatTodoSentence(todo) {
   const owner = todo.owner === "self" ? "He" : todo.owner;
   const due = todo.due_date ? fmtShort(todo.due_date) : "date not mentioned";
