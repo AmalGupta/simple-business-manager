@@ -1,11 +1,4 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import {
-  FileText,
-  Image,
-  Video,
-  Mic,
-  Users,
-} from "lucide-react";
 import { t } from "./theme.js";
 import {
   today,
@@ -21,9 +14,7 @@ import { sortCalls } from "./lib/constants.js";
 import { DownloadButton } from "./components/DownloadButton.jsx";
 import { Card } from "./components/Card.jsx";
 import { BackLink } from "./components/BackLink.jsx";
-import { AudioPlayer } from "./components/AudioPlayer.jsx";
 import { TileLabel } from "./components/TileLabel.jsx";
-import { TodoRow } from "./components/TodoRow.jsx";
 import { CallTypeBadge } from "./components/CallTypeBadge.jsx";
 import { CallCard } from "./components/CallCard.jsx";
 import { StatCard } from "./components/StatCard.jsx";
@@ -57,6 +48,7 @@ import { WorkTimelinePopup } from "./views/sites/WorkTimelinePopup.jsx";
 import { MyTaskBanner } from "./views/sites/MyTaskBanner.jsx";
 import { VoiceNoteModal } from "./views/sites/VoiceNoteModal.jsx";
 import { SiteMediaUploadRow } from "./views/sites/SiteMediaUploadRow.jsx";
+import { SiteTimeline } from "./views/sites/SiteTimeline.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -86,142 +78,6 @@ import {
 /* ------------------------------------------------------------------ */
 /* ================================================================== */
 /* Tiles 1 & 2 — a plain number readout, same card language as tiles 3 & 4. */
-
-/* ------------------------------------------------------------------
-   Site timeline — unified activity feed (calls incl. voice notes, media
-   uploads, team changes, site-detail edits), newest first. Extends the
-   borderLeft rail idiom already used for CallDetail's unresolved-items
-   block, with a dot marker per entry.
-   ------------------------------------------------------------------ */
-function timelineEntryIcon(entry) {
-  if (entry.type === "call") return entry.ref?.is_voice_memo ? <Mic size={13} /> : <FileText size={13} />;
-  if (entry.type === "media") return entry.ref?.media_type === "video" ? <Video size={13} /> : <Image size={13} />;
-  if (entry.type === "team_added") return <Users size={13} />;
-  return <FileText size={13} />;
-}
-
-function VoiceMemoDetail({ entryRef }) {
-  if (entryRef.transcript === undefined) return null; // not sent to this session (staff) — nothing to show
-  if (entryRef.transcript === null) return null; // still transcribing
-  return (
-    <div style={{ marginTop: 8 }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: t.edge2, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-        Transcript
-      </div>
-      <div
-        style={{
-          fontSize: 13,
-          lineHeight: 1.6,
-          color: t.edge2,
-          background: t.frostSoft,
-          border: `1px solid ${t.frost}`,
-          borderRadius: t.radiusButton,
-          padding: "10px 12px",
-          maxHeight: 220,
-          overflowY: "auto",
-          whiteSpace: "pre-wrap",
-        }}
-      >
-        {entryRef.transcript}
-      </div>
-      {entryRef.todos?.length > 0 && (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: t.edge2, marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-            Todos
-          </div>
-          {entryRef.todos.map((td) => (
-            <TodoRow key={td.id} todo={td} readOnly />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function SiteTimelineEntry({ entry, onOpenCall, canManage }) {
-  const content = () => {
-    if (entry.type === "call") {
-      // A site voice memo's transcript/todos are admin-only (see
-      // isCallAccessibleToUser) — staff get the plain summary line, not a
-      // link into a call detail the API would 403 on anyway.
-      if (entry.ref?.is_voice_memo && !canManage) {
-        return <span style={{ fontSize: 14, color: t.edge, lineHeight: 1.6 }}>{entry.summary}</span>;
-      }
-      return (
-        <button
-          onClick={() => onOpenCall(entry.ref.call_id)}
-          style={{ display: "block", textAlign: "left", padding: 0, border: "none", background: "none", cursor: "pointer", color: t.edge, fontSize: 14, lineHeight: 1.6 }}
-        >
-          {entry.summary}
-        </button>
-      );
-    }
-    if (entry.type === "media") {
-      return (
-        <>
-          <span style={{ fontSize: 14, color: t.edge }}>{entry.summary}</span>
-          {entry.ref?.media_type === "photo" ? (
-            <img
-              src={`/api/media/${entry.ref.media_id}`}
-              alt=""
-              style={{ display: "block", marginTop: 6, maxWidth: "100%", maxHeight: 220, borderRadius: t.radiusButton, border: `1px solid ${t.frost}` }}
-            />
-          ) : (
-            <video
-              src={`/api/media/${entry.ref.media_id}`}
-              controls
-              style={{ display: "block", marginTop: 6, maxWidth: "100%", maxHeight: 220, borderRadius: t.radiusButton }}
-            />
-          )}
-        </>
-      );
-    }
-    return <span style={{ fontSize: 14, color: t.edge }}>{entry.summary}</span>;
-  };
-
-  return (
-    <div style={{ position: "relative", paddingLeft: 20, paddingBottom: 18 }}>
-      <span
-        style={{
-          position: "absolute",
-          left: -4.5,
-          top: 4,
-          width: 9,
-          height: 9,
-          borderRadius: "50%",
-          background: t.accent,
-          border: `2px solid ${t.white}`,
-        }}
-      />
-      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.edge2, marginBottom: 3 }}>
-        {timelineEntryIcon(entry)}
-        <span>{fmtDate(entry.created_at)}</span>
-        {entry.actor_name && <span>· {entry.actor_name}</span>}
-      </div>
-      {content()}
-      {entry.type === "call" && entry.ref?.is_voice_memo && <AudioPlayer src={`/api/calls/${entry.ref.call_id}/recording`} />}
-      {entry.type === "call" && entry.ref?.is_voice_memo && canManage && <VoiceMemoDetail entryRef={entry.ref} />}
-    </div>
-  );
-}
-
-function SiteTimeline({ entries, onOpenCall, canManage }) {
-  if (entries === null) return <p style={{ fontSize: 13, color: t.edge2 }}>Loading…</p>;
-  if (entries.length === 0) {
-    return (
-      <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
-        <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>Nothing recorded for this site yet.</p>
-      </Card>
-    );
-  }
-  return (
-    <div style={{ borderLeft: `2px solid ${t.frost}`, marginLeft: 4 }}>
-      {entries.map((entry) => (
-        <SiteTimelineEntry key={`${entry.type}-${entry.id}`} entry={entry} onOpenCall={onOpenCall} canManage={canManage} />
-      ))}
-    </div>
-  );
-}
 
 /* ------------------------------------------------------------------
    Site view — drilldown from Tile 3, the sites directory, or the
