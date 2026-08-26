@@ -34,6 +34,7 @@ import {
   closeEscalationApi,
   patchTodo,
   fetchMe,
+  postLogin,
   postLogout,
   postResetPin,
   postUpdateMyPhone,
@@ -65,6 +66,12 @@ export default function SimpleBusinessManager() {
      src/lib/auth.ts / LoginScreen above — additive session-cookie auth,
      the whole dashboard is now gated behind it. */
   const [me, setMe] = useState(undefined);
+  /* Optimistic login handoff — paint home chrome as soon as the user
+     submits, before POST /api/login returns. On failure, snap back to
+     LoginScreen with the error. */
+  const [loginPending, setLoginPending] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [pendingLoginName, setPendingLoginName] = useState("");
 
   /* `staff` lands on their personal workflow tiles instead of the office
      dashboard — migration 0011 (role split) plus migration 0013 (the
@@ -174,6 +181,22 @@ export default function SimpleBusinessManager() {
     await postLogout();
     setMe(null);
     setView({ name: "home" });
+  }, []);
+
+  const onLoginSubmit = useCallback(async (name, pin) => {
+    setLoginPending(true);
+    setLoginError("");
+    setPendingLoginName(name);
+    setView({ name: "home" });
+    try {
+      const user = await postLogin(name, pin);
+      setMe(user);
+      setLoginPending(false);
+      setPendingLoginName("");
+    } catch (err) {
+      setLoginPending(false);
+      setLoginError(err.message || "Login failed.");
+    }
   }, []);
 
   const onResetPin = useCallback(async (currentPin, newPin) => {
@@ -438,7 +461,76 @@ export default function SimpleBusinessManager() {
   );
 
   if (me === undefined) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
-  if (me === null) return <LoginScreen onLogin={setMe} />;
+  if (me === null && !loginPending) {
+    return <LoginScreen onSubmit={onLoginSubmit} error={loginError} initialName={pendingLoginName} />;
+  }
+
+  /* Login in flight — show admin home chrome immediately (empty tiles).
+     Role-specific layout swaps in once POST /api/login returns and setMe
+     runs; staff briefly see the admin shell for one hop, which is fine. */
+  if (me === null && loginPending) {
+    return shell(
+      <>
+        <AppHeader
+          hideAccount
+          right={
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
+              {pendingLoginName ? `${pendingLoginName} · signing in…` : "Signing in…"}
+            </span>
+          }
+        >
+          <StreakWall
+            days={monthDays}
+            onSelectDay={() => {}}
+            selected={null}
+            year={calMonth.year}
+            month={calMonth.month}
+            yearOptions={yearOptions}
+            onChangeYear={(y) => goToMonth(y, calMonth.month)}
+            onChangeMonth={(m) => goToMonth(calMonth.year, m)}
+            onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
+            onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
+            todayIso={isoDate(today().getFullYear(), today().getMonth(), today().getDate())}
+          />
+        </AppHeader>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 12,
+            marginBottom: "1.5rem",
+          }}
+        >
+          <StatCard value={0} label="closed today" />
+          <SitesAttentionTile
+            sites={[]}
+            onOpenSite={() => {}}
+            onReviewSites={() => {}}
+            onViewDirectory={() => {}}
+            hasAnySites={false}
+            unconfirmedCount={0}
+            confirmedCount={0}
+          />
+          <EscalationsTile escalations={[]} onAdd={async () => {}} onClose={async () => {}} busyIds={busyIds} />
+          <StaffTile count={0} onOpen={() => {}} />
+          <WorkflowTilesRow tasks={[]} onOpenCategory={() => {}} />
+          <StatCard value={0} label="open today" />
+          <Card tile>
+            <TileLabel>calls logged</TileLabel>
+            <div style={TILE_VALUE_ROW_STYLE}>
+              <span style={TILE_NUMBER_STYLE}>0</span>
+            </div>
+          </Card>
+          <Card tile>
+            <TileLabel>recordings</TileLabel>
+            <div style={TILE_VALUE_ROW_STYLE}>
+              <span style={TILE_NUMBER_STYLE}>0</span>
+            </div>
+          </Card>
+        </div>
+      </>
+    );
+  }
 
   if (view.name === "call" && !bulkCall && fetchedCall === undefined) {
     return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
