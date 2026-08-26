@@ -2,7 +2,6 @@
 @docs/SCAFFOLDING.md
 @docs/LOCAL_PROFILE.md
 @docs/DEPLOY_RUNBOOK.md
-@docs/DESIGN_LANGUAGE.md
 
 # Simple Business Manager — project context for AI coding tools
 
@@ -19,7 +18,7 @@ One deployed Cloudflare Worker on `workers.dev` that serves both the API and the
 - **Forced tool use for extraction**, never free-text JSON. Schema in `docs/SCAFFOLDING.md` §6.
 - **Prompt versioning from day one.** `calls.prompt_version` is written on every extraction; a shipped prompt version is never edited in place.
 - **Dashboard behavioral fidelity.** The four todo states, the calendar/day drilldown, and CSV export are the acceptance criteria for any visual refactor — behavior does not change, only appearance. As of 2026-08-22 the visual theme itself is no longer frozen: it was deliberately replaced (see below), and `Dashboard.jsx` was reskinned in place, not rebuilt. The streak metric itself was removed on 2026-08-22 — see `docs/ADDITIONAL_FEATURES_M0.md` "Deferred from Phase 1": it counts missed deadlines off a signal only 2 of 11 real calls carried, so it was reading as a number he'd learn to distrust. The calendar it was paired with stays; it now lives in the dark header.
-- **Design system: "control room"** palette (canvas/ink/slate/line/accent/warn/danger — replaces the earlier float-glass green system as of 2026-08-22, see `docs/SCAFFOLDING.md` §7), with the **"Studio" surface/typography pass** on top of it as of 2026-08-26 (see `docs/DESIGN_LANGUAGE.md`: flat white cards with a hairline border instead of shadows/tints, IBM Plex Sans labels, accent-blue tile numerals). Tailwind v4, `motion`, `react-router` v7, `lucide-react`, Radix only when a dialog/menu appears. No component library (MUI/Chakra/shadcn), no second animation library. Colors and fonts live in `web/src/theme.css` as CSS custom properties, not hardcoded in components — that's what makes the theme swappable; the retired float-glass palette is kept there as a second, inactive theme block rather than deleted. `--color-danger` (red) still appears only for deadlines inside 24h or missed — never decoratively; that rule survived both theme changes unchanged.
+- **Design system: "control room"** (replaces the earlier float-glass green system as of 2026-08-22 — see `docs/SCAFFOLDING.md` §7 for the full rationale and token table). Tailwind v4, `motion`, `react-router` v7, `lucide-react`, Radix only when a dialog/menu appears. No component library (MUI/Chakra/shadcn), no second animation library. Colors and fonts live in `web/src/theme.css` as CSS custom properties, not hardcoded in components — that's what makes the theme swappable; the retired float-glass palette is kept there as a second, inactive theme block rather than deleted. `--color-danger` (red) still appears only for deadlines inside 24h or missed — never decoratively; that rule survived the theme change unchanged.
 
 ## Build order
 
