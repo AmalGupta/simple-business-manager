@@ -1,23 +1,147 @@
-name: CI
+name: CI & Deploy
 
 on:
-  pull_request:
   push:
-    branches: [main]
+    branches: [develop]
+  pull_request:
+    branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   typecheck-and-build:
+    name: Typecheck & build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
       - uses: pnpm/action-setup@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm build
+
+  # 1. testcases — e2e suite against `wrangler dev --local` (Miniflare D1/R2,
+  # self-generated .dev.vars). See docs/LOCAL_PROFILE.md / e2e/playwright.config.ts.
+  test-e2e:
+    name: Testcases (e2e)
+    needs: typecheck-and-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:e2e:install
+      - run: pnpm test:e2e
+
+  # 2. eval runs — scores extraction against packages/core/prompts/evals/golden/*.json.
+  # Needs ANTHROPIC_API_KEY as a repo secret; run.ts exits 1 if it's missing.
+  eval:
+    name: Eval runs
+    needs: typecheck-and-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # 3. smoke tests — pre-deploy, against a LOCAL `wrangler dev --local` boot
+  # of this exact commit (Miniflare D1/R2, self-generated .dev.vars — same
+  # mechanism e2e/run-local-worker.sh uses for the Playwright suite). This is
+  # the new code that's about to ship, not the currently-deployed worker, so
+  # a real regression is caught before deploy ever runs. Same three checks as
+  # docs/DEPLOY_RUNBOOK.md "Verify after deploying", just run against
+  # localhost instead of the live URL.
+  smoke-test:
+    name: Smoke tests (pre-deploy, local)
+    needs: typecheck-and-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Log to a file rather than stdout: install + migrate + vite build + Miniflare
+      # boot can comfortably take longer than a happy-path run, so give it real
+      # headroom (3 min) and keep the output around to debug a slow/failed boot
+      # instead of a silent timeout.
+      - name: Start local worker
+        run: |
+          bash e2e/run-local-worker.sh > worker.log 2>&1 &
+          echo $! > worker.pid
+          for i in $(seq 1 90); do
+            if curl -s -o /dev/null http://localhost:8787/upload; then
+              echo "local worker is up after ${i}x2s"
+              exit 0
+            fi
+            if ! kill -0 "$(cat worker.pid)" 2>/dev/null; then
+              echo "worker process exited early" >&2
+              break
+            fi
+            sleep 2
+          done
+          echo "local worker never came up — dumping worker.log" >&2
+          cat worker.log
+          exit 1
+      - name: GET / -> 200 (dashboard shell)
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/)
+          echo "GET / -> $code"
+          test "$code" = "200"
+      - name: GET /upload -> 200 (unauthenticated)
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/upload)
+          echo "GET /upload -> $code"
+          test "$code" = "200"
+      - name: GET /api/sites -> 401, not 500 (proves routing/auth didn't break)
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8787/api/sites)
+          echo "GET /api/sites -> $code"
+          test "$code" = "401"
+      - name: Dump worker log on failure
+        if: failure()
+        run: cat worker.log || true
+
+  # Deploy only on a real push (or manual dispatch) to develop — never on a PR
+  # — and only once testcases, eval runs, and the smoke test have all passed.
+  # Deliberately does NOT run `wrangler d1 migrations apply --remote`: per
+  # docs/DEPLOY_RUNBOOK.md, remote migrations are confirmed with the user by hand
+  # every time, never run automatically. Apply one first if this deploy needs it.
+  deploy:
+    name: Deploy worker
+    needs: [test-e2e, eval, smoke-test]
+    if: >-
+      github.ref == 'refs/heads/develop' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

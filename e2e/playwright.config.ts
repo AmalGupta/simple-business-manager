@@ -1,10 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const E2E_DIR = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 8787;
 const BASE_URL = `http://localhost:${PORT}`;
+
+// Only this agentic-coding sandbox has a browser pre-installed here — a
+// plain GitHub Actions runner does not, and should fall back to whatever
+// `playwright install --with-deps chromium` (pnpm test:e2e:install) put in
+// Playwright's own cache instead.
+const SANDBOX_CHROMIUM = "/opt/pw-browsers/chromium";
 
 // Local-profile-only Playwright suite — docs/LOCAL_PROFILE.md. Runs entirely
 // against `wrangler dev --local` (Miniflare D1/R2, .dev.vars secrets). Never
@@ -43,8 +50,11 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
         // The sandbox pre-installs Chromium at a fixed path/revision that
         // doesn't always match @playwright/test's expected download — point
-        // at it directly rather than fetching a browser at test time.
-        launchOptions: { executablePath: "/opt/pw-browsers/chromium" },
+        // at it directly rather than fetching a browser at test time, when
+        // that path actually exists (it won't in CI).
+        ...(existsSync(SANDBOX_CHROMIUM)
+          ? { launchOptions: { executablePath: SANDBOX_CHROMIUM } }
+          : {}),
       },
     },
   ],
