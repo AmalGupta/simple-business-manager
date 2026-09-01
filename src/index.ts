@@ -53,6 +53,16 @@ import {
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
+import {
+  handleGetInstallation,
+  handleGetInstallations,
+  handleGetMaterialShortages,
+  handlePatchMaterialShortage,
+  handlePostInstallation,
+  handlePostInstallationUpdate,
+  handlePostInstallationUpdateMedia,
+  handlePostSiteComplaint,
+} from "./handlers/installation";
 import { assertSiteMembership, requireSession } from "./lib/auth";
 
 export interface Env {
@@ -348,6 +358,62 @@ export default {
       if (!session) return new Response("Unauthorized", { status: 401 });
       if (!(await assertSiteMembership(env, session, timelineMatch[1]))) return new Response("Forbidden", { status: 403 });
       return handleGetSiteTimeline(env, timelineMatch[1], session.user_role !== "staff");
+    }
+
+    // --- Staff field workflow (migration 0016): installations + their
+    // checklist, site-level complaints, and the admin material-shortage
+    // ledger. Session-cookie gated, same reasoning as the block above. ---
+
+    const installationsMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/installations$/);
+    if (installationsMatch && request.method === "GET") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!(await assertSiteMembership(env, session, installationsMatch[1]))) return new Response("Forbidden", { status: 403 });
+      return handleGetInstallations(env, installationsMatch[1], url.searchParams.get("category"));
+    }
+    if (installationsMatch && request.method === "POST") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!(await assertSiteMembership(env, session, installationsMatch[1]))) return new Response("Forbidden", { status: 403 });
+      return handlePostInstallation(request, env, installationsMatch[1], session.user_id);
+    }
+
+    const installationMatch = url.pathname.match(/^\/api\/installations\/([^/]+)$/);
+    if (installationMatch && request.method === "GET") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handleGetInstallation(env, installationMatch[1], session);
+    }
+
+    const installationUpdatesMatch = url.pathname.match(/^\/api\/installations\/([^/]+)\/updates$/);
+    if (installationUpdatesMatch && request.method === "POST") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handlePostInstallationUpdate(request, env, ctx, installationUpdatesMatch[1], session);
+    }
+
+    const installationUpdateMediaMatch = url.pathname.match(/^\/api\/installation-updates\/([^/]+)\/media$/);
+    if (installationUpdateMediaMatch && request.method === "POST") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handlePostInstallationUpdateMedia(request, env, installationUpdateMediaMatch[1], session);
+    }
+
+    const siteComplaintMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/complaints$/);
+    if (siteComplaintMatch && request.method === "POST") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!(await assertSiteMembership(env, session, siteComplaintMatch[1]))) return new Response("Forbidden", { status: 403 });
+      return handlePostSiteComplaint(request, env, ctx, siteComplaintMatch[1], session.user_id);
+    }
+
+    if (url.pathname === "/api/material-shortages" && request.method === "GET") {
+      return handleGetMaterialShortages(request, env);
+    }
+
+    const materialShortageMatch = url.pathname.match(/^\/api\/material-shortages\/([^/]+)$/);
+    if (materialShortageMatch && request.method === "PATCH") {
+      return handlePatchMaterialShortage(request, env, materialShortageMatch[1]);
     }
 
     return env.ASSETS.fetch(request);

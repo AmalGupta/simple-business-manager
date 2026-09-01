@@ -8,7 +8,14 @@ import type {
   CallType,
   DiarizedEntry,
   Escalation,
+  EscalationSource,
   EscalationStatus,
+  Installation,
+  InstallationCategory,
+  InstallationUpdate,
+  InstallationUpdateCategory,
+  MaterialShortage,
+  MaterialShortageStatus,
   SiteMedia,
   SiteMediaType,
   SiteTaskStatus,
@@ -29,13 +36,15 @@ export interface NewCallInput {
   /** Set for a voice memo uploaded explicitly from a site's page — see src/handlers/site-voice-note.ts. */
   recordedForSiteId?: string | null;
   uploadedByUserId?: string | null;
+  /** Set when this call is the required voice note for one installation checklist row — see src/handlers/installation.ts. */
+  installationUpdateId?: string | null;
 }
 
 export async function insertCall(db: D1Database, input: NewCallInput): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO calls (id, r2_key, source, recorded_at, recording_date, duration_s, stt_status, recorded_for_site_id, uploaded_by_user_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+      `INSERT INTO calls (id, r2_key, source, recorded_at, recording_date, duration_s, stt_status, recorded_for_site_id, uploaded_by_user_id, installation_update_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
     )
     .bind(
       input.id,
@@ -45,7 +54,8 @@ export async function insertCall(db: D1Database, input: NewCallInput): Promise<v
       input.recordingDate,
       input.durationS,
       input.recordedForSiteId ?? null,
-      input.uploadedByUserId ?? null
+      input.uploadedByUserId ?? null,
+      input.installationUpdateId ?? null
     )
     .run();
 }
@@ -170,6 +180,17 @@ export async function linkCallToSites(db: D1Database, callId: string, siteNames:
  */
 export async function linkCallToSiteExplicit(db: D1Database, callId: string, siteId: string): Promise<void> {
   await db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId).run();
+}
+
+/**
+ * Backfills the reverse pointer once both rows exist — insertCall runs
+ * before its installation_updates row can exist (the row's own
+ * voice_note_call_id needs the call's id first), so this call's
+ * installation_update_id FK can't be set at insert time. See
+ * src/handlers/installation.ts.
+ */
+export async function linkCallToInstallationUpdate(db: D1Database, callId: string, installationUpdateId: string): Promise<void> {
+  await db.prepare(`UPDATE calls SET installation_update_id = ? WHERE id = ?`).bind(installationUpdateId, callId).run();
 }
 
 /** Task 5 — extraction landed. Writes the extracted fields, prompt_version, sites, todos, and commitments.
@@ -1105,6 +1126,8 @@ export interface EscalationRow {
   status: EscalationStatus;
   created_at: string;
   closed_at: string | null;
+  source: EscalationSource;
+  created_by_name: string | null;
 }
 
 export interface CallForSiteScan {
@@ -1136,9 +1159,11 @@ export async function listOpenEscalations(db: D1Database): Promise<EscalationRow
   const { results } = await db
     .prepare(
       `SELECT escalations.id, escalations.text, escalations.site_id, sites.name AS site_name,
-              escalations.status, escalations.created_at, escalations.closed_at
+              escalations.status, escalations.created_at, escalations.closed_at,
+              escalations.source, creator.name AS created_by_name
        FROM escalations
        LEFT JOIN sites ON sites.id = escalations.site_id
+       LEFT JOIN users AS creator ON creator.id = escalations.created_by_user_id
        WHERE escalations.status = 'open'
        ORDER BY escalations.created_at ASC`
     )
@@ -1149,14 +1174,28 @@ export async function listOpenEscalations(db: D1Database): Promise<EscalationRow
 export interface NewEscalationInput {
   text: string;
   siteId?: string | null;
+  /** migration 0016: attribution for a staff-filed complaint. Omitted for admin-typed entries. */
+  createdByUserId?: string | null;
+  source?: EscalationSource;
+  installationUpdateId?: string | null;
 }
 
 /** Manual only — see schema.sql comment on `escalations`. Never called from the extraction path. */
 export async function createEscalation(db: D1Database, input: NewEscalationInput): Promise<Escalation> {
   const id = crypto.randomUUID();
   await db
-    .prepare(`INSERT INTO escalations (id, text, site_id) VALUES (?, ?, ?)`)
-    .bind(id, input.text, input.siteId ?? null)
+    .prepare(
+      `INSERT INTO escalations (id, text, site_id, created_by_user_id, source, installation_update_id)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      id,
+      input.text,
+      input.siteId ?? null,
+      input.createdByUserId ?? null,
+      input.source ?? "admin",
+      input.installationUpdateId ?? null
+    )
     .run();
   const row = await db.prepare(`SELECT * FROM escalations WHERE id = ?`).bind(id).first<Escalation>();
   return row!;
@@ -1346,16 +1385,28 @@ export interface NewSiteMediaInput {
   fileSize: number | null;
   caption: string | null;
   uploadedBy: string;
+  /** Set when this documents a specific installation checklist row — see src/handlers/installation.ts. */
+  installationUpdateId?: string | null;
 }
 
 export async function addSiteMedia(db: D1Database, input: NewSiteMediaInput): Promise<SiteMedia> {
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO site_media (id, site_id, media_type, r2_key, content_type, file_size, caption, uploaded_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO site_media (id, site_id, media_type, r2_key, content_type, file_size, caption, uploaded_by, installation_update_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(id, input.siteId, input.mediaType, input.r2Key, input.contentType, input.fileSize, input.caption, input.uploadedBy)
+    .bind(
+      id,
+      input.siteId,
+      input.mediaType,
+      input.r2Key,
+      input.contentType,
+      input.fileSize,
+      input.caption,
+      input.uploadedBy,
+      input.installationUpdateId ?? null
+    )
     .run();
   return (await getSiteMediaById(db, id))!;
 }
@@ -1686,6 +1737,160 @@ export async function completeSiteTask(db: D1Database, id: string, completedByUs
     .bind(completedByUserId, id)
     .run();
   return getSiteTaskById(db, id);
+}
+
+// ---------------------------------------------------------------------------
+// Staff field workflow — migration 0016. "Installations" (physical
+// windows/openings at a site) each accumulate a repeatable 6-category
+// checklist ("installation_updates") over visits. See the schema.sql
+// comment on `installations` for how this differs from workflow_stages/
+// site_tasks above.
+// ---------------------------------------------------------------------------
+
+export async function createInstallation(
+  db: D1Database,
+  siteId: string,
+  label: string,
+  createdBy: string,
+  category: InstallationCategory
+): Promise<Installation> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(`INSERT INTO installations (id, site_id, label, created_by, category) VALUES (?, ?, ?, ?, ?)`)
+    .bind(id, siteId, label, createdBy, category)
+    .run();
+  const row = await db.prepare(`SELECT * FROM installations WHERE id = ?`).bind(id).first<Installation>();
+  return row!;
+}
+
+/** `category` scopes to one of the three site-visit categories sharing this table — see migration 0017. */
+export async function listInstallations(db: D1Database, siteId: string, category: InstallationCategory): Promise<Installation[]> {
+  const { results } = await db
+    .prepare(`SELECT * FROM installations WHERE site_id = ? AND category = ? ORDER BY created_at ASC`)
+    .bind(siteId, category)
+    .all<Installation>();
+  return results;
+}
+
+export async function getInstallationById(db: D1Database, id: string): Promise<Installation | null> {
+  const row = await db.prepare(`SELECT * FROM installations WHERE id = ?`).bind(id).first<Installation>();
+  return row ?? null;
+}
+
+export interface InstallationUpdateRow {
+  id: string;
+  installation_id: string;
+  site_id: string;
+  category: InstallationUpdateCategory;
+  voice_note_call_id: string | null;
+  reported_by_user_id: string;
+  reported_by_name: string | null;
+  created_at: string;
+  /** Read-time computation — a row is "complete" once a voice note exists AND media_count > 0. */
+  media_count: number;
+}
+
+const INSTALLATION_UPDATE_ROW_SELECT = `
+  SELECT installation_updates.id AS id,
+         installation_updates.installation_id AS installation_id,
+         installations.site_id AS site_id,
+         installation_updates.category AS category,
+         installation_updates.voice_note_call_id AS voice_note_call_id,
+         installation_updates.reported_by_user_id AS reported_by_user_id,
+         reporter.name AS reported_by_name,
+         installation_updates.created_at AS created_at,
+         (SELECT COUNT(*) FROM site_media WHERE site_media.installation_update_id = installation_updates.id) AS media_count
+  FROM installation_updates
+  JOIN installations ON installations.id = installation_updates.installation_id
+  LEFT JOIN users AS reporter ON reporter.id = installation_updates.reported_by_user_id
+`;
+
+/** Full history for one installation, oldest first — the frontend groups by category and shows the latest per category on the checklist. */
+export async function listInstallationUpdates(db: D1Database, installationId: string): Promise<InstallationUpdateRow[]> {
+  const { results } = await db
+    .prepare(`${INSTALLATION_UPDATE_ROW_SELECT} WHERE installation_updates.installation_id = ? ORDER BY installation_updates.created_at ASC`)
+    .bind(installationId)
+    .all<InstallationUpdateRow>();
+  return results;
+}
+
+export async function getInstallationUpdateById(db: D1Database, id: string): Promise<InstallationUpdateRow | null> {
+  const row = await db
+    .prepare(`${INSTALLATION_UPDATE_ROW_SELECT} WHERE installation_updates.id = ?`)
+    .bind(id)
+    .first<InstallationUpdateRow>();
+  return row ?? null;
+}
+
+export interface NewInstallationUpdateInput {
+  /** Caller-generated (matches insertCall's `id` convention) so the handler can also stamp it onto the call it wraps as `installation_update_id` before this row exists. */
+  id: string;
+  installationId: string;
+  category: InstallationUpdateCategory;
+  voiceNoteCallId: string;
+  reportedByUserId: string;
+}
+
+/** Created once the required voice note has been submitted — see src/handlers/installation.ts. */
+export async function createInstallationUpdate(db: D1Database, input: NewInstallationUpdateInput): Promise<InstallationUpdateRow> {
+  await db
+    .prepare(
+      `INSERT INTO installation_updates (id, installation_id, category, voice_note_call_id, reported_by_user_id)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .bind(input.id, input.installationId, input.category, input.voiceNoteCallId, input.reportedByUserId)
+    .run();
+  return (await getInstallationUpdateById(db, input.id))!;
+}
+
+export interface NewMaterialShortageInput {
+  siteId: string;
+  installationId?: string | null;
+  installationUpdateId?: string | null;
+  reportedByUserId: string;
+  description?: string | null;
+}
+
+/** Real ledger (open/fulfilled) — see schema.sql comment on `material_shortages`. */
+export async function createMaterialShortage(db: D1Database, input: NewMaterialShortageInput): Promise<MaterialShortage> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO material_shortages (id, site_id, installation_id, installation_update_id, description, reported_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(id, input.siteId, input.installationId ?? null, input.installationUpdateId ?? null, input.description ?? null, input.reportedByUserId)
+    .run();
+  const row = await db.prepare(`SELECT * FROM material_shortages WHERE id = ?`).bind(id).first<MaterialShortage>();
+  return row!;
+}
+
+export interface MaterialShortageRow extends MaterialShortage {
+  site_name: string;
+  reported_by_name: string | null;
+}
+
+/** Admin ledger view — `status` omitted returns every row, open first. */
+export async function listMaterialShortages(db: D1Database, status?: MaterialShortageStatus): Promise<MaterialShortageRow[]> {
+  const scoped = status ? `WHERE material_shortages.status = ?` : "";
+  const stmt = db.prepare(
+    `SELECT material_shortages.*, sites.name AS site_name, reporter.name AS reported_by_name
+     FROM material_shortages
+     JOIN sites ON sites.id = material_shortages.site_id
+     LEFT JOIN users AS reporter ON reporter.id = material_shortages.reported_by_user_id
+     ${scoped}
+     ORDER BY (material_shortages.status = 'open') DESC, material_shortages.reported_at DESC`
+  );
+  const { results } = await (status ? stmt.bind(status) : stmt).all<MaterialShortageRow>();
+  return results;
+}
+
+export async function resolveMaterialShortage(db: D1Database, id: string, resolvedByUserId: string): Promise<MaterialShortage | null> {
+  await db
+    .prepare(`UPDATE material_shortages SET status = 'fulfilled', resolved_by_user_id = ?, resolved_at = datetime('now') WHERE id = ?`)
+    .bind(resolvedByUserId, id)
+    .run();
+  return db.prepare(`SELECT * FROM material_shortages WHERE id = ?`).bind(id).first<MaterialShortage>();
 }
 
 /** Total row count in `calls`, including low_signal — the home-page "Calls logged" tile. */

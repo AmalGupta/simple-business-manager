@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { CalendarDays, MapPin, MessageSquareWarning } from "lucide-react";
 import { t } from "./theme.js";
 import { today, dayKey, isoDate, fmtDate } from "./lib/dates.js";
 import { Card } from "./components/Card.jsx";
@@ -24,6 +25,14 @@ import { StaffDirectoryView } from "./views/staff/StaffDirectoryView.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { SitesReviewView } from "./views/sites/SitesReviewView.jsx";
 import { SiteView } from "./views/sites/SiteView.jsx";
+import { MyScheduleView } from "./views/home/MyScheduleView.jsx";
+import { SiteVisitSiteList } from "./views/site-visit/SiteVisitSiteList.jsx";
+import { SiteVisitCategoryGrid } from "./views/site-visit/SiteVisitCategoryGrid.jsx";
+import { InstallationListView } from "./views/site-visit/InstallationListView.jsx";
+import { InstallationScreen } from "./views/site-visit/InstallationScreen.jsx";
+import { SiteComplaintForm } from "./views/site-visit/SiteComplaintForm.jsx";
+import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
+import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
 import {
   fetchCalls,
   fetchCall,
@@ -720,6 +729,11 @@ export default function SimpleBusinessManager() {
       <>
         <AppHeader me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
 
+        {/* Four-tile grid matching the brainstorm sketch: Pending Work wraps
+            the existing "my call tasks" + workflow-category tiles under one
+            label rather than replacing them; To-Do/Calendar, Site Visit, and
+            Complaints are new entry points — see MyScheduleView and the
+            views/site-visit/ directory. */}
         <div
           style={{
             display: "grid",
@@ -728,6 +742,39 @@ export default function SimpleBusinessManager() {
             marginBottom: "1.5rem",
           }}
         >
+          <button
+            onClick={() => setView({ name: "my-schedule", from: { name: "staff-home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label="To-Do / Calendar"
+          >
+            <Card tile>
+              <TileLabel action={<CalendarDays size={14} color={t.edge2} />}>To-Do / Calendar</TileLabel>
+              <div style={TILE_VALUE_ROW_STYLE}>
+                <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length + openSiteTasks.length}</span>
+              </div>
+            </Card>
+          </button>
+
+          <button
+            onClick={() => setView({ name: "site-visit-sites", intent: "category", from: { name: "staff-home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label="Site Visit"
+          >
+            <Card tile style={{ display: "flex", alignItems: "center" }}>
+              <TileLabel action={<MapPin size={14} color={t.edge2} />}>Site Visit</TileLabel>
+            </Card>
+          </button>
+
+          <button
+            onClick={() => setView({ name: "site-visit-sites", intent: "complaint", from: { name: "staff-home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label="Complaints"
+          >
+            <Card tile style={{ display: "flex", alignItems: "center" }}>
+              <TileLabel action={<MessageSquareWarning size={14} color={t.edge2} />}>Complaints</TileLabel>
+            </Card>
+          </button>
+
           {myOpenTodos.length > 0 && (
             <button
               onClick={() => setView({ name: "my-open-todos", from: { name: "staff-home" } })}
@@ -771,6 +818,68 @@ export default function SimpleBusinessManager() {
         busyIds={busyIds}
       />
     );
+
+  if (view.name === "my-schedule")
+    return shell(
+      <MyScheduleView
+        todos={myOpenTodos}
+        siteTasks={openSiteTasks}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-schedule" } })}
+        onOpenSite={(site) => setView({ name: "site", site, from: { name: "my-schedule" } })}
+      />
+    );
+
+  // --- Staff field workflow (migration 0016): site visit -> category ->
+  // installation checklist, and the site-level complaint form. `intent` on
+  // site-visit-sites picks which screen selecting a site leads to. ---
+
+  if (view.name === "site-visit-sites")
+    return shell(
+      <SiteVisitSiteList
+        onBack={() => setView(view.from ?? homeView)}
+        onSelectSite={(site) =>
+          setView(
+            view.intent === "complaint"
+              ? { name: "site-complaint", site, from: view }
+              : { name: "site-visit-category", site, from: view }
+          )
+        }
+      />
+    );
+
+  if (view.name === "site-visit-category")
+    return shell(
+      <SiteVisitCategoryGrid
+        site={view.site}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenCategory={(category) =>
+          category === "complaints"
+            ? setView({ name: "site-complaint", site: view.site, from: view })
+            : setView({ name: "site-visit-installations", site: view.site, category, from: view })
+        }
+      />
+    );
+
+  if (view.name === "site-visit-installations")
+    return shell(
+      <InstallationListView
+        site={view.site}
+        category={view.category}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenInstallation={(installation) => setView({ name: "installation", installation, from: view })}
+      />
+    );
+
+  if (view.name === "installation")
+    return shell(<InstallationScreen installation={view.installation} onBack={() => setView(view.from ?? homeView)} />);
+
+  if (view.name === "site-complaint")
+    return shell(
+      <SiteComplaintForm site={view.site} onBack={() => setView(view.from ?? homeView)} onSubmitted={() => setView(homeView)} />
+    );
+
+  if (view.name === "material-shortages") return shell(<MaterialShortagesView onBack={() => setView(homeView)} />);
 
   return shell(
     <>
@@ -833,6 +942,9 @@ export default function SimpleBusinessManager() {
         />
         {(me.role === "admin" || me.role === "superadmin") && (
           <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />
         )}
         <WorkflowTilesRow
           tasks={openSiteTasks}
