@@ -250,13 +250,22 @@ export interface SiteTask {
   created_at: string;
 }
 
-/** See migration 0016 — a physical window/opening instance at a site (a site can have many). */
+/**
+ * See migration 0016 — a physical instance at a site (a site can have
+ * many): a window/opening for "installation", a visit for "measurement",
+ * a delivery event for "material_delivery". All three site-visit
+ * categories share this one table and the same checklist pattern
+ * (migration 0017) rather than being separate near-identical concepts.
+ */
+export type InstallationCategory = "installation" | "measurement" | "material_delivery";
+
 export interface Installation {
   id: string;
   site_id: string;
   label: string;
   created_by: string;
   created_at: string;
+  category: InstallationCategory;
 }
 
 /** The 6-row field-report checklist per installation — see docs/DESIGN_LANGUAGE.md-adjacent plan notes. */

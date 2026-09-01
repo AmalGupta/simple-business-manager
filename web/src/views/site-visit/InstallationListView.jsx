@@ -6,19 +6,46 @@ import { fetchSiteInstallations, postSiteInstallation } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 
-/* Installations at one site — "one site, multiple installations" from the
-   brainstorm sketch (separate windows/openings, each accumulating its own
-   checklist over repeat visits). The staff-typed label here is purely for
+/* Copy per site-visit category — kept local to this view since the grid
+   (SITE_VISIT_CATEGORIES) only needs the enable/gate logic, not display
+   strings. All three categories share this exact list+create+checklist
+   pattern (migration 0017) — only labels differ. */
+const COPY = {
+  installation: {
+    listTitle: "Installations",
+    emptyState: "No installations logged yet at this site.",
+    newButton: "New installation",
+    placeholder: "e.g. Window 3 - Living Room",
+  },
+  measurement: {
+    listTitle: "Measurements",
+    emptyState: "No measurements logged yet at this site.",
+    newButton: "New measurement",
+    placeholder: "e.g. Living room windows",
+  },
+  material_delivery: {
+    listTitle: "Material Deliveries",
+    emptyState: "No material deliveries logged yet at this site.",
+    newButton: "New delivery",
+    placeholder: "e.g. Glass sheets - 12mm toughened",
+  },
+};
+
+/* Instances at one site for one category — "one site, multiple
+   installations" from the brainstorm sketch generalizes to measurements
+   and material deliveries too (migration 0017): each accumulates its own
+   checklist over repeat visits. The staff-typed label here is purely for
    list display; the checklist's own "Location of Work / Window" row still
    captures the voice+photo evidence for that instance. */
-export function InstallationListView({ site, onBack, onOpenInstallation }) {
+export function InstallationListView({ site, category, onBack, onOpenInstallation }) {
+  const copy = COPY[category];
   const [installations, setInstallations] = useState(null);
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState("");
   const [saving, setSaving] = useState(false);
 
   const load = () => {
-    fetchSiteInstallations(site.id)
+    fetchSiteInstallations(site.id, category)
       .then(setInstallations)
       .catch((err) => {
         console.error("[sbm] failed to load installations", err);
@@ -26,14 +53,14 @@ export function InstallationListView({ site, onBack, onOpenInstallation }) {
       });
   };
 
-  useEffect(load, [site.id]);
+  useEffect(load, [site.id, category]);
 
   const submit = async () => {
     const trimmed = label.trim();
     if (!trimmed || saving) return;
     setSaving(true);
     try {
-      const created = await postSiteInstallation(site.id, trimmed);
+      const created = await postSiteInstallation(site.id, trimmed, category);
       setLabel("");
       setAdding(false);
       setInstallations((prev) => [...(prev ?? []), created]);
@@ -49,7 +76,9 @@ export function InstallationListView({ site, onBack, onOpenInstallation }) {
     <div>
       <BackLink onClick={onBack}>Back</BackLink>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem", gap: 12 }}>
-        <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>{site.name} — Installations</h1>
+        <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>
+          {site.name} — {copy.listTitle}
+        </h1>
       </div>
 
       {adding ? (
@@ -60,7 +89,7 @@ export function InstallationListView({ site, onBack, onOpenInstallation }) {
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submit()}
-              placeholder="e.g. Window 3 - Living Room"
+              placeholder={copy.placeholder}
               style={{ ...TEXT_INPUT_STYLE, flex: 1 }}
             />
             <button
@@ -91,7 +120,7 @@ export function InstallationListView({ site, onBack, onOpenInstallation }) {
             cursor: "pointer",
           }}
         >
-          <Plus size={15} /> New installation
+          <Plus size={15} /> {copy.newButton}
         </button>
       )}
 
@@ -99,7 +128,7 @@ export function InstallationListView({ site, onBack, onOpenInstallation }) {
         <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
       ) : installations.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
-          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No installations logged yet at this site.</p>
+          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>{copy.emptyState}</p>
         </Card>
       ) : (
         <Card>

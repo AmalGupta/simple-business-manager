@@ -310,21 +310,23 @@ export async function patchSiteTask(id, patch) {
   return res.json();
 }
 
-/* Staff field workflow (migration 0016) — installations at a site and their
-   6-category checklist. Session-cookie only, same as postSiteMedia/
-   postSiteVoiceNote above — no X-SBM-Key involved. */
+/* Staff field workflow (migration 0016/0017) — installations at a site and
+   their 6-category checklist. `category` is "installation" | "measurement"
+   | "material_delivery" — one table/API serves all three (migration 0017).
+   Session-cookie only, same as postSiteMedia/postSiteVoiceNote above — no
+   X-SBM-Key involved. */
 
-export async function fetchSiteInstallations(siteId) {
-  const res = await fetch(`/api/sites/${siteId}/installations`);
+export async function fetchSiteInstallations(siteId, category) {
+  const res = await fetch(`/api/sites/${siteId}/installations?category=${category}`);
   if (!res.ok) throw new Error(`GET /api/sites/${siteId}/installations → ${res.status}`);
   return res.json();
 }
 
-export async function postSiteInstallation(siteId, label) {
+export async function postSiteInstallation(siteId, label, category) {
   const res = await fetch(`/api/sites/${siteId}/installations`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ label }),
+    body: JSON.stringify({ label, category }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

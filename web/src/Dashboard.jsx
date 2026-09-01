@@ -848,20 +848,33 @@ export default function SimpleBusinessManager() {
       />
     );
 
-  if (view.name === "site-visit-category")
+  if (view.name === "site-visit-category") {
+    // Which WorkflowCategory boxes are active here — the staff member's own
+    // assigned site_tasks at this site (see SITE_VISIT_CATEGORIES' mapping
+    // and the "reflect real assignment" decision). Plain computation, not a
+    // hook, since it only runs for this one view branch.
+    const assignedCategories = new Set(
+      openSiteTasks.filter((tk) => tk.site_name === view.site.name).map((tk) => tk.category)
+    );
     return shell(
       <SiteVisitCategoryGrid
         site={view.site}
+        assignedCategories={assignedCategories}
         onBack={() => setView(view.from ?? homeView)}
-        onOpenInstallations={() => setView({ name: "site-visit-installations", site: view.site, from: view })}
-        onOpenComplaint={() => setView({ name: "site-complaint", site: view.site, from: view })}
+        onOpenCategory={(category) =>
+          category === "complaints"
+            ? setView({ name: "site-complaint", site: view.site, from: view })
+            : setView({ name: "site-visit-installations", site: view.site, category, from: view })
+        }
       />
     );
+  }
 
   if (view.name === "site-visit-installations")
     return shell(
       <InstallationListView
         site={view.site}
+        category={view.category}
         onBack={() => setView(view.from ?? homeView)}
         onOpenInstallation={(installation) => setView({ name: "installation", installation, from: view })}
       />

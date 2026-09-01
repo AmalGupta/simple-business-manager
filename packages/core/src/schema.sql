@@ -283,9 +283,14 @@ CREATE TABLE installations (
   site_id     TEXT NOT NULL REFERENCES sites(id),
   label       TEXT NOT NULL,   -- staff-entered at creation, e.g. "Window 3 - Living Room"
   created_by  TEXT NOT NULL REFERENCES users(id),
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  -- migration 0017: 'installation' | 'measurement' | 'material_delivery' —
+  -- one table serves all three site-visit categories, since they turned out
+  -- to want the exact same pick/create-instance + checklist pattern.
+  category    TEXT NOT NULL DEFAULT 'installation'
 );
 CREATE INDEX idx_installations_site ON installations(site_id);
+CREATE INDEX idx_installations_site_category ON installations(site_id, category);
 
 -- One row per checklist-category report on one installation. "Complete"
 -- (voice note + at least one photo/video) is a read-time computation, not a

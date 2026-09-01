@@ -23,6 +23,7 @@ import {
   resolveMaterialShortage,
   setCallFailed,
   setCallSubmitted,
+  type InstallationCategory,
   type InstallationUpdateCategory,
   type MaterialShortageStatus,
   type SessionWithUser,
@@ -51,8 +52,17 @@ const UPDATE_CATEGORIES: readonly InstallationUpdateCategory[] = [
   "site_delay",
 ];
 
-export async function handleGetInstallations(env: Env, siteId: string): Promise<Response> {
-  return json(await listInstallations(env.DB, siteId));
+/** The three site-visit categories sharing the `installations` table — see migration 0017. */
+const INSTALLATION_CATEGORIES: readonly InstallationCategory[] = ["installation", "measurement", "material_delivery"];
+
+function parseInstallationCategory(value: string | null): InstallationCategory | null {
+  return value && INSTALLATION_CATEGORIES.includes(value as InstallationCategory) ? (value as InstallationCategory) : null;
+}
+
+export async function handleGetInstallations(env: Env, siteId: string, categoryParam: string | null): Promise<Response> {
+  const category = parseInstallationCategory(categoryParam);
+  if (!category) return json({ error: "invalid or missing category" }, 400);
+  return json(await listInstallations(env.DB, siteId, category));
 }
 
 export async function handlePostInstallation(request: Request, env: Env, siteId: string, createdBy: string): Promise<Response> {
@@ -62,9 +72,12 @@ export async function handlePostInstallation(request: Request, env: Env, siteId:
   } catch {
     return json({ error: "invalid JSON body" }, 400);
   }
-  const label = typeof body === "object" && body !== null ? (body as Record<string, unknown>).label : undefined;
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const label = record.label;
   if (typeof label !== "string" || label.trim().length === 0) return json({ error: "label is required" }, 400);
-  return json(await createInstallation(env.DB, siteId, label.trim(), createdBy), 201);
+  const category = parseInstallationCategory(typeof record.category === "string" ? record.category : null);
+  if (!category) return json({ error: "invalid or missing category" }, 400);
+  return json(await createInstallation(env.DB, siteId, label.trim(), createdBy, category), 201);
 }
 
 /**

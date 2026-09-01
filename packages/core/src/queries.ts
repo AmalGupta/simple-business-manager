@@ -11,6 +11,7 @@ import type {
   EscalationSource,
   EscalationStatus,
   Installation,
+  InstallationCategory,
   InstallationUpdate,
   InstallationUpdateCategory,
   MaterialShortage,
@@ -1746,20 +1747,27 @@ export async function completeSiteTask(db: D1Database, id: string, completedByUs
 // site_tasks above.
 // ---------------------------------------------------------------------------
 
-export async function createInstallation(db: D1Database, siteId: string, label: string, createdBy: string): Promise<Installation> {
+export async function createInstallation(
+  db: D1Database,
+  siteId: string,
+  label: string,
+  createdBy: string,
+  category: InstallationCategory
+): Promise<Installation> {
   const id = crypto.randomUUID();
   await db
-    .prepare(`INSERT INTO installations (id, site_id, label, created_by) VALUES (?, ?, ?, ?)`)
-    .bind(id, siteId, label, createdBy)
+    .prepare(`INSERT INTO installations (id, site_id, label, created_by, category) VALUES (?, ?, ?, ?, ?)`)
+    .bind(id, siteId, label, createdBy, category)
     .run();
   const row = await db.prepare(`SELECT * FROM installations WHERE id = ?`).bind(id).first<Installation>();
   return row!;
 }
 
-export async function listInstallations(db: D1Database, siteId: string): Promise<Installation[]> {
+/** `category` scopes to one of the three site-visit categories sharing this table — see migration 0017. */
+export async function listInstallations(db: D1Database, siteId: string, category: InstallationCategory): Promise<Installation[]> {
   const { results } = await db
-    .prepare(`SELECT * FROM installations WHERE site_id = ? ORDER BY created_at ASC`)
-    .bind(siteId)
+    .prepare(`SELECT * FROM installations WHERE site_id = ? AND category = ? ORDER BY created_at ASC`)
+    .bind(siteId, category)
     .all<Installation>();
   return results;
 }

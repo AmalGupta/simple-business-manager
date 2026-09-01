@@ -369,7 +369,7 @@ export default {
       const session = await requireSession(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       if (!(await assertSiteMembership(env, session, installationsMatch[1]))) return new Response("Forbidden", { status: 403 });
-      return handleGetInstallations(env, installationsMatch[1]);
+      return handleGetInstallations(env, installationsMatch[1], url.searchParams.get("category"));
     }
     if (installationsMatch && request.method === "POST") {
       const session = await requireSession(request, env);
