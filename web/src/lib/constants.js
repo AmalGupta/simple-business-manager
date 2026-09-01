@@ -33,21 +33,17 @@ export const INSTALLATION_UPDATE_CATEGORIES = [
 
 /* ------------------------------------------------------------------
    Site-visit category grid (SiteVisitCategoryGrid) — the "what are you
-   here to report?" screen for a selected site. `workflowCategory` maps a
-   box to the migration-0013 WorkflowCategory whose assigned site_tasks
-   gate whether it's active there (per the owner: reflect real assignment,
-   not a static always-on grid). "Material Delivery" maps to `procurement`
-   (Material Ordered/Material Received — inbound material to the site),
-   not `billing_delivery` (which is the finished product going OUT to the
-   customer — a different direction entirely). `workflowCategory: null`
-   (Complaints) is never gated — filing a problem report isn't something
-   you need to be assigned to do.
+   here to report?" screen for a selected site. All four are always
+   active: a staff member can initiate any of these from the field even
+   without a prior admin-assigned site_task in that category — reporting
+   proactively is the point of this flow, not something to gate on
+   pre-existing assignment.
    ------------------------------------------------------------------ */
 export const SITE_VISIT_CATEGORIES = [
-  { key: "measurement", label: "New Measurement", workflowCategory: "measurement" },
-  { key: "material_delivery", label: "Material Delivery", workflowCategory: "procurement" },
-  { key: "installation", label: "Installation", workflowCategory: "installation" },
-  { key: "complaints", label: "Complaints", workflowCategory: null },
+  { key: "measurement", label: "New Measurement" },
+  { key: "material_delivery", label: "Material Delivery" },
+  { key: "installation", label: "Installation" },
+  { key: "complaints", label: "Complaints" },
 ];
 
 /* Sort rule — §4. Customer-waiting beats deadline proximity, beats recency. */
