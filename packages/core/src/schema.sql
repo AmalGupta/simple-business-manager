@@ -40,6 +40,11 @@ CREATE TABLE calls (
   recorded_for_site_id  TEXT REFERENCES sites(id),
   uploaded_by_user_id   TEXT REFERENCES users(id),
 
+  -- migration 0016: set when this call is the required voice note for one
+  -- installation_updates checklist row (the staff site-visit flow), rather
+  -- than an ordinary site voice memo or phone call. NULL otherwise.
+  installation_update_id TEXT REFERENCES installation_updates(id),
+
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -95,13 +100,22 @@ CREATE TABLE commitments (
 -- "Tile 4 — Escalations" for why: a 2-of-11 client-urgency signal isn't enough
 -- to trust an LLM classifier with this, and a tile he didn't put items in is a
 -- tile he stops trusting.
+--
+-- migration 0016: field complaints (the staff site-visit flow) write here
+-- too, rather than forking a second complaints system — created_by_user_id/
+-- source distinguish an admin-typed entry from a staff-filed one, and
+-- installation_update_id links back to the checklist row that raised it
+-- (NULL for a site-level complaint with no installation).
 CREATE TABLE escalations (
-  id          TEXT PRIMARY KEY,
-  text        TEXT NOT NULL,
-  site_id     TEXT REFERENCES sites(id),
-  status      TEXT NOT NULL DEFAULT 'open',   -- open | done
-  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  closed_at   TEXT
+  id                     TEXT PRIMARY KEY,
+  text                   TEXT NOT NULL,
+  site_id                TEXT REFERENCES sites(id),
+  status                 TEXT NOT NULL DEFAULT 'open',   -- open | done
+  created_at             TEXT NOT NULL DEFAULT (datetime('now')),
+  closed_at              TEXT,
+  created_by_user_id     TEXT REFERENCES users(id),
+  source                 TEXT NOT NULL DEFAULT 'admin',  -- admin | staff_field
+  installation_update_id TEXT REFERENCES installation_updates(id)
 );
 
 CREATE TABLE todos (
@@ -210,9 +224,14 @@ CREATE TABLE site_media (
   file_size     INTEGER,
   caption       TEXT,
   uploaded_by   TEXT NOT NULL REFERENCES users(id),
-  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  -- migration 0016: set when this photo/video documents a specific
+  -- installation_updates checklist row, in addition to always being tied
+  -- to site_id above (keeps every existing site-scoped query unmodified).
+  installation_update_id TEXT REFERENCES installation_updates(id)
 );
 CREATE INDEX idx_site_media_site ON site_media(site_id, created_at DESC);
+CREATE INDEX idx_site_media_installation_update ON site_media(installation_update_id);
 
 -- sites.address/poc_name are overwritten in place with no history; one row
 -- here per PATCH that actually changed something.
@@ -252,3 +271,50 @@ CREATE TABLE site_tasks (
 );
 CREATE INDEX idx_site_tasks_site ON site_tasks(site_id);
 CREATE INDEX idx_site_tasks_assignee ON site_tasks(assigned_to_user_id, status);
+
+-- Staff field workflow — migration 0016. "Installations" are physical
+-- windows/openings at a site (a site can have many); each accumulates its
+-- own repeatable 6-category checklist ("installation_updates") over visits.
+-- Distinct from workflow_stages/site_tasks above, which is a fixed
+-- one-row-per-stage-per-site production catalog with no attachments and no
+-- repeat visits — different axis entirely, do not conflate the two.
+CREATE TABLE installations (
+  id          TEXT PRIMARY KEY,
+  site_id     TEXT NOT NULL REFERENCES sites(id),
+  label       TEXT NOT NULL,   -- staff-entered at creation, e.g. "Window 3 - Living Room"
+  created_by  TEXT NOT NULL REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_installations_site ON installations(site_id);
+
+-- One row per checklist-category report on one installation. "Complete"
+-- (voice note + at least one photo/video) is a read-time computation, not a
+-- stored column — see listInstallationUpdates in queries.ts.
+CREATE TABLE installation_updates (
+  id                   TEXT PRIMARY KEY,
+  installation_id      TEXT NOT NULL REFERENCES installations(id),
+  category             TEXT NOT NULL,  -- location|work_done|work_pending|material_short|complaints|site_delay
+  voice_note_call_id   TEXT REFERENCES calls(id),
+  reported_by_user_id  TEXT NOT NULL REFERENCES users(id),
+  created_at           TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_installation_updates_installation ON installation_updates(installation_id);
+
+-- A real ledger (open/fulfilled) for material-short reports filed from the
+-- site-visit flow — unlike the existing self-expiring calls.material_needs
+-- field, admin needs to see outstanding shortages across sites and resolve
+-- them explicitly.
+CREATE TABLE material_shortages (
+  id                      TEXT PRIMARY KEY,
+  site_id                 TEXT NOT NULL REFERENCES sites(id),
+  installation_id         TEXT REFERENCES installations(id),
+  installation_update_id  TEXT REFERENCES installation_updates(id),
+  description             TEXT,        -- admin fills in from the voice transcript; nullable at creation
+  status                  TEXT NOT NULL DEFAULT 'open',  -- open|fulfilled
+  reported_by_user_id     TEXT NOT NULL REFERENCES users(id),
+  reported_at             TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_by_user_id     TEXT REFERENCES users(id),
+  resolved_at             TEXT
+);
+CREATE INDEX idx_material_shortages_status ON material_shortages(status);
+CREATE INDEX idx_material_shortages_site ON material_shortages(site_id);

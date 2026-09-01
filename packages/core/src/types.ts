@@ -42,6 +42,8 @@ export interface Call {
   /** Set only for a voice memo uploaded explicitly from a site's page — see queries.ts insertCall. */
   recorded_for_site_id: string | null;
   uploaded_by_user_id: string | null;
+  /** migration 0016: set when this call is the required voice note for one installation checklist row. */
+  installation_update_id: string | null;
 
   created_at: string;
 }
@@ -110,6 +112,8 @@ export interface SiteMedia {
   caption: string | null;
   uploaded_by: string;
   created_at: string;
+  /** migration 0016: set when this documents a specific installation checklist row. */
+  installation_update_id: string | null;
 }
 
 export interface SiteEdit {
@@ -130,6 +134,8 @@ export interface Commitment {
 }
 
 /** Manual only — see docs/ADDITIONAL_FEATURES_M0.md "Tile 4 — Escalations". */
+export type EscalationSource = "admin" | "staff_field";
+
 export interface Escalation {
   id: string;
   text: string;
@@ -137,6 +143,11 @@ export interface Escalation {
   status: EscalationStatus;
   created_at: string;
   closed_at: string | null;
+  /** migration 0016: who filed it — NULL for pre-existing admin-typed rows. */
+  created_by_user_id: string | null;
+  source: EscalationSource;
+  /** Set when filed from a specific installation checklist row; NULL for a site-level complaint. */
+  installation_update_id: string | null;
 }
 
 export interface Todo {
@@ -237,4 +248,46 @@ export interface SiteTask {
   completed_at: string | null;
   completed_by_user_id: string | null;
   created_at: string;
+}
+
+/** See migration 0016 — a physical window/opening instance at a site (a site can have many). */
+export interface Installation {
+  id: string;
+  site_id: string;
+  label: string;
+  created_by: string;
+  created_at: string;
+}
+
+/** The 6-row field-report checklist per installation — see docs/DESIGN_LANGUAGE.md-adjacent plan notes. */
+export type InstallationUpdateCategory =
+  | "location"
+  | "work_done"
+  | "work_pending"
+  | "material_short"
+  | "complaints"
+  | "site_delay";
+
+export interface InstallationUpdate {
+  id: string;
+  installation_id: string;
+  category: InstallationUpdateCategory;
+  voice_note_call_id: string | null;
+  reported_by_user_id: string;
+  created_at: string;
+}
+
+export type MaterialShortageStatus = "open" | "fulfilled";
+
+export interface MaterialShortage {
+  id: string;
+  site_id: string;
+  installation_id: string | null;
+  installation_update_id: string | null;
+  description: string | null;
+  status: MaterialShortageStatus;
+  reported_by_user_id: string;
+  reported_at: string;
+  resolved_by_user_id: string | null;
+  resolved_at: string | null;
 }

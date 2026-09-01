@@ -16,6 +16,21 @@ export const WORKFLOW_CATEGORIES = [
 ];
 export const WORKFLOW_CATEGORY_LABEL = Object.fromEntries(WORKFLOW_CATEGORIES.map((c) => [c.key, c.label]));
 
+/* ------------------------------------------------------------------
+   The staff site-visit installation checklist — migration 0016. One row
+   per category; `allowVideo: false` on "location" is the one row that
+   only ever offers a photo alongside the required voice note (matches
+   Piyush's brainstorm sketch). Order here is display order.
+   ------------------------------------------------------------------ */
+export const INSTALLATION_UPDATE_CATEGORIES = [
+  { key: "location", label: "Location of Work / Window", allowVideo: false },
+  { key: "work_done", label: "Work Done", allowVideo: true },
+  { key: "work_pending", label: "Work Pending", allowVideo: true },
+  { key: "material_short", label: "Material Short", allowVideo: true },
+  { key: "complaints", label: "Complaints", allowVideo: true },
+  { key: "site_delay", label: "Site Delay", allowVideo: true },
+];
+
 /* Sort rule — §4. Customer-waiting beats deadline proximity, beats recency. */
 export const sortCalls = (calls) =>
   [...calls].sort((a, b) => {

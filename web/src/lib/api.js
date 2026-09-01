@@ -309,3 +309,82 @@ export async function patchSiteTask(id, patch) {
   }
   return res.json();
 }
+
+/* Staff field workflow (migration 0016) — installations at a site and their
+   6-category checklist. Session-cookie only, same as postSiteMedia/
+   postSiteVoiceNote above — no X-SBM-Key involved. */
+
+export async function fetchSiteInstallations(siteId) {
+  const res = await fetch(`/api/sites/${siteId}/installations`);
+  if (!res.ok) throw new Error(`GET /api/sites/${siteId}/installations → ${res.status}`);
+  return res.json();
+}
+
+export async function postSiteInstallation(siteId, label) {
+  const res = await fetch(`/api/sites/${siteId}/installations`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/sites/${siteId}/installations → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Returns { installation, updates } — updates is the full history, oldest first. */
+export async function fetchInstallation(id) {
+  const res = await fetch(`/api/installations/${id}`);
+  if (!res.ok) throw new Error(`GET /api/installations/${id} → ${res.status}`);
+  return res.json();
+}
+
+/** The required voice note for one checklist row. `category` is one of the 6 InstallationUpdateCategory values. */
+export async function postInstallationUpdate(installationId, category, blob, fileName) {
+  const fd = new FormData();
+  fd.append("category", category);
+  fd.append("recording", blob, fileName);
+  const res = await fetch(`/api/installations/${installationId}/updates`, { method: "POST", body: fd });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/installations/${installationId}/updates → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Optional photo/video attached to an existing checklist row, once it has a voice note. */
+export async function postInstallationUpdateMedia(updateId, file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(`/api/installation-updates/${updateId}/media`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`POST /api/installation-updates/${updateId}/media → ${res.status}`);
+  return res.json();
+}
+
+/** Site-level complaint (not nested in an installation) — `blob`/`fileName` are optional. */
+export async function postSiteComplaint(siteId, text, blob, fileName) {
+  const fd = new FormData();
+  fd.append("text", text);
+  if (blob) fd.append("recording", blob, fileName);
+  const res = await fetch(`/api/sites/${siteId}/complaints`, { method: "POST", body: fd });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/sites/${siteId}/complaints → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Admin material-shortage ledger. `status` optional ("open" | "fulfilled"); omitted returns every row. */
+export async function fetchMaterialShortages(status) {
+  const qs = status ? `?status=${status}` : "";
+  const res = await fetch(`/api/material-shortages${qs}`);
+  if (!res.ok) throw new Error(`GET /api/material-shortages → ${res.status}`);
+  return res.json();
+}
+
+export async function patchMaterialShortage(id) {
+  const res = await fetch(`/api/material-shortages/${id}`, { method: "PATCH" });
+  if (!res.ok) throw new Error(`PATCH /api/material-shortages/${id} → ${res.status}`);
+  return res.json();
+}
