@@ -115,7 +115,10 @@ CREATE TABLE escalations (
   closed_at              TEXT,
   created_by_user_id     TEXT REFERENCES users(id),
   source                 TEXT NOT NULL DEFAULT 'admin',  -- admin | staff_field
-  installation_update_id TEXT REFERENCES installation_updates(id)
+  installation_update_id TEXT REFERENCES installation_updates(id),
+  assigned_to_user_id    TEXT REFERENCES users(id),
+  assigned_by_user_id    TEXT REFERENCES users(id),
+  assigned_at            TEXT
 );
 
 CREATE TABLE todos (

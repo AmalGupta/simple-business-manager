@@ -1,16 +1,33 @@
 import { useState, useEffect } from "react";
+import { Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { fetchConfirmedSites } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
+import { AddSiteModal } from "../sites/AddSiteModal.jsx";
 
 /* Entry point for the "Site Visit" home tile — pick a site, then a
-   category, then (for Installation) an installation. Reuses
+   category. Complaints use ComplaintsHomeView instead. Reuses
    fetchConfirmedSites, already scoped server-side to the staff member's
-   own sites (same call SitesDirectoryView makes for "All my sites"), so no
-   new list endpoint was needed for this screen. */
-export function SiteVisitSiteList({ onBack, onSelectSite }) {
+   own sites (same call SitesDirectoryView makes for "All my sites"). */
+export function SiteVisitSiteList({
+  onBack,
+  onSelectSite,
+  onSiteCreated,
+  title = "Site Visit",
+  prompt = "Which site are you at?",
+  addLabel = "Add new site",
+}) {
   const [sites, setSites] = useState(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  const reload = () =>
+    fetchConfirmedSites()
+      .then((data) => setSites(data))
+      .catch((err) => {
+        console.error("[sbm] failed to load sites for site visit", err);
+        setSites([]);
+      });
 
   useEffect(() => {
     let cancelled = false;
@@ -30,8 +47,32 @@ export function SiteVisitSiteList({ onBack, onSelectSite }) {
   return (
     <div>
       <BackLink onClick={onBack}>Back</BackLink>
-      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>Site Visit</h1>
-      <p style={{ fontSize: 13, color: t.edge2, margin: "0 0 1rem" }}>Which site are you at?</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5rem", gap: 12 }}>
+        <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>{title}</h1>
+        {onSiteCreated && (
+          <button
+            onClick={() => setShowAddModal(true)}
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "7px 12px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              background: t.white,
+              color: t.edge,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Plus size={14} /> {addLabel}
+          </button>
+        )}
+      </div>
+      <p style={{ fontSize: 13, color: t.edge2, margin: "0 0 1rem" }}>{prompt}</p>
 
       {sites === null ? (
         <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
@@ -65,6 +106,18 @@ export function SiteVisitSiteList({ onBack, onSelectSite }) {
             </button>
           ))}
         </Card>
+      )}
+
+      {showAddModal && onSiteCreated && (
+        <AddSiteModal
+          onClose={() => setShowAddModal(false)}
+          onCreate={async (name, address, pocName) => {
+            const site = await onSiteCreated(name, address, pocName);
+            setShowAddModal(false);
+            await reload();
+            return site;
+          }}
+        />
       )}
     </div>
   );

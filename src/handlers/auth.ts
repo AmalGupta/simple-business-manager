@@ -34,6 +34,7 @@ import {
   hashPin,
   hashToken,
   newSessionToken,
+  readSessionToken,
   requireSession,
   sessionCookieHeader,
   sessionExpiryFromNow,
@@ -48,6 +49,30 @@ function json(data: unknown, status = 200, extraHeaders?: Record<string, string>
   });
 }
 
+function loginFailedRedirect(name: string): Response {
+  const qs = new URLSearchParams({ login_error: "1" });
+  if (name) qs.set("name", name);
+  return new Response(null, {
+    status: 303,
+    headers: { Location: `/?${qs.toString()}` },
+  });
+}
+
+async function establishSession(request: Request, env: Env, userId: string): Promise<{ token: string; clearCookie: string; setCookie: string }> {
+  const existingToken = readSessionToken(request);
+  if (existingToken) await revokeSession(env.DB, await hashToken(existingToken));
+
+  const token = newSessionToken();
+  const tokenHash = await hashToken(token);
+  await createSession(env.DB, userId, tokenHash, sessionExpiryFromNow());
+
+  return {
+    token,
+    clearCookie: clearSessionCookieHeader(request),
+    setCookie: sessionCookieHeader(request, token),
+  };
+}
+
 /** admin/superadmin only — every new staff-management route needs this. Returns the session on success, or the Response to short-circuit with otherwise. */
 async function requireAdmin(request: Request, env: Env): Promise<SessionWithUser | Response> {
   const session = await requireSession(request, env);
@@ -57,51 +82,86 @@ async function requireAdmin(request: Request, env: Env): Promise<SessionWithUser
 }
 
 export async function handleLogin(request: Request, env: Env): Promise<Response> {
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return json({ error: "invalid JSON body" }, 400);
+  const contentType = request.headers.get("content-type") ?? "";
+  const isForm =
+    contentType.includes("application/x-www-form-urlencoded") || contentType.includes("multipart/form-data");
+
+  let name = "";
+  let pin = "";
+
+  if (contentType.includes("application/json")) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "invalid JSON body" }, 400);
+    }
+    const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+    name = typeof record.name === "string" ? record.name.trim() : "";
+    pin = typeof record.pin === "string" ? record.pin : "";
+  } else if (isForm) {
+    const form = await request.formData();
+    name = String(form.get("name") ?? "").trim();
+    pin = String(form.get("pin") ?? "");
+  } else {
+    return json({ error: "unsupported content type" }, 415);
   }
-  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
-  const name = typeof record.name === "string" ? record.name.trim() : "";
-  const pin = typeof record.pin === "string" ? record.pin : "";
-  if (!name || !pin) return json({ error: "name and pin are required" }, 400);
+
+  if (!name || !pin) {
+    if (isForm) return loginFailedRedirect(name);
+    return json({ error: "name and pin are required" }, 400);
+  }
 
   const user = await getUserByName(env.DB, name);
-  if (!user || user.disabled_at) return json({ error: "invalid name or pin" }, 401);
+  if (!user || user.disabled_at) {
+    if (isForm) return loginFailedRedirect(name);
+    return json({ error: "invalid name or pin" }, 401);
+  }
 
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
+    if (isForm) return loginFailedRedirect(name);
     return json({ error: "account locked — try again later" }, 423);
   }
 
   const valid = await verifyPin(env, pin, user.pin_hash, user.pin_salt);
   if (!valid) {
     await incrementFailedLogin(env.DB, user.id);
+    if (isForm) return loginFailedRedirect(name);
     return json({ error: "invalid name or pin" }, 401);
   }
 
   await resetFailedLogin(env.DB, user.id);
 
-  const token = newSessionToken();
-  const tokenHash = await hashToken(token);
-  await createSession(env.DB, user.id, tokenHash, sessionExpiryFromNow());
+  const session = await establishSession(request, env, user.id);
+
+  if (isForm) {
+    const headers = new Headers({ Location: "/" });
+    headers.append("set-cookie", session.clearCookie);
+    headers.append("set-cookie", session.setCookie);
+    return new Response(null, { status: 303, headers });
+  }
 
   return json(
     { id: user.id, name: user.name, role: user.role, phone: user.phone },
     200,
-    { "set-cookie": sessionCookieHeader(request, token) }
+    { "set-cookie": session.setCookie }
   );
 }
 
 export async function handleLogout(request: Request, env: Env): Promise<Response> {
-  const session = await requireSession(request, env);
-  if (session) {
-    const cookie = request.headers.get("Cookie") ?? "";
-    const match = cookie.match(/sbm_session=([^;]+)/);
-    if (match) await revokeSession(env.DB, await hashToken(match[1]));
-  }
+  const token = readSessionToken(request);
+  if (token) await revokeSession(env.DB, await hashToken(token));
   return json({ ok: true }, 200, { "set-cookie": clearSessionCookieHeader(request) });
+}
+
+/** Browser navigation logout — Set-Cookie on a document navigation is more reliable than fetch(). */
+export async function handleLogoutRedirect(request: Request, env: Env): Promise<Response> {
+  const token = readSessionToken(request);
+  if (token) await revokeSession(env.DB, await hashToken(token));
+  return new Response(null, {
+    status: 303,
+    headers: { Location: "/", "set-cookie": clearSessionCookieHeader(request) },
+  });
 }
 
 export async function handleMe(request: Request, env: Env): Promise<Response> {

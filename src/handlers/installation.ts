@@ -219,10 +219,9 @@ export async function handlePostInstallationUpdateMedia(request: Request, env: E
 }
 
 /**
- * Site-level complaint (the home category grid's "Complaints" box, not
- * nested in an installation). Text is always required — it's what goes in
- * the escalations.text column; a voice note is an optional attachment, not
- * gated the way the installation checklist's is.
+ * Site-level complaint (staff Complaints tile). Voice note is required;
+ * text is optional (defaults to a site-scoped label). Optional photo/video
+ * attachments land in site_media for the site timeline.
  */
 export async function handlePostSiteComplaint(
   request: Request,
@@ -232,36 +231,41 @@ export async function handlePostSiteComplaint(
   reportedByUserId: string
 ): Promise<Response> {
   const form = await request.formData();
-  const textField = form.get("text");
-  const text = typeof textField === "string" ? textField.trim() : "";
-  if (!text) return json({ error: "text is required" }, 400);
-
-  const file = form.get("recording");
-  if (file instanceof File) {
-    const callId = crypto.randomUUID();
-    const ext = file.name.includes(".") ? file.name.split(".").pop() : "m4a";
-    const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
-    await env.RECORDINGS.put(r2Key, file.stream(), {
-      httpMetadata: { contentType: normalizeAudioContentType(file.type) },
-    });
-    await insertCall(env.DB, {
-      id: callId,
-      r2Key,
-      source: "ios",
-      recordedAt: new Date().toISOString(),
-      recordingDate: null,
-      durationS: null,
-      recordedForSiteId: siteId,
-      uploadedByUserId: reportedByUserId,
-    });
-    await linkCallToSiteExplicit(env.DB, callId, siteId);
-    const callbackUrl = `${new URL(request.url).origin}/webhooks/sarvam`;
-    ctx.waitUntil(
-      submitRecording(env, r2Key, callbackUrl)
-        .then((result) => setCallSubmitted(env.DB, callId, result.jobId))
-        .catch((err) => setCallFailed(env.DB, callId, `submit: ${String(err)}`))
-    );
+  const recording = form.get("recording");
+  if (!(recording instanceof File) || recording.size === 0) {
+    return json({ error: "voice recording is required" }, 400);
   }
+
+  const textField = form.get("text");
+  let text = typeof textField === "string" ? textField.trim() : "";
+  if (!text) {
+    const siteRow = await env.DB.prepare(`SELECT name FROM sites WHERE id = ?`).bind(siteId).first<{ name: string }>();
+    text = siteRow?.name ? `Complaint at ${siteRow.name}` : "Site complaint (voice note)";
+  }
+
+  const callId = crypto.randomUUID();
+  const ext = recording.name.includes(".") ? recording.name.split(".").pop() : "m4a";
+  const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
+  await env.RECORDINGS.put(r2Key, recording.stream(), {
+    httpMetadata: { contentType: normalizeAudioContentType(recording.type) },
+  });
+  await insertCall(env.DB, {
+    id: callId,
+    r2Key,
+    source: "ios",
+    recordedAt: new Date().toISOString(),
+    recordingDate: null,
+    durationS: null,
+    recordedForSiteId: siteId,
+    uploadedByUserId: reportedByUserId,
+  });
+  await linkCallToSiteExplicit(env.DB, callId, siteId);
+  const callbackUrl = `${new URL(request.url).origin}/webhooks/sarvam`;
+  ctx.waitUntil(
+    submitRecording(env, r2Key, callbackUrl)
+      .then((result) => setCallSubmitted(env.DB, callId, result.jobId))
+      .catch((err) => setCallFailed(env.DB, callId, `submit: ${String(err)}`))
+  );
 
   const escalation = await createEscalation(env.DB, {
     text,
@@ -269,7 +273,30 @@ export async function handlePostSiteComplaint(
     createdByUserId: reportedByUserId,
     source: "staff_field",
   });
-  return json(escalation, 201);
+
+  const mediaIds: string[] = [];
+  for (const entry of form.getAll("media")) {
+    if (!(entry instanceof File) || entry.size === 0) continue;
+    const mediaType = entry.type.startsWith("video/") ? "video" : entry.type.startsWith("image/") ? "photo" : null;
+    if (!mediaType) continue;
+    const mediaExt = entry.name.includes(".") ? entry.name.split(".").pop() : "bin";
+    const mediaKey = `site-media/${siteId}/${crypto.randomUUID()}.${mediaExt}`;
+    await env.RECORDINGS.put(mediaKey, entry.stream(), {
+      httpMetadata: { contentType: entry.type || "application/octet-stream" },
+    });
+    const media = await addSiteMedia(env.DB, {
+      siteId,
+      mediaType,
+      r2Key: mediaKey,
+      contentType: entry.type || "application/octet-stream",
+      fileSize: entry.size ?? null,
+      caption: "Complaint attachment",
+      uploadedBy: reportedByUserId,
+    });
+    mediaIds.push(media.id);
+  }
+
+  return json({ ...escalation, voice_call_id: callId, media_ids: mediaIds }, 201);
 }
 
 /** Admin ledger — session-only, no X-SBM-Key, same pattern as /api/staff. */

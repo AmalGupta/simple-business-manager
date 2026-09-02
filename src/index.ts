@@ -12,6 +12,9 @@ import {
   handleCloseEscalation,
   handleGetCall,
   handleGetCalls,
+  handleGetComplaints,
+  handleGetComplaintsCount,
+  handlePatchComplaint,
   handleGetCallsCount,
   handleGetCallTranscripts,
   handleGetDashboardSummary,
@@ -44,6 +47,7 @@ import {
   handleListStaffRoster,
   handleLogin,
   handleLogout,
+  handleLogoutRedirect,
   handleMe,
   handleResetPin,
   handleResetStaffPin,
@@ -264,6 +268,10 @@ export default {
       return handleLogout(request, env);
     }
 
+    if (url.pathname === "/api/logout" && request.method === "GET") {
+      return handleLogoutRedirect(request, env);
+    }
+
     if (url.pathname === "/api/me" && request.method === "GET") {
       return handleMe(request, env);
     }
@@ -405,6 +413,19 @@ export default {
       if (!session) return new Response("Unauthorized", { status: 401 });
       if (!(await assertSiteMembership(env, session, siteComplaintMatch[1]))) return new Response("Forbidden", { status: 403 });
       return handlePostSiteComplaint(request, env, ctx, siteComplaintMatch[1], session.user_id);
+    }
+
+    if (url.pathname === "/api/complaints/count" && request.method === "GET") {
+      return handleGetComplaintsCount(request, env);
+    }
+
+    if (url.pathname === "/api/complaints" && request.method === "GET") {
+      return handleGetComplaints(request, env);
+    }
+
+    const complaintMatch = url.pathname.match(/^\/api\/complaints\/([^/]+)$/);
+    if (complaintMatch && request.method === "PATCH") {
+      return handlePatchComplaint(request, env, complaintMatch[1]);
     }
 
     if (url.pathname === "/api/material-shortages" && request.method === "GET") {

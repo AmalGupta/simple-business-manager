@@ -781,32 +781,54 @@ export async function updateSite(
  * patches it rather than erroring on the UNIQUE constraint — same
  * `updateSite` path SitesReviewView uses, so it logs a site_edits row too.
  */
+/**
+ * Find-or-create a confirmed site by name. When `assignCreatorUserId` is set
+ * (staff self-serve create), the creator is added to the site team so the
+ * site appears in their scoped listSites / getConfirmedSitesSummary.
+ */
 export async function createSite(
   db: D1Database,
   name: string,
   address: string | null,
   pocName: string | null,
-  actorUserId?: string | null
+  actorUserId?: string | null,
+  assignCreatorUserId?: string | null
 ): Promise<SiteRow> {
   const trimmed = name.trim();
   const existing = await db.prepare(`${SITE_ROW_SELECT} WHERE name = ?`).bind(trimmed).first<SiteRow>();
+  let site: SiteRow;
   if (existing) {
     const updated = await updateSite(db, existing.id, { is_confirmed: "Y", address, poc_name: pocName }, actorUserId ?? null);
-    return updated ?? existing;
+    site = updated ?? existing;
+  } else {
+    const id = crypto.randomUUID();
+    await db.batch([
+      db
+        .prepare(`INSERT INTO sites (id, name, is_confirmed, address, poc_name) VALUES (?, ?, 'Y', ?, ?)`)
+        .bind(id, trimmed, address, pocName),
+      db
+        .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, 'Site added')`)
+        .bind(crypto.randomUUID(), id, actorUserId ?? null),
+    ]);
+    await seedSiteTasks(db, id);
+    const row = await db.prepare(`${SITE_ROW_SELECT} WHERE id = ?`).bind(id).first<SiteRow>();
+    site = row!;
   }
 
-  const id = crypto.randomUUID();
-  await db.batch([
-    db
-      .prepare(`INSERT INTO sites (id, name, is_confirmed, address, poc_name) VALUES (?, ?, 'Y', ?, ?)`)
-      .bind(id, trimmed, address, pocName),
-    db
-      .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, 'Site added')`)
-      .bind(crypto.randomUUID(), id, actorUserId ?? null),
-  ]);
-  await seedSiteTasks(db, id);
-  const row = await db.prepare(`${SITE_ROW_SELECT} WHERE id = ?`).bind(id).first<SiteRow>();
-  return row!;
+  if (assignCreatorUserId) {
+    const onTeam = await db
+      .prepare(`SELECT 1 FROM site_team_members WHERE site_id = ? AND user_id = ? LIMIT 1`)
+      .bind(site.id, assignCreatorUserId)
+      .first();
+    if (!onTeam) {
+      const user = await getUserById(db, assignCreatorUserId);
+      if (user) {
+        await addSiteTeamMember(db, site.id, user.name, user.phone ?? "", assignCreatorUserId, assignCreatorUserId);
+      }
+    }
+  }
+
+  return site;
 }
 
 export interface SiteTeamMemberRow {
@@ -1130,6 +1152,25 @@ export interface EscalationRow {
   created_by_name: string | null;
 }
 
+/** Staff-filed complaints (`source = staff_field`) with site + assignee joins. */
+export interface ComplaintRow extends EscalationRow {
+  site_address: string | null;
+  site_poc_name: string | null;
+  assigned_to_user_id: string | null;
+  assignee_name: string | null;
+}
+
+const COMPLAINT_LIST_SELECT = `SELECT escalations.id, escalations.text, escalations.site_id, sites.name AS site_name,
+              sites.address AS site_address, sites.poc_name AS site_poc_name,
+              escalations.status, escalations.created_at, escalations.closed_at,
+              escalations.source, creator.name AS created_by_name,
+              escalations.assigned_to_user_id, assignee.name AS assignee_name
+       FROM escalations
+       LEFT JOIN sites ON sites.id = escalations.site_id
+       LEFT JOIN users AS creator ON creator.id = escalations.created_by_user_id
+       LEFT JOIN users AS assignee ON assignee.id = escalations.assigned_to_user_id
+       WHERE escalations.source = 'staff_field'`;
+
 export interface CallForSiteScan {
   id: string;
   diarized_transcript: string;
@@ -1169,6 +1210,68 @@ export async function listOpenEscalations(db: D1Database): Promise<EscalationRow
     )
     .all<EscalationRow>();
   return results;
+}
+
+/** All staff-filed complaints — admin view; newest first. */
+export async function listComplaints(db: D1Database, forUserId?: string | null): Promise<ComplaintRow[]> {
+  let sql = COMPLAINT_LIST_SELECT;
+  const binds: string[] = [];
+  if (forUserId) {
+    sql += ` AND (
+         escalations.created_by_user_id = ?
+         OR escalations.site_id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)
+       )`;
+    binds.push(forUserId, forUserId);
+  }
+  sql += ` ORDER BY escalations.created_at DESC`;
+  const stmt = db.prepare(sql);
+  const bound = binds.length ? stmt.bind(...binds) : stmt;
+  const { results } = await bound.all<ComplaintRow>();
+  return results;
+}
+
+/** Open staff-filed complaints count — home tile. */
+export async function countOpenComplaints(db: D1Database, forUserId?: string | null): Promise<number> {
+  let sql = `SELECT COUNT(*) AS n FROM escalations
+             WHERE source = 'staff_field' AND status = 'open'`;
+  const binds: string[] = [];
+  if (forUserId) {
+    sql += ` AND (
+         created_by_user_id = ?
+         OR site_id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)
+       )`;
+    binds.push(forUserId, forUserId);
+  }
+  const stmt = db.prepare(sql);
+  const bound = binds.length ? stmt.bind(...binds) : stmt;
+  const row = await bound.first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+export async function assignComplaint(
+  db: D1Database,
+  id: string,
+  assignedToUserId: string,
+  assignedByUserId: string
+): Promise<ComplaintRow | null> {
+  await db
+    .prepare(
+      `UPDATE escalations
+       SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now')
+       WHERE id = ? AND source = 'staff_field'`
+    )
+    .bind(assignedToUserId, assignedByUserId, id)
+    .run();
+  const { results } = await db
+    .prepare(`${COMPLAINT_LIST_SELECT} AND escalations.id = ?`)
+    .bind(id)
+    .all<ComplaintRow>();
+  return results[0] ?? null;
+}
+
+/** @deprecated Use listComplaints(db, userId) — kept for callers migrating gradually. */
+export async function listStaffComplaints(db: D1Database, userId: string): Promise<ComplaintRow[]> {
+  return listComplaints(db, userId);
 }
 
 export interface NewEscalationInput {

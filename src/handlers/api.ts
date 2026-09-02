@@ -7,7 +7,9 @@
 import {
   addSiteTeamMember,
   assignTodo,
+  assignComplaint,
   closeEscalation,
+  countOpenComplaints,
   createEscalation,
   createSite,
   getCallById,
@@ -26,6 +28,7 @@ import {
   listCallTranscripts,
   listCallsForSiteScan,
   listCallsWithTodos,
+  listComplaints,
   listOpenEscalations,
   listSiteTeamMembers,
   listSites,
@@ -247,10 +250,11 @@ export async function handleGetSites(request: Request, env: Env): Promise<Respon
   return json(await listSites(env.DB, forUserId));
 }
 
-/** "Add new site" — manual creation, distinct from the LLM-driven upsertSite path. See createSite in queries.ts. */
+/** "Add new site" — any logged-in role. Staff creators are auto-added to the
+ * site team so the site appears under All my sites. See createSite. */
 export async function handlePostSite(request: Request, env: Env): Promise<Response> {
-  const gate = await requireAdmin(request, env);
-  if (gate instanceof Response) return gate;
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
 
   let body: unknown;
   try {
@@ -264,7 +268,8 @@ export async function handlePostSite(request: Request, env: Env): Promise<Respon
   const address = typeof record.address === "string" && record.address.trim() ? record.address.trim() : null;
   const pocName = typeof record.poc_name === "string" && record.poc_name.trim() ? record.poc_name.trim() : null;
 
-  const site = await createSite(env.DB, name, address, pocName, gate.user_id);
+  const assignCreator = session.user_role === "staff" ? session.user_id : null;
+  const site = await createSite(env.DB, name, address, pocName, session.user_id, assignCreator);
   return json(site, 201);
 }
 
@@ -420,6 +425,45 @@ export async function handleGetEscalations(request: Request, env: Env): Promise<
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
   return json(await listOpenEscalations(env.DB));
+}
+
+/** Complaints list — staff see complaints they filed or at their sites; admin sees all. */
+export async function handleGetComplaints(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  const forUserId = session.user_role === "staff" ? session.user_id : null;
+  return json(await listComplaints(env.DB, forUserId));
+}
+
+/** Open complaints count — home tile for staff and admin. */
+export async function handleGetComplaintsCount(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  const forUserId = session.user_role === "staff" ? session.user_id : null;
+  return json({ count: await countOpenComplaints(env.DB, forUserId) });
+}
+
+/** Admin assigns a staff-filed complaint to a team member. */
+export async function handlePatchComplaint(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const assignedToUserId = typeof record.assigned_to_user_id === "string" ? record.assigned_to_user_id : "";
+  if (!assignedToUserId) return json({ error: "assigned_to_user_id is required" }, 400);
+
+  const assignee = await getUserById(env.DB, assignedToUserId);
+  if (!assignee || assignee.role !== "staff") return json({ error: "invalid assignee" }, 400);
+
+  const updated = await assignComplaint(env.DB, id, assignedToUserId, gate.user_id);
+  if (!updated) return json({ error: "not found" }, 404);
+  return json(updated);
 }
 
 export async function handlePostEscalation(request: Request, env: Env): Promise<Response> {

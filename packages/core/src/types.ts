@@ -148,6 +148,9 @@ export interface Escalation {
   source: EscalationSource;
   /** Set when filed from a specific installation checklist row; NULL for a site-level complaint. */
   installation_update_id: string | null;
+  assigned_to_user_id: string | null;
+  assigned_by_user_id: string | null;
+  assigned_at: string | null;
 }
 
 export interface Todo {

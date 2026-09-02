@@ -142,15 +142,21 @@ export async function patchTodo(id, patch) {
 
 /* Session-cookie auth (login gate + site media/timeline) — additive to the
    X-SBM-Key mechanism above, not a replacement. See src/lib/auth.ts. */
+function sessionFetch(path, init = {}) {
+  return fetch(path, { credentials: "same-origin", ...init });
+}
+
 export async function fetchMe() {
-  const res = await fetch("/api/me");
+  const res = await sessionFetch("/api/me");
   if (res.status === 401) return null;
   if (!res.ok) throw new Error(`GET /api/me → ${res.status}`);
   return res.json();
 }
 
 export async function postLogin(name, pin) {
-  const res = await fetch("/api/login", {
+  /* Browser login uses a real form POST (LoginScreen) so Set-Cookie is
+     applied reliably. Keep this for programmatic callers (e2e/api). */
+  const res = await sessionFetch("/api/login", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ name, pin }),
@@ -162,8 +168,10 @@ export async function postLogin(name, pin) {
   return res.json();
 }
 
-export async function postLogout() {
-  await fetch("/api/logout", { method: "POST" });
+export function postLogout() {
+  /* Full navigation — browsers reliably apply HttpOnly Set-Cookie on
+     document loads; fetch() responses often leave the cookie in place. */
+  window.location.assign("/api/logout");
 }
 
 export async function postResetPin(currentPin, newPin) {
@@ -364,12 +372,53 @@ export async function postInstallationUpdateMedia(updateId, file) {
   return res.json();
 }
 
-/** Site-level complaint (not nested in an installation) — `blob`/`fileName` are optional. */
-export async function postSiteComplaint(siteId, text, blob, fileName) {
+/** Complaints list — staff (scoped) or admin (all). Session-only. */
+export async function fetchComplaints() {
+  const res = await fetch("/api/complaints", { credentials: "same-origin" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `GET /api/complaints → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Open complaints count — home tile. */
+export async function fetchComplaintsCount() {
+  const res = await fetch("/api/complaints/count", { credentials: "same-origin" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `GET /api/complaints/count → ${res.status}`);
+  }
+  const data = await res.json();
+  return data.count ?? 0;
+}
+
+export async function patchComplaint(id, assignedToUserId) {
+  const res = await fetch(`/api/complaints/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ assigned_to_user_id: assignedToUserId }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/complaints/${id} → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** @deprecated Use fetchComplaints() */
+export async function fetchStaffComplaints() {
+  return fetchComplaints();
+}
+
+/** Site-level complaint — voice note required; optional text + photo/video attachments. */
+export async function postSiteComplaint(siteId, text, blob, fileName, mediaFiles = []) {
   const fd = new FormData();
-  fd.append("text", text);
-  if (blob) fd.append("recording", blob, fileName);
-  const res = await fetch(`/api/sites/${siteId}/complaints`, { method: "POST", body: fd });
+  if (text?.trim()) fd.append("text", text.trim());
+  fd.append("recording", blob, fileName);
+  for (const file of mediaFiles) fd.append("media", file);
+  const res = await fetch(`/api/sites/${siteId}/complaints`, { method: "POST", body: fd, credentials: "same-origin" });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `POST /api/sites/${siteId}/complaints → ${res.status}`);

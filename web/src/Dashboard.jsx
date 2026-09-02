@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { CalendarDays, MapPin, MessageSquareWarning } from "lucide-react";
+import { CalendarDays, MapPin } from "lucide-react";
 import { t } from "./theme.js";
 import { today, dayKey, isoDate, fmtDate } from "./lib/dates.js";
 import { Card } from "./components/Card.jsx";
@@ -31,6 +31,8 @@ import { SiteVisitCategoryGrid } from "./views/site-visit/SiteVisitCategoryGrid.
 import { InstallationListView } from "./views/site-visit/InstallationListView.jsx";
 import { InstallationScreen } from "./views/site-visit/InstallationScreen.jsx";
 import { SiteComplaintForm } from "./views/site-visit/SiteComplaintForm.jsx";
+import { ComplaintsHomeView } from "./views/site-visit/ComplaintsHomeView.jsx";
+import { ComplaintsTile } from "./views/site-visit/ComplaintsTile.jsx";
 import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
 import {
@@ -46,10 +48,10 @@ import {
   closeEscalationApi,
   patchTodo,
   fetchMe,
-  postLogin,
   postLogout,
   postResetPin,
   postUpdateMyPhone,
+  patchComplaint,
   fetchOpenSiteTasks,
 } from "./lib/api.js";
 
@@ -72,6 +74,7 @@ export default function SimpleBusinessManager() {
      superadmin. See fetchOpenSiteTasks and migration 0013. */
   const [openSiteTasks, setOpenSiteTasks] = useState([]);
   const [myOpenTodos, setMyOpenTodos] = useState([]);
+  const [complaintsRefreshKey, setComplaintsRefreshKey] = useState(0);
   const [view, setView] = useState({ name: "home" });
   const [busyIds, setBusyIds] = useState(new Set());
 
@@ -84,12 +87,21 @@ export default function SimpleBusinessManager() {
      src/lib/auth.ts / LoginScreen above — additive session-cookie auth,
      the whole dashboard is now gated behind it. */
   const [me, setMe] = useState(undefined);
-  /* Optimistic login handoff — paint home chrome as soon as the user
-     submits, before POST /api/login returns. On failure, snap back to
-     LoginScreen with the error. */
-  const [loginPending, setLoginPending] = useState(false);
-  const [loginError, setLoginError] = useState("");
-  const [pendingLoginName, setPendingLoginName] = useState("");
+  const [loginError, setLoginError] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("login_error") ? "Invalid name or PIN." : "";
+  });
+  const [loginInitialName, setLoginInitialName] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get("login_error") ? (params.get("name") ?? "") : "";
+  });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("login_error")) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
 
   /* `staff` lands on their personal workflow tiles instead of the office
      dashboard — migration 0011 (role split) plus migration 0013 (the
@@ -196,26 +208,12 @@ export default function SimpleBusinessManager() {
     setOpenSiteTasks(tasksData);
   }, []);
 
-  const onLogout = useCallback(async () => {
-    await postLogout();
-    setMe(null);
-    setView({ name: "home" });
+  const onLogout = useCallback(() => {
+    postLogout();
   }, []);
 
-  const onLoginSubmit = useCallback(async (name, pin) => {
-    setLoginPending(true);
-    setLoginError("");
-    setPendingLoginName(name);
-    setView({ name: "home" });
-    try {
-      const user = await postLogin(name, pin);
-      setMe(user);
-      setLoginPending(false);
-      setPendingLoginName("");
-    } catch (err) {
-      setLoginPending(false);
-      setLoginError(err.message || "Login failed.");
-    }
+  const onAssignComplaint = useCallback(async (id, staffId) => {
+    return patchComplaint(id, staffId);
   }, []);
 
   const onResetPin = useCallback(async (currentPin, newPin) => {
@@ -228,25 +226,38 @@ export default function SimpleBusinessManager() {
   }, []);
 
   const refreshSites = useCallback(async () => {
+    if (me?.role === "staff") {
+      const sitesData = await fetchSites();
+      setAllSites(sitesData);
+      setConfirmedCount(sitesData.filter((s) => s.is_confirmed === "Y").length);
+      setUnconfirmedCount(sitesData.filter((s) => s.is_confirmed === null).length);
+      return;
+    }
     const [sitesData, attentionData] = await Promise.all([fetchSites(), fetchSitesAttention()]);
     setAllSites(sitesData);
     setSitesAttention(attentionData);
     setConfirmedCount(sitesData.filter((s) => s.is_confirmed === "Y").length);
     setUnconfirmedCount(sitesData.filter((s) => s.is_confirmed === null).length);
-  }, []);
+  }, [me?.role]);
 
-  /* "Add new site": create, refresh the site list so SiteView can find the
-     new record, then hand off straight into SiteView — team assignment and
-     photo/video/voice-note upload already exist there, no need to
-     duplicate that flow in the creation modal itself. */
-  const onSiteCreated = useCallback(
+  /* "Add new site": create + refresh so scoped lists / SiteView can resolve
+     the new record. Callers decide where to navigate afterward. */
+  const createSiteAndRefresh = useCallback(
     async (name, address, pocName) => {
       const site = await postCreateSite(name, address, pocName);
       await refreshSites();
-      setView({ name: "site", site: site.name, from: { name: "sites-directory" }, autoEdit: true });
       return site;
     },
     [refreshSites]
+  );
+
+  const onSiteCreated = useCallback(
+    async (name, address, pocName) => {
+      const site = await createSiteAndRefresh(name, address, pocName);
+      setView({ name: "site", site: site.name, from: { name: "sites-directory" }, autoEdit: true });
+      return site;
+    },
+    [createSiteAndRefresh]
   );
 
   const onAddEscalation = useCallback(async (text) => {
@@ -516,75 +527,8 @@ export default function SimpleBusinessManager() {
   );
 
   if (me === undefined) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
-  if (me === null && !loginPending) {
-    return <LoginScreen onSubmit={onLoginSubmit} error={loginError} initialName={pendingLoginName} />;
-  }
-
-  /* Login in flight — show admin home chrome immediately (empty tiles).
-     Role-specific layout swaps in once POST /api/login returns and setMe
-     runs; staff briefly see the admin shell for one hop, which is fine. */
-  if (me === null && loginPending) {
-    return shell(
-      <>
-        <AppHeader
-          hideAccount
-          right={
-            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
-              {pendingLoginName ? `${pendingLoginName} · signing in…` : "Signing in…"}
-            </span>
-          }
-        >
-          <StreakWall
-            days={monthDays}
-            onSelectDay={() => {}}
-            selected={null}
-            year={calMonth.year}
-            month={calMonth.month}
-            yearOptions={yearOptions}
-            onChangeYear={(y) => goToMonth(y, calMonth.month)}
-            onChangeMonth={(m) => goToMonth(calMonth.year, m)}
-            onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
-            onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
-            todayIso={isoDate(today().getFullYear(), today().getMonth(), today().getDate())}
-          />
-        </AppHeader>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: 12,
-            marginBottom: "1.5rem",
-          }}
-        >
-          <StatCard value={0} label="closed today" />
-          <SitesAttentionTile
-            sites={[]}
-            onOpenSite={() => {}}
-            onReviewSites={() => {}}
-            onViewDirectory={() => {}}
-            hasAnySites={false}
-            unconfirmedCount={0}
-            confirmedCount={0}
-          />
-          <EscalationsTile escalations={[]} onAdd={async () => {}} onClose={async () => {}} busyIds={busyIds} />
-          <StaffTile count={0} onOpen={() => {}} />
-          <WorkflowTilesRow tasks={[]} onOpenCategory={() => {}} />
-          <StatCard value={0} label="open today" />
-          <Card tile>
-            <TileLabel>calls logged</TileLabel>
-            <div style={TILE_VALUE_ROW_STYLE}>
-              <span style={TILE_NUMBER_STYLE}>0</span>
-            </div>
-          </Card>
-          <Card tile>
-            <TileLabel>recordings</TileLabel>
-            <div style={TILE_VALUE_ROW_STYLE}>
-              <span style={TILE_NUMBER_STYLE}>0</span>
-            </div>
-          </Card>
-        </div>
-      </>
-    );
+  if (me === null) {
+    return <LoginScreen error={loginError} initialName={loginInitialName} />;
   }
 
   if (view.name === "call" && !bulkCallReady && fetchedCall === undefined) {
@@ -716,7 +660,6 @@ export default function SimpleBusinessManager() {
           onBack={() => setView(homeView)}
           onOpenSite={(site) => setView({ name: "site", site, from: { name: "sites-directory" } })}
           onSiteCreated={onSiteCreated}
-          canManage={me.role !== "staff"}
           isHome={me.role === "staff"}
         />
       </>
@@ -756,7 +699,7 @@ export default function SimpleBusinessManager() {
           </button>
 
           <button
-            onClick={() => setView({ name: "site-visit-sites", intent: "category", from: { name: "staff-home" } })}
+            onClick={() => setView({ name: "site-visit-sites", from: { name: "staff-home" } })}
             style={{ all: "unset", cursor: "pointer", display: "block" }}
             aria-label="Site Visit"
           >
@@ -765,15 +708,10 @@ export default function SimpleBusinessManager() {
             </Card>
           </button>
 
-          <button
-            onClick={() => setView({ name: "site-visit-sites", intent: "complaint", from: { name: "staff-home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label="Complaints"
-          >
-            <Card tile style={{ display: "flex", alignItems: "center" }}>
-              <TileLabel action={<MessageSquareWarning size={14} color={t.edge2} />}>Complaints</TileLabel>
-            </Card>
-          </button>
+          <ComplaintsTile
+            refreshKey={complaintsRefreshKey}
+            onOpen={() => setView({ name: "complaints-home", from: { name: "staff-home" } })}
+          />
 
           {myOpenTodos.length > 0 && (
             <button
@@ -831,20 +769,47 @@ export default function SimpleBusinessManager() {
     );
 
   // --- Staff field workflow (migration 0016): site visit -> category ->
-  // installation checklist, and the site-level complaint form. `intent` on
-  // site-visit-sites picks which screen selecting a site leads to. ---
+  // installation checklist, and the site-level complaint form. ---
 
   if (view.name === "site-visit-sites")
     return shell(
       <SiteVisitSiteList
         onBack={() => setView(view.from ?? homeView)}
-        onSelectSite={(site) =>
-          setView(
-            view.intent === "complaint"
-              ? { name: "site-complaint", site, from: view }
-              : { name: "site-visit-category", site, from: view }
-          )
-        }
+        onSelectSite={(site) => setView({ name: "site-visit-category", site, from: view })}
+        onSiteCreated={async (name, address, pocName) => {
+          const site = await createSiteAndRefresh(name, address, pocName);
+          setView({ name: "site-visit-category", site, from: view });
+          return site;
+        }}
+      />
+    );
+
+  if (view.name === "complaints-home")
+    return shell(
+      <ComplaintsHomeView
+        refreshKey={complaintsRefreshKey}
+        onBack={() => setView(view.from ?? homeView)}
+        onAddComplaint={() => setView({ name: "complaint-sites", from: view })}
+        canAdd={me.role === "staff"}
+        canAssign={me.role !== "staff"}
+        staffRoster={staffRoster}
+        onAssignComplaint={onAssignComplaint}
+      />
+    );
+
+  if (view.name === "complaint-sites")
+    return shell(
+      <SiteVisitSiteList
+        title="New complaint"
+        prompt="Which site is this about?"
+        addLabel="Add new site"
+        onBack={() => setView(view.from ?? { name: "complaints-home", from: homeView })}
+        onSelectSite={(site) => setView({ name: "site-complaint", site, from: view })}
+        onSiteCreated={async (name, address, pocName) => {
+          const site = await createSiteAndRefresh(name, address, pocName);
+          setView({ name: "site-complaint", site, from: view });
+          return site;
+        }}
       />
     );
 
@@ -876,7 +841,14 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "site-complaint")
     return shell(
-      <SiteComplaintForm site={view.site} onBack={() => setView(view.from ?? homeView)} onSubmitted={() => setView(homeView)} />
+      <SiteComplaintForm
+        site={view.site}
+        onBack={() => setView(view.from ?? { name: "complaints-home", from: homeView })}
+        onSubmitted={() => {
+          setComplaintsRefreshKey((k) => k + 1);
+          setView({ name: "complaints-home", from: homeView });
+        }}
+      />
     );
 
   if (view.name === "material-shortages") return shell(<MaterialShortagesView onBack={() => setView(homeView)} />);
@@ -946,6 +918,10 @@ export default function SimpleBusinessManager() {
         {(me.role === "admin" || me.role === "superadmin") && (
           <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />
         )}
+        <ComplaintsTile
+          refreshKey={complaintsRefreshKey}
+          onOpen={() => setView({ name: "complaints-home", from: { name: "home" } })}
+        />
         <WorkflowTilesRow
           tasks={openSiteTasks}
           onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}

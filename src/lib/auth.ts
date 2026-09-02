@@ -147,18 +147,25 @@ export function sessionCookieHeader(request: Request, token: string): string {
 
 export function clearSessionCookieHeader(request: Request): string {
   const secure = new URL(request.url).protocol === "https:" ? " Secure;" : "";
-  return `${SESSION_COOKIE}=; HttpOnly;${secure} SameSite=Lax; Path=/; Max-Age=0`;
+  // Expires + Max-Age=0 — some browsers ignore one without the other when deleting.
+  return `${SESSION_COOKIE}=; HttpOnly;${secure} SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+}
+
+/** Raw session token from the request cookie, if present. */
+export function readSessionToken(request: Request): string | null {
+  return readCookie(request, SESSION_COOKIE);
 }
 
 function readCookie(request: Request, name: string): string | null {
   const header = request.headers.get("Cookie");
   if (!header) return null;
+  let value: string | null = null;
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
-    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+    if (part.slice(0, eq).trim() === name) value = part.slice(eq + 1).trim();
   }
-  return null;
+  return value;
 }
 
 /**
