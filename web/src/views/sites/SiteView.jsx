@@ -43,7 +43,13 @@ export function SiteView({
   /* "Assign new site" only for a genuinely blank site — no details AND no
      call history yet. Anything with either already shows "Add more site
      details" instead, since it's not really a fresh/untouched site. */
-  const hasDetails = Boolean(siteRecord?.address?.trim() || siteRecord?.poc_name?.trim());
+  const hasDetails = Boolean(
+    siteRecord?.address?.trim() ||
+      siteRecord?.poc_name?.trim() ||
+      siteRecord?.house_no?.trim() ||
+      siteRecord?.sector?.trim() ||
+      siteRecord?.city?.trim()
+  );
   const isBlankSite = !hasDetails && siteCalls.length === 0;
   const daysMissed = siteRecord?.target_closure_date ? -daysUntil(siteRecord.target_closure_date) : 0;
   const targetMissed = daysMissed > 0;
@@ -243,6 +249,19 @@ export function SiteView({
               <span style={{ fontSize: 14, color: t.edge }}>{siteRecord?.address?.trim() || "No address on file."}</span>
               {siteRecord?.poc_name?.trim() && (
                 <span style={{ fontSize: 13, color: t.edge2 }}>Point of contact: {siteRecord.poc_name}</span>
+              )}
+              {siteRecord?.poc_contact_number?.trim() && (
+                <span style={{ fontSize: 13, color: t.edge2 }}>Contact: {siteRecord.poc_contact_number}</span>
+              )}
+              {(siteRecord?.assigned_by?.trim() || siteRecord?.referred_by?.trim()) && (
+                <span style={{ fontSize: 13, color: t.edge2 }}>
+                  {[siteRecord.assigned_by && `Assigned by ${siteRecord.assigned_by}`, siteRecord.referred_by && `Referred by ${siteRecord.referred_by}`]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </span>
+              )}
+              {siteRecord?.site_location?.trim() && (
+                <span style={{ fontSize: 13, color: t.edge2 }}>Location: {siteRecord.site_location}</span>
               )}
               <span style={{ fontSize: 13, color: targetMissed ? t.signal : t.edge2, fontWeight: targetMissed ? 700 : 400 }}>
                 {siteRecord?.target_closure_date

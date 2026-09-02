@@ -5,7 +5,6 @@ import { fmtShort, daysUntil } from "../../lib/dates.js";
 import { fetchConfirmedSites } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
-import { AddSiteModal } from "./AddSiteModal.jsx";
 
 /* ------------------------------------------------------------------
    Sites directory — reached via the "N confirmed sites" rollup on Tile 3.
@@ -14,9 +13,8 @@ import { AddSiteModal } from "./AddSiteModal.jsx";
    triage. Tapping a row reuses the same per-site drilldown (SiteView) Tile
    3's own rows link to. Also the entry point for "Add new site".
    ------------------------------------------------------------------ */
-export function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated, isHome = false }) {
+export function SitesDirectoryView({ onBack, onOpenSite, onAddSite, isHome = false }) {
   const [sites, setSites] = useState(null);
-  const [showAddModal, setShowAddModal] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,30 +33,32 @@ export function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated, isHome =
 
   return (
     <div>
-      {!isHome && <BackLink onClick={onBack}>Back</BackLink>}
+      <BackLink onClick={onBack}>{isHome ? "Home" : "Back"}</BackLink>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem", gap: 12 }}>
         <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>Sites</h1>
-        <button
-          onClick={() => setShowAddModal(true)}
-          style={{
-            flexShrink: 0,
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "7px 12px",
-            border: `1px solid ${t.frost}`,
-            borderRadius: t.radiusButton,
-            background: t.white,
-            color: t.edge,
-            fontSize: 12,
-            fontWeight: 600,
-            cursor: "pointer",
-            whiteSpace: "nowrap",
-          }}
-        >
-          <Plus size={14} /> Add new site
-        </button>
+        {onAddSite && (
+          <button
+            onClick={onAddSite}
+            style={{
+              flexShrink: 0,
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "7px 12px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              background: t.white,
+              color: t.edge,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <Plus size={14} /> Add new site
+          </button>
+        )}
       </div>
 
       {sites === null ? (
@@ -128,17 +128,6 @@ export function SitesDirectoryView({ onBack, onOpenSite, onSiteCreated, isHome =
             );
           })}
         </Card>
-      )}
-
-      {showAddModal && (
-        <AddSiteModal
-          onClose={() => setShowAddModal(false)}
-          onCreate={async (name, address, pocName) => {
-            const site = await onSiteCreated(name, address, pocName);
-            setShowAddModal(false);
-            return site;
-          }}
-        />
       )}
     </div>
   );

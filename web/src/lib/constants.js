@@ -16,6 +16,9 @@ export const WORKFLOW_CATEGORIES = [
 ];
 export const WORKFLOW_CATEGORY_LABEL = Object.fromEntries(WORKFLOW_CATEGORIES.map((c) => [c.key, c.label]));
 
+/** Mirrors packages/core/src/types.ts — categories hidden from staff UI/API. */
+export const STAFF_HIDDEN_WORKFLOW_CATEGORIES = ["admin_intake"];
+
 /* ------------------------------------------------------------------
    The staff site-visit installation checklist — migration 0016. One row
    per category; `allowVideo: false` on "location" is the one row that

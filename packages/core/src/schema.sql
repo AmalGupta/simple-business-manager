@@ -57,6 +57,13 @@ CREATE TABLE sites (
   is_confirmed  TEXT,          -- NULL = unreviewed, 'Y' = confirmed valid, 'N' = confirmed not a real site
   address       TEXT,
   poc_name      TEXT,          -- point of contact
+  house_no      TEXT,
+  sector        TEXT,
+  city          TEXT,
+  poc_contact_number TEXT,
+  assigned_by   TEXT,
+  referred_by   TEXT,
+  site_location TEXT,          -- lat,lng or map pin captured at intake
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   -- migration 0012: admin/superadmin-editable, ISO date. Drives the missed
   -- red highlight on the Sites list and the staff-facing banner.

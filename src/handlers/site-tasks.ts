@@ -52,11 +52,12 @@ export async function handleListOpenSiteTasks(request: Request, env: Env): Promi
   return json(await listOpenSiteTasks(env.DB, forUserId));
 }
 
-/** The handoff picker after marking a stage done — every still-unassigned stage at that site. Session required, no role restriction (both roles need this list). */
+/** The handoff picker after marking a stage done — every still-unassigned stage at that site. Staff never see admin-only intake stages. */
 export async function handleListUnassignedSiteTasks(request: Request, env: Env, siteId: string): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  return json(await listUnassignedSiteTasksForSite(env.DB, siteId));
+  const excludeStaffHidden = session.user_role === "staff";
+  return json(await listUnassignedSiteTasksForSite(env.DB, siteId, excludeStaffHidden));
 }
 
 /**
@@ -75,6 +76,10 @@ export async function handlePatchSiteTask(request: Request, env: Env, id: string
 
   const task = await getSiteTaskById(env.DB, id);
   if (!task) return json({ error: "not found" }, 404);
+
+  if (session.user_role === "staff" && task.category === "admin_intake") {
+    return json({ error: "forbidden" }, 403);
+  }
 
   let body: unknown;
   try {

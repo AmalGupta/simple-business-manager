@@ -263,13 +263,28 @@ export async function handlePostSite(request: Request, env: Env): Promise<Respon
     return json({ error: "invalid JSON body" }, 400);
   }
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
-  const name = typeof record.name === "string" ? record.name.trim() : "";
-  if (!name) return json({ error: "name is required" }, 400);
-  const address = typeof record.address === "string" && record.address.trim() ? record.address.trim() : null;
-  const pocName = typeof record.poc_name === "string" && record.poc_name.trim() ? record.poc_name.trim() : null;
+  const str = (key: string) => {
+    const v = record[key];
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  };
+  const details = {
+    name: str("name"),
+    house_no: str("house_no"),
+    sector: str("sector"),
+    city: str("city"),
+    address: str("address"),
+    poc_name: str("poc_name"),
+    poc_contact_number: str("poc_contact_number"),
+    assigned_by: str("assigned_by"),
+    referred_by: str("referred_by"),
+    site_location: str("site_location"),
+  };
+  if (!details.name && !details.house_no && !details.sector && !details.city) {
+    return json({ error: "Provide at least H.No, sector, or city" }, 400);
+  }
 
   const assignCreator = session.user_role === "staff" ? session.user_id : null;
-  const site = await createSite(env.DB, name, address, pocName, session.user_id, assignCreator);
+  const site = await createSite(env.DB, details, session.user_id, assignCreator);
   return json(site, 201);
 }
 

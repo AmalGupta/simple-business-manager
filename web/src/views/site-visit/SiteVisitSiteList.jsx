@@ -4,7 +4,6 @@ import { t } from "../../theme.js";
 import { fetchConfirmedSites } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
-import { AddSiteModal } from "../sites/AddSiteModal.jsx";
 
 /* Entry point for the "Site Visit" home tile — pick a site, then a
    category. Complaints use ComplaintsHomeView instead. Reuses
@@ -13,21 +12,12 @@ import { AddSiteModal } from "../sites/AddSiteModal.jsx";
 export function SiteVisitSiteList({
   onBack,
   onSelectSite,
-  onSiteCreated,
+  onAddSite,
   title = "Site Visit",
   prompt = "Which site are you at?",
   addLabel = "Add new site",
 }) {
   const [sites, setSites] = useState(null);
-  const [showAddModal, setShowAddModal] = useState(false);
-
-  const reload = () =>
-    fetchConfirmedSites()
-      .then((data) => setSites(data))
-      .catch((err) => {
-        console.error("[sbm] failed to load sites for site visit", err);
-        setSites([]);
-      });
 
   useEffect(() => {
     let cancelled = false;
@@ -49,9 +39,9 @@ export function SiteVisitSiteList({
       <BackLink onClick={onBack}>Back</BackLink>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5rem", gap: 12 }}>
         <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>{title}</h1>
-        {onSiteCreated && (
+        {onAddSite && (
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={onAddSite}
             style={{
               flexShrink: 0,
               display: "flex",
@@ -106,18 +96,6 @@ export function SiteVisitSiteList({
             </button>
           ))}
         </Card>
-      )}
-
-      {showAddModal && onSiteCreated && (
-        <AddSiteModal
-          onClose={() => setShowAddModal(false)}
-          onCreate={async (name, address, pocName) => {
-            const site = await onSiteCreated(name, address, pocName);
-            setShowAddModal(false);
-            await reload();
-            return site;
-          }}
-        />
       )}
     </div>
   );

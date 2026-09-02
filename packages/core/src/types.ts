@@ -231,6 +231,9 @@ export type WorkflowCategory =
   | "handover"
   | "billing_delivery";
 
+/** Staff must not see tiles, lists, or assignments in these categories — admin-only intake. */
+export const STAFF_HIDDEN_WORKFLOW_CATEGORIES: readonly WorkflowCategory[] = ["admin_intake"];
+
 export interface WorkflowStage {
   id: string;
   label: string;

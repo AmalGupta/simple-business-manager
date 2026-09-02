@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Image, Video, Mic, Check } from "lucide-react";
 import { t } from "../../theme.js";
 import { INSTALLATION_UPDATE_CATEGORIES } from "../../lib/constants.js";
-import { fetchInstallation, postInstallationUpdate, postInstallationUpdateMedia } from "../../lib/api.js";
+import { fetchInstallation, fetchSiteTimeline, postInstallationUpdate, postInstallationUpdateMedia } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { VoiceNoteModal } from "../sites/VoiceNoteModal.jsx";
+import { SiteTimeline } from "../sites/SiteTimeline.jsx";
 
 const actionButtonStyle = (busy) => ({
   display: "flex",
@@ -23,20 +24,46 @@ const actionButtonStyle = (busy) => ({
   whiteSpace: "nowrap",
 });
 
+const tableHeaderStyle = {
+  fontFamily: t.label,
+  fontSize: 10,
+  fontWeight: 700,
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  color: t.edge2,
+};
+
+function rowStatus(current) {
+  if (!current?.voice_note_call_id) return { label: "—", complete: false, started: false };
+  if (current.media_count > 0) return { label: "Done", complete: true, started: true };
+  return { label: "In progress", complete: false, started: true };
+}
+
+function filterTimelineForCategory(timeline, updates, categoryKey) {
+  if (!timeline || !updates) return [];
+  const updateIds = new Set(updates.filter((u) => u.category === categoryKey).map((u) => u.id));
+  const callIds = new Set(
+    updates.filter((u) => u.category === categoryKey && u.voice_note_call_id).map((u) => u.voice_note_call_id)
+  );
+  return timeline.filter((entry) => {
+    if (entry.type === "call" && callIds.has(entry.id)) return true;
+    if (entry.type === "media" && entry.ref?.installation_update_id && updateIds.has(entry.ref.installation_update_id)) {
+      return true;
+    }
+    return false;
+  });
+}
+
 /*
- * The 6-row field checklist for one installation — see docs/BUILD... plan
- * notes on the staff site-visit workflow. Rule (from the brainstorm sketch):
- * a row shows only "Add Voice Note" until one is recorded; once it has a
- * voice note, Photo/Video buttons appear (Video only if the category
- * allows it — the "Location" row is photo-only); once it has a voice note
- * PLUS at least one photo/video, the row is "complete" — this is a
- * read-time computation (voice_note_call_id + media_count from the API),
- * not a stored status. Completion is shown with an accent border + check,
- * not a tinted fill, per docs/DESIGN_LANGUAGE.md's "flat or it's wrong"
- * surface rule (tints were explicitly retired).
+ * Compact 6-row checklist table + category timeline panel. Voice notes still
+ * flow through the calls/STT pipeline and appear on the site timeline
+ * (transcript admin-only on the sites page). Each row's panel reuses
+ * SiteTimeline filtered to that category's installation_updates.
  */
-export function InstallationScreen({ installation, onBack }) {
+export function InstallationScreen({ installation, onBack, onHome }) {
   const [updates, setUpdates] = useState(null);
+  const [timeline, setTimeline] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState(INSTALLATION_UPDATE_CATEGORIES[0].key);
   const [recordingCategory, setRecordingCategory] = useState(null);
   const [busyUpdateId, setBusyUpdateId] = useState(null);
   const photoTargetRef = useRef(null);
@@ -46,23 +73,36 @@ export function InstallationScreen({ installation, onBack }) {
 
   const load = () => {
     fetchInstallation(installation.id)
-      .then((data) => setUpdates(data.updates))
+      .then((data) => {
+        setUpdates(data.updates);
+        return fetchSiteTimeline(data.installation.site_id);
+      })
+      .then((entries) => setTimeline(entries))
       .catch((err) => {
         console.error("[sbm] failed to load installation", err);
         setUpdates([]);
+        setTimeline([]);
       });
   };
 
   useEffect(load, [installation.id]);
 
-  // Updates come back oldest-first, so the last one written per category
-  // (a repeat visit creates a new row rather than editing the old one) is
-  // the current state of that checklist row.
   const latestByCategory = useMemo(() => {
     const m = new Map();
     for (const u of updates ?? []) m.set(u.category, u);
     return m;
   }, [updates]);
+
+  const selectedMeta = INSTALLATION_UPDATE_CATEGORIES.find((c) => c.key === selectedCategory);
+  const current = latestByCategory.get(selectedCategory);
+  const hasVoice = Boolean(current?.voice_note_call_id);
+  const complete = hasVoice && current.media_count > 0;
+  const busy = busyUpdateId === current?.id;
+
+  const categoryTimeline = useMemo(
+    () => filterTimelineForCategory(timeline, updates, selectedCategory),
+    [timeline, updates, selectedCategory]
+  );
 
   const handleVoiceNote = async (category, blob, fileName) => {
     await postInstallationUpdate(installation.id, category, blob, fileName);
@@ -87,8 +127,31 @@ export function InstallationScreen({ installation, onBack }) {
 
   return (
     <div>
-      <BackLink onClick={onBack}>Back</BackLink>
-      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>{installation.label}</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: "1rem" }}>
+        <BackLink onClick={onBack} style={{ marginBottom: 0 }}>
+          Back
+        </BackLink>
+        {onHome && (
+          <button
+            type="button"
+            onClick={onHome}
+            style={{
+              padding: 0,
+              border: "none",
+              background: "none",
+              cursor: "pointer",
+              color: t.accent,
+              fontSize: 13,
+              fontWeight: 600,
+            }}
+          >
+            Home
+          </button>
+        )}
+      </div>
+      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
+        {installation.label}
+      </h1>
 
       <input
         ref={photoInputRef}
@@ -116,37 +179,96 @@ export function InstallationScreen({ installation, onBack }) {
       {updates === null ? (
         <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
       ) : (
-        INSTALLATION_UPDATE_CATEGORIES.map((cat) => {
-          const current = latestByCategory.get(cat.key);
-          const hasVoice = Boolean(current?.voice_note_call_id);
-          const complete = hasVoice && current.media_count > 0;
-          const busy = busyUpdateId === current?.id;
-
-          return (
-            <Card
-              key={cat.key}
+        <div className="sbm-install-grid">
+          <Card style={{ padding: 0, alignSelf: "start" }}>
+            <div
               style={{
-                marginBottom: 10,
-                border: complete ? `2px solid ${t.accent}` : `1px solid ${t.frost}`,
+                display: "grid",
+                gridTemplateColumns: "minmax(0, 1fr) max-content",
+                gap: 12,
+                padding: "10px 14px",
+                borderBottom: `1px solid ${t.frost}`,
+                ...tableHeaderStyle,
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: hasVoice ? 10 : 0 }}>
-                <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 500, color: t.edge }}>{cat.label}</span>
-                {complete && <Check size={18} color={t.accent} />}
-              </div>
+              <span>Section</span>
+              <span>Status</span>
+            </div>
+            {INSTALLATION_UPDATE_CATEGORIES.map((cat) => {
+              const row = latestByCategory.get(cat.key);
+              const { label: status, complete: rowComplete } = rowStatus(row);
+              const selected = selectedCategory === cat.key;
 
+              return (
+                <button
+                  key={cat.key}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat.key)}
+                  aria-pressed={selected}
+                  style={{
+                    all: "unset",
+                    boxSizing: "border-box",
+                    cursor: "pointer",
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) max-content",
+                    gap: 12,
+                    alignItems: "center",
+                    width: "100%",
+                    padding: "10px 14px",
+                    borderTop: `1px solid ${t.frost}`,
+                    background: selected ? "color-mix(in srgb, var(--color-accent) 10%, white)" : t.white,
+                    fontFamily: t.body,
+                    textAlign: "left",
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: selected ? 600 : 400,
+                      color: t.edge,
+                      lineHeight: 1.35,
+                      minWidth: 0,
+                    }}
+                  >
+                    {cat.label}
+                  </span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      fontSize: 12,
+                      color: rowComplete ? t.accent : t.edge2,
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {rowComplete && <Check size={14} />}
+                    {status}
+                  </span>
+                </button>
+              );
+            })}
+          </Card>
+
+          <div>
+            <h2 style={{ fontFamily: t.display, fontSize: 17, fontWeight: 500, color: t.edge, margin: "0 0 12px" }}>
+              {selectedMeta?.label}
+            </h2>
+
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
               {!hasVoice && (
-                <button onClick={() => setRecordingCategory(cat.key)} style={actionButtonStyle(false)}>
+                <button type="button" onClick={() => setRecordingCategory(selectedCategory)} style={actionButtonStyle(false)}>
                   <Mic size={15} /> Add voice note
                 </button>
               )}
-
               {hasVoice && (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: t.edge2 }}>
+                <>
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: t.edge2, minHeight: 40 }}>
                     <Mic size={13} /> Voice note recorded
                   </span>
                   <button
+                    type="button"
                     disabled={busy}
                     onClick={() => {
                       photoTargetRef.current = current.id;
@@ -156,8 +278,9 @@ export function InstallationScreen({ installation, onBack }) {
                   >
                     <Image size={15} /> Add photo
                   </button>
-                  {cat.allowVideo && (
+                  {selectedMeta?.allowVideo && (
                     <button
+                      type="button"
                       disabled={busy}
                       onClick={() => {
                         videoTargetRef.current = current.id;
@@ -168,20 +291,30 @@ export function InstallationScreen({ installation, onBack }) {
                       <Video size={15} /> Add video
                     </button>
                   )}
-                </div>
+                </>
               )}
-
               {complete && (
                 <button
-                  onClick={() => setRecordingCategory(cat.key)}
-                  style={{ all: "unset", cursor: "pointer", display: "block", marginTop: 8, fontSize: 12, fontWeight: 600, color: t.accent }}
+                  type="button"
+                  onClick={() => setRecordingCategory(selectedCategory)}
+                  style={{ all: "unset", cursor: "pointer", fontSize: 12, fontWeight: 600, color: t.accent, minHeight: 40, display: "flex", alignItems: "center" }}
                 >
                   Log another update →
                 </button>
               )}
-            </Card>
-          );
-        })
+            </div>
+
+            {timeline === null ? (
+              <p style={{ fontSize: 13, color: t.edge2 }}>Loading timeline…</p>
+            ) : categoryTimeline.length === 0 ? (
+              <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
+                <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>Nothing logged in this section yet.</p>
+              </Card>
+            ) : (
+              <SiteTimeline entries={categoryTimeline} canManage={false} onOpenCall={() => {}} />
+            )}
+          </div>
+        </div>
       )}
 
       {recordingCategory && (

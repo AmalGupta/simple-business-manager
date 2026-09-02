@@ -1,7 +1,7 @@
 import { ChevronLeft } from "lucide-react";
 import { t } from "../theme.js";
 
-export function BackLink({ onClick, children }) {
+export function BackLink({ onClick, children, style }) {
   return (
     <button
       onClick={onClick}
@@ -16,6 +16,7 @@ export function BackLink({ onClick, children }) {
         cursor: "pointer",
         color: t.edge2,
         fontSize: 13,
+        ...style,
       }}
     >
       <ChevronLeft size={16} /> {children}

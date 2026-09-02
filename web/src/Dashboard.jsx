@@ -1,7 +1,8 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { CalendarDays, MapPin } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { t } from "./theme.js";
 import { today, dayKey, isoDate, fmtDate } from "./lib/dates.js";
+import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./lib/constants.js";
 import { Card } from "./components/Card.jsx";
 import { BackLink } from "./components/BackLink.jsx";
 import { TileLabel } from "./components/TileLabel.jsx";
@@ -23,9 +24,13 @@ import { OpenTodosView } from "./views/calls/OpenTodosView.jsx";
 import { MyOpenTodosView } from "./views/calls/MyOpenTodosView.jsx";
 import { StaffDirectoryView } from "./views/staff/StaffDirectoryView.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
+import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
 import { SitesReviewView } from "./views/sites/SitesReviewView.jsx";
 import { SiteView } from "./views/sites/SiteView.jsx";
+import { PendingWorkView } from "./views/home/PendingWorkView.jsx";
+import { PendingWorkTile } from "./views/home/PendingWorkTile.jsx";
 import { MyScheduleView } from "./views/home/MyScheduleView.jsx";
+import { StaffScheduleTile } from "./views/home/StaffScheduleTile.jsx";
 import { SiteVisitSiteList } from "./views/site-visit/SiteVisitSiteList.jsx";
 import { SiteVisitCategoryGrid } from "./views/site-visit/SiteVisitCategoryGrid.jsx";
 import { InstallationListView } from "./views/site-visit/InstallationListView.jsx";
@@ -243,21 +248,12 @@ export default function SimpleBusinessManager() {
   /* "Add new site": create + refresh so scoped lists / SiteView can resolve
      the new record. Callers decide where to navigate afterward. */
   const createSiteAndRefresh = useCallback(
-    async (name, address, pocName) => {
-      const site = await postCreateSite(name, address, pocName);
+    async (details) => {
+      const site = await postCreateSite(details);
       await refreshSites();
       return site;
     },
     [refreshSites]
-  );
-
-  const onSiteCreated = useCallback(
-    async (name, address, pocName) => {
-      const site = await createSiteAndRefresh(name, address, pocName);
-      setView({ name: "site", site: site.name, from: { name: "sites-directory" }, autoEdit: true });
-      return site;
-    },
-    [createSiteAndRefresh]
   );
 
   const onAddEscalation = useCallback(async (text) => {
@@ -490,6 +486,12 @@ export default function SimpleBusinessManager() {
           .sbm-call-grid{display:grid;grid-template-columns:1.6fr 1fr;gap:1.5rem;align-items:start}
         }
 
+        /* Installation checklist — section table left, category timeline right. */
+        .sbm-install-grid{display:flex;flex-direction:column;gap:1.25rem}
+        @media (min-width:768px){
+          .sbm-install-grid{display:grid;grid-template-columns:minmax(280px,340px) 1fr;gap:1.25rem;align-items:start}
+        }
+
         .sbm-tooltip{
           position:absolute;bottom:100%;left:50%;
           transform:translateX(-50%) translateY(-4px);
@@ -589,7 +591,15 @@ export default function SimpleBusinessManager() {
       />
     );
 
-  if (view.name === "workflow-site-list")
+  if (view.name === "workflow-site-list") {
+    if (me.role === "staff" && STAFF_HIDDEN_WORKFLOW_CATEGORIES.includes(view.category)) {
+      return shell(
+        <div>
+          <BackLink onClick={() => setView(view.from ?? homeView)}>Back</BackLink>
+          <p style={{ fontSize: 14, color: t.edge2 }}>That category is not available for staff.</p>
+        </div>
+      );
+    }
     return shell(
       <WorkflowCategorySiteList
         tasks={openSiteTasks}
@@ -598,6 +608,7 @@ export default function SimpleBusinessManager() {
         onOpenSite={(site) => setView({ name: "site", site, from: view })}
       />
     );
+  }
 
   if (view.name === "calls")
     return shell(
@@ -657,12 +668,31 @@ export default function SimpleBusinessManager() {
           <AppHeader me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
         )}
         <SitesDirectoryView
-          onBack={() => setView(homeView)}
-          onOpenSite={(site) => setView({ name: "site", site, from: { name: "sites-directory" } })}
-          onSiteCreated={onSiteCreated}
-          isHome={me.role === "staff"}
+          onBack={() => setView(view.from ?? homeView)}
+          onOpenSite={(site) => setView({ name: "site", site, from: view })}
+          onAddSite={() => setView({ name: "add-site", from: view, afterCreate: { name: "site" } })}
+          isHome={me.role === "staff" && (!view.from || view.from.name === "staff-home")}
         />
       </>
+    );
+
+  if (view.name === "add-site")
+    return shell(
+      <AddSiteScreen
+        defaultAssignedBy={me?.name ?? ""}
+        onBack={() => setView(view.from ?? homeView)}
+        onCreate={createSiteAndRefresh}
+        onDone={(site) => {
+          const next = view.afterCreate?.name;
+          if (next === "site-visit-category") {
+            setView({ name: "site-visit-category", site, from: view.from ?? homeView });
+          } else if (next === "site-complaint") {
+            setView({ name: "site-complaint", site, from: view.from ?? homeView });
+          } else {
+            setView({ name: "site", site: site.name, from: view.from ?? homeView });
+          }
+        }}
+      />
     );
 
   if (view.name === "staff-directory") return shell(<StaffDirectoryView onBack={() => setView(homeView)} />);
@@ -672,11 +702,8 @@ export default function SimpleBusinessManager() {
       <>
         <AppHeader me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
 
-        {/* Four-tile grid matching the brainstorm sketch: Pending Work wraps
-            the existing "my call tasks" + workflow-category tiles under one
-            label rather than replacing them; To-Do/Calendar, Site Visit, and
-            Complaints are new entry points — see MyScheduleView and the
-            views/site-visit/ directory. */}
+        {/* Staff home tiles: Pending Work, To-Do / Calendar, Site Visit,
+            Complaints, and optional call todos when assigned. */}
         <div
           style={{
             display: "grid",
@@ -685,18 +712,15 @@ export default function SimpleBusinessManager() {
             marginBottom: "1.5rem",
           }}
         >
-          <button
-            onClick={() => setView({ name: "my-schedule", from: { name: "staff-home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label="To-Do / Calendar"
-          >
-            <Card tile>
-              <TileLabel action={<CalendarDays size={14} color={t.edge2} />}>To-Do / Calendar</TileLabel>
-              <div style={TILE_VALUE_ROW_STYLE}>
-                <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length + openSiteTasks.length}</span>
-              </div>
-            </Card>
-          </button>
+          <PendingWorkTile
+            count={openSiteTasks.length}
+            onOpen={() => setView({ name: "pending-work", from: { name: "staff-home" } })}
+          />
+
+          <StaffScheduleTile
+            count={myOpenTodos.length + openSiteTasks.length}
+            onOpen={() => setView({ name: "my-schedule", from: { name: "staff-home" } })}
+          />
 
           <button
             onClick={() => setView({ name: "site-visit-sites", from: { name: "staff-home" } })}
@@ -727,10 +751,6 @@ export default function SimpleBusinessManager() {
               </Card>
             </button>
           )}
-          <WorkflowTilesRow
-            tasks={openSiteTasks}
-            onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "staff-home" } })}
-          />
         </div>
 
         {openSiteTasks.length === 0 && myOpenTodos.length === 0 && (
@@ -738,12 +758,32 @@ export default function SimpleBusinessManager() {
         )}
 
         <button
-          onClick={() => setView({ name: "sites-directory" })}
+          onClick={() => setView({ name: "sites-directory", from: { name: "staff-home" } })}
           style={{ all: "unset", cursor: "pointer", fontSize: 13, fontWeight: 600, color: t.accent }}
         >
           All my sites →
         </button>
       </>
+    );
+
+  if (view.name === "pending-work")
+    return shell(
+      <PendingWorkView
+        tasks={openSiteTasks}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
+      />
+    );
+
+  if (view.name === "my-schedule")
+    return shell(
+      <MyScheduleView
+        todos={myOpenTodos}
+        siteTasks={openSiteTasks}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-schedule" } })}
+        onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
+      />
     );
 
   if (view.name === "my-open-todos")
@@ -757,17 +797,6 @@ export default function SimpleBusinessManager() {
       />
     );
 
-  if (view.name === "my-schedule")
-    return shell(
-      <MyScheduleView
-        todos={myOpenTodos}
-        siteTasks={openSiteTasks}
-        onBack={() => setView(view.from ?? homeView)}
-        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-schedule" } })}
-        onOpenSite={(site) => setView({ name: "site", site, from: { name: "my-schedule" } })}
-      />
-    );
-
   // --- Staff field workflow (migration 0016): site visit -> category ->
   // installation checklist, and the site-level complaint form. ---
 
@@ -776,11 +805,9 @@ export default function SimpleBusinessManager() {
       <SiteVisitSiteList
         onBack={() => setView(view.from ?? homeView)}
         onSelectSite={(site) => setView({ name: "site-visit-category", site, from: view })}
-        onSiteCreated={async (name, address, pocName) => {
-          const site = await createSiteAndRefresh(name, address, pocName);
-          setView({ name: "site-visit-category", site, from: view });
-          return site;
-        }}
+        onAddSite={() =>
+          setView({ name: "add-site", from: view, afterCreate: { name: "site-visit-category" } })
+        }
       />
     );
 
@@ -805,11 +832,7 @@ export default function SimpleBusinessManager() {
         addLabel="Add new site"
         onBack={() => setView(view.from ?? { name: "complaints-home", from: homeView })}
         onSelectSite={(site) => setView({ name: "site-complaint", site, from: view })}
-        onSiteCreated={async (name, address, pocName) => {
-          const site = await createSiteAndRefresh(name, address, pocName);
-          setView({ name: "site-complaint", site, from: view });
-          return site;
-        }}
+        onAddSite={() => setView({ name: "add-site", from: view, afterCreate: { name: "site-complaint" } })}
       />
     );
 
@@ -837,7 +860,13 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "installation")
-    return shell(<InstallationScreen installation={view.installation} onBack={() => setView(view.from ?? homeView)} />);
+    return shell(
+      <InstallationScreen
+        installation={view.installation}
+        onBack={() => setView(view.from ?? homeView)}
+        onHome={() => setView(homeView)}
+      />
+    );
 
   if (view.name === "site-complaint")
     return shell(

@@ -52,11 +52,12 @@ export async function fetchConfirmedSites() {
   return fetchJSON("/api/sites/confirmed");
 }
 
-export async function postCreateSite(name, address, pocName) {
+export async function postCreateSite(details) {
   const res = await fetch("/api/sites", {
     method: "POST",
-    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
-    body: JSON.stringify({ name, address: address || null, poc_name: pocName || null }),
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify(details),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

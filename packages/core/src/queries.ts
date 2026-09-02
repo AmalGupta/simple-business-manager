@@ -25,6 +25,15 @@ import type {
   UserRole,
   WorkflowCategory,
 } from "./types";
+import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./types";
+
+function staffHiddenCategorySql(alias = "workflow_stages.category"): { clause: string; binds: string[] } {
+  const placeholders = STAFF_HIDDEN_WORKFLOW_CATEGORIES.map(() => "?").join(", ");
+  return {
+    clause: `AND ${alias} NOT IN (${placeholders})`,
+    binds: [...STAFF_HIDDEN_WORKFLOW_CATEGORIES],
+  };
+}
 
 export interface NewCallInput {
   id: string;
@@ -688,10 +697,66 @@ export interface SiteRow {
   is_confirmed: "Y" | "N" | null;
   address: string | null;
   poc_name: string | null;
+  house_no: string | null;
+  sector: string | null;
+  city: string | null;
+  poc_contact_number: string | null;
+  assigned_by: string | null;
+  referred_by: string | null;
+  site_location: string | null;
   target_closure_date: string | null;
 }
 
-const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name, target_closure_date FROM sites`;
+export interface SiteIntakeDetails {
+  name?: string | null;
+  house_no?: string | null;
+  sector?: string | null;
+  city?: string | null;
+  address?: string | null;
+  poc_name?: string | null;
+  poc_contact_number?: string | null;
+  assigned_by?: string | null;
+  referred_by?: string | null;
+  site_location?: string | null;
+}
+
+const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name,
+  house_no, sector, city, poc_contact_number, assigned_by, referred_by, site_location,
+  target_closure_date FROM sites`;
+
+/** Display name for a new site — explicit name wins, else H.No + sector + city. */
+export function resolveSiteName(details: SiteIntakeDetails): string {
+  const explicit = details.name?.trim();
+  if (explicit) return explicit;
+  const parts = [details.house_no, details.sector, details.city].map((s) => s?.trim()).filter(Boolean);
+  return parts.join(", ") || "New site";
+}
+
+function composeSiteAddress(details: SiteIntakeDetails): string | null {
+  if (details.address?.trim()) return details.address.trim();
+  const parts = [
+    details.house_no?.trim() ? `H.No ${details.house_no.trim()}` : null,
+    details.sector?.trim() ? `Sector ${details.sector.trim()}` : null,
+    details.city?.trim() || null,
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join(", ") : null;
+}
+
+function normalizeIntake(details: SiteIntakeDetails) {
+  const trim = (s?: string | null) => (s?.trim() ? s.trim() : null);
+  return {
+    name: resolveSiteName(details),
+    house_no: trim(details.house_no),
+    sector: trim(details.sector),
+    city: trim(details.city),
+    address: composeSiteAddress(details),
+    poc_name: trim(details.poc_name),
+    poc_contact_number: trim(details.poc_contact_number),
+    assigned_by: trim(details.assigned_by),
+    referred_by: trim(details.referred_by),
+    site_location: trim(details.site_location),
+  };
+}
 
 /** All sites regardless of confirmation state — the review screen needs to see everything. */
 /**
@@ -715,7 +780,19 @@ export async function listSites(db: D1Database, forUserId?: string | null): Prom
   return results;
 }
 
-const SITE_PATCH_FIELDS = ["is_confirmed", "address", "poc_name", "target_closure_date"] as const;
+const SITE_PATCH_FIELDS = [
+  "is_confirmed",
+  "address",
+  "poc_name",
+  "house_no",
+  "sector",
+  "city",
+  "poc_contact_number",
+  "assigned_by",
+  "referred_by",
+  "site_location",
+  "target_closure_date",
+] as const;
 type SitePatchField = (typeof SITE_PATCH_FIELDS)[number];
 
 /**
@@ -743,13 +820,30 @@ export async function updateSite(
     const values = fields.map((f) => patch[f] ?? null);
     const statements = [db.prepare(`UPDATE sites SET ${setClause} WHERE id = ?`).bind(...values, id)];
 
-    const detailFields = fields.filter((f) => f === "address" || f === "poc_name");
+    const detailFields = fields.filter(
+      (f) =>
+        f === "address" ||
+        f === "poc_name" ||
+        f === "house_no" ||
+        f === "sector" ||
+        f === "city" ||
+        f === "poc_contact_number" ||
+        f === "assigned_by" ||
+        f === "referred_by" ||
+        f === "site_location"
+    );
     if (detailFields.length > 0) {
-      const labels = detailFields.map((f) => (f === "poc_name" ? "point of contact" : f)).join(", ");
+      const labels = detailFields.map((f) => {
+        if (f === "poc_name") return "point of contact";
+        if (f === "poc_contact_number") return "contact number";
+        if (f === "house_no") return "H.No";
+        if (f === "site_location") return "site location";
+        return f.replace(/_/g, " ");
+      });
       statements.push(
         db
           .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
-          .bind(crypto.randomUUID(), id, actorUserId ?? null, `${labels[0].toUpperCase()}${labels.slice(1)} updated`)
+          .bind(crypto.randomUUID(), id, actorUserId ?? null, `${labels.join(", ").replace(/^./, (c) => c.toUpperCase())} updated`)
       );
     }
 
@@ -788,24 +882,54 @@ export async function updateSite(
  */
 export async function createSite(
   db: D1Database,
-  name: string,
-  address: string | null,
-  pocName: string | null,
+  details: SiteIntakeDetails,
   actorUserId?: string | null,
   assignCreatorUserId?: string | null
 ): Promise<SiteRow> {
-  const trimmed = name.trim();
-  const existing = await db.prepare(`${SITE_ROW_SELECT} WHERE name = ?`).bind(trimmed).first<SiteRow>();
+  const intake = normalizeIntake(details);
+  const existing = await db.prepare(`${SITE_ROW_SELECT} WHERE name = ?`).bind(intake.name).first<SiteRow>();
   let site: SiteRow;
   if (existing) {
-    const updated = await updateSite(db, existing.id, { is_confirmed: "Y", address, poc_name: pocName }, actorUserId ?? null);
+    const updated = await updateSite(
+      db,
+      existing.id,
+      {
+        is_confirmed: "Y",
+        address: intake.address,
+        poc_name: intake.poc_name,
+        house_no: intake.house_no,
+        sector: intake.sector,
+        city: intake.city,
+        poc_contact_number: intake.poc_contact_number,
+        assigned_by: intake.assigned_by,
+        referred_by: intake.referred_by,
+        site_location: intake.site_location,
+      },
+      actorUserId ?? null
+    );
     site = updated ?? existing;
   } else {
     const id = crypto.randomUUID();
     await db.batch([
       db
-        .prepare(`INSERT INTO sites (id, name, is_confirmed, address, poc_name) VALUES (?, ?, 'Y', ?, ?)`)
-        .bind(id, trimmed, address, pocName),
+        .prepare(
+          `INSERT INTO sites (id, name, is_confirmed, address, poc_name, house_no, sector, city,
+           poc_contact_number, assigned_by, referred_by, site_location)
+           VALUES (?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          id,
+          intake.name,
+          intake.address,
+          intake.poc_name,
+          intake.house_no,
+          intake.sector,
+          intake.city,
+          intake.poc_contact_number,
+          intake.assigned_by,
+          intake.referred_by,
+          intake.site_location
+        ),
       db
         .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, 'Site added')`)
         .bind(crypto.randomUUID(), id, actorUserId ?? null),
@@ -1564,6 +1688,7 @@ export async function getSiteTimeline(
         .prepare(
           `SELECT calls.id AS id, calls.recorded_at AS created_at, calls.summary AS summary,
                   calls.call_type AS call_type, calls.recorded_for_site_id AS recorded_for_site_id,
+                  calls.installation_update_id AS installation_update_id,
                   transcripts.transcript AS transcript,
                   users.name AS actor_name
            FROM call_sites
@@ -1579,6 +1704,7 @@ export async function getSiteTimeline(
           summary: string | null;
           call_type: CallType | null;
           recorded_for_site_id: string | null;
+          installation_update_id: string | null;
           transcript: string | null;
           actor_name: string | null;
         }>(),
@@ -1586,6 +1712,7 @@ export async function getSiteTimeline(
         .prepare(
           `SELECT site_media.id AS id, site_media.created_at AS created_at, site_media.media_type AS media_type,
                   site_media.r2_key AS r2_key, site_media.content_type AS content_type, site_media.caption AS caption,
+                  site_media.installation_update_id AS installation_update_id,
                   users.name AS actor_name
            FROM site_media
            JOIN users ON users.id = site_media.uploaded_by
@@ -1599,6 +1726,7 @@ export async function getSiteTimeline(
           r2_key: string;
           content_type: string;
           caption: string | null;
+          installation_update_id: string | null;
           actor_name: string;
         }>(),
       db
@@ -1654,6 +1782,7 @@ export async function getSiteTimeline(
       ref: {
         call_id: c.id,
         is_voice_memo: isVoiceMemo,
+        installation_update_id: c.installation_update_id,
         ...(includeCallDetails && isVoiceMemo
           ? { transcript: c.transcript ?? null, todos: todosByVoiceMemoCall.get(c.id) ?? [] }
           : {}),
@@ -1668,7 +1797,12 @@ export async function getSiteTimeline(
       created_at: m.created_at,
       actor_name: m.actor_name,
       summary: m.caption ?? (m.media_type === "photo" ? "Photo added" : "Video added"),
-      ref: { media_id: m.id, media_type: m.media_type, content_type: m.content_type },
+      ref: {
+        media_id: m.id,
+        media_type: m.media_type,
+        content_type: m.content_type,
+        installation_update_id: m.installation_update_id,
+      },
     });
   }
 
@@ -1769,20 +1903,29 @@ export async function listSiteTasks(db: D1Database, siteId: string): Promise<Sit
  */
 export async function listOpenSiteTasks(db: D1Database, forUserId?: string | null): Promise<SiteTaskRow[]> {
   const scoped = forUserId ? `AND site_tasks.assigned_to_user_id = ?` : "";
+  const hidden = forUserId ? staffHiddenCategorySql() : { clause: "", binds: [] as string[] };
   const stmt = db.prepare(
-    `${SITE_TASK_ROW_SELECT} WHERE site_tasks.status = 'assigned' ${scoped}
+    `${SITE_TASK_ROW_SELECT} WHERE site_tasks.status = 'assigned' ${scoped} ${hidden.clause}
      ORDER BY (site_tasks.due_date IS NULL) ASC, site_tasks.due_date ASC`
   );
-  const { results } = await (forUserId ? stmt.bind(forUserId) : stmt).all<SiteTaskRow>();
+  const binds = forUserId ? [forUserId, ...hidden.binds] : hidden.binds;
+  const bound = binds.length ? stmt.bind(...binds) : stmt;
+  const { results } = await bound.all<SiteTaskRow>();
   return results;
 }
 
 /** Every still-unassigned stage at one site — the handoff picker shown after marking a stage done. */
-export async function listUnassignedSiteTasksForSite(db: D1Database, siteId: string): Promise<SiteTaskRow[]> {
-  const { results } = await db
-    .prepare(`${SITE_TASK_ROW_SELECT} WHERE site_tasks.site_id = ? AND site_tasks.status = 'unassigned'`)
-    .bind(siteId)
-    .all<SiteTaskRow>();
+export async function listUnassignedSiteTasksForSite(
+  db: D1Database,
+  siteId: string,
+  excludeStaffHidden = false
+): Promise<SiteTaskRow[]> {
+  const hidden = excludeStaffHidden ? staffHiddenCategorySql() : { clause: "", binds: [] as string[] };
+  const stmt = db.prepare(
+    `${SITE_TASK_ROW_SELECT} WHERE site_tasks.site_id = ? AND site_tasks.status = 'unassigned' ${hidden.clause}`
+  );
+  const bound = stmt.bind(siteId, ...hidden.binds);
+  const { results } = await bound.all<SiteTaskRow>();
   return results;
 }
 
