@@ -174,6 +174,8 @@ Cron notes: `*/15` is the bucket scan. `30 1 * * *` is UTC = 07:00 IST, the dige
 | `SARVAM_API_KEY` | pipeline | Sarvam subscription key (`api-subscription-key` header) |
 | `SARVAM_WEBHOOK_TOKEN` | pipeline | Token you generate; validated on every callback |
 | `ANTHROPIC_API_KEY` | pipeline | Claude API key |
+| `GOOGLE_DRIVE_CLIENT_EMAIL` | pipeline | Google SA `client_email` — JWT `iss` for Drive API |
+| `GOOGLE_DRIVE_PRIVATE_KEY` | pipeline | Google SA `private_key` PEM — signs JWTs at request time |
 | `RESEND_API_KEY` | pipeline | Digest email delivery |
 | `CLOUDFLARE_API_TOKEN` | GitHub only | Workers Scripts:Edit, D1:Edit, R2:Edit |
 | `CLOUDFLARE_ACCOUNT_ID` | GitHub only | Account identifier |

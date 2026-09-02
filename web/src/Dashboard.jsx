@@ -619,6 +619,10 @@ export default function SimpleBusinessManager() {
         onToggle={onToggle}
         onPark={onPark}
         busyIds={busyIds}
+        onCallsChanged={async () => {
+          const callsData = await fetchCalls();
+          setCalls(callsData);
+        }}
       />
     );
 

@@ -12,7 +12,10 @@
     "SARVAM_LANGUAGE_CODE": "unknown",
     "ANTHROPIC_MODEL": "claude-sonnet-5",
     "ANTHROPIC_HAIKU_MODEL": "claude-haiku-4-5-20251001",
-    "INGEST_PREFIX": "inbox/"
+    "INGEST_PREFIX": "inbox/",
+    "GOOGLE_DRIVE_CALLS_FOLDER_ID": "1BVvqN0a_e8mb4S50yMb9X-XwKEfxO5RR",
+    "GOOGLE_DRIVE_ARCHIVE_FOLDER_ID": "12v7xURXHMtL20fjOVLEzmMmXdmcCYhXg",
+    "PUBLIC_BASE_URL": "https://sbm-pipeline.gupta-amal01.workers.dev"
   },
 
   "assets": {
@@ -54,10 +57,13 @@
       "persist": true,
       "head_sampling_rate": 1
     }
+  },
+
+  // Drive Calls-folder poller — only ingests when app_settings.drive_poll_enabled is on.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
   }
 
-  // staging / production `env` blocks, the `*/15` cron bucket-scanner trigger,
-  // and the digest-email vars are documented in docs/SCAFFOLDING.md §2-3 but
-  // are explicitly out of scope for this milestone — see the "Not in this
-  // milestone" list in docs/BUILD_BRIEF.md. Add them when that work starts.
+  // Digest-email vars are documented in docs/SCAFFOLDING.md §2-3 but remain
+  // out of scope — see the "Not in this milestone" list in docs/BUILD_BRIEF.md.
 }

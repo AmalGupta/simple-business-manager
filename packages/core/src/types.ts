@@ -1,6 +1,6 @@
 // Types matching the D1 schema — see schema.sql and docs/SCAFFOLDING.md §4.
 
-export type CallSource = "android" | "ios";
+export type CallSource = "android" | "ios" | "drive";
 export type SttStatus = "pending" | "transcription_in_progress" | "transcribed" | "extracted" | "failed";
 /** Free text — a staff name, or the literal "self" for the business owner's own commitments. */
 export type TodoOwner = string;
@@ -44,6 +44,9 @@ export interface Call {
   uploaded_by_user_id: string | null;
   /** migration 0016: set when this call is the required voice note for one installation checklist row. */
   installation_update_id: string | null;
+
+  /** migration 0020: Google Drive file id when ingested by the Calls-folder poller. */
+  drive_file_id: string | null;
 
   created_at: string;
 }

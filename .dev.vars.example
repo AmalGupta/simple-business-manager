@@ -23,3 +23,17 @@ PIN_PEPPER=replace-with-openssl-rand-hex-32
 # encryptPin/decryptPin. Deliberately separate from PIN_PEPPER, which stays
 # one-way. Generate: python3 -c "import secrets,base64;print(base64.b64encode(secrets.token_bytes(32)).decode())"
 PIN_ENCRYPTION_KEY=replace-with-32-random-bytes-base64
+
+# Google Drive service account (JWT → OAuth access token). Remote: wrangler
+# secret put GOOGLE_DRIVE_CLIENT_EMAIL / GOOGLE_DRIVE_PRIVATE_KEY. Store only
+# client_email + private_key — never commit the downloaded JSON key file.
+# private_key may use literal \n for PEM newlines.
+GOOGLE_DRIVE_CLIENT_EMAIL=sbm-drivesync@your-project.iam.gserviceaccount.com
+GOOGLE_DRIVE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+
+# Drive Calls folder + public origin for cron webhook callbacks (manual
+# "Get latest" uses the request origin instead). Folder id is also in
+# wrangler.jsonc vars; override here for local if needed.
+GOOGLE_DRIVE_CALLS_FOLDER_ID=1BVvqN0a_e8mb4S50yMb9X-XwKEfxO5RR
+GOOGLE_DRIVE_ARCHIVE_FOLDER_ID=12v7xURXHMtL20fjOVLEzmMmXdmcCYhXg
+PUBLIC_BASE_URL=http://localhost:8787

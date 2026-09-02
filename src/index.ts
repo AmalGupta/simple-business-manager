@@ -58,6 +58,11 @@ import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostS
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
 import {
+  handleGetDrivePollSettings,
+  handlePatchDrivePollSettings,
+  handlePostDrivePoll,
+} from "./handlers/drive-poll";
+import {
   handleGetInstallation,
   handleGetInstallations,
   handleGetMaterialShortages,
@@ -68,6 +73,8 @@ import {
   handlePostSiteComplaint,
 } from "./handlers/installation";
 import { assertSiteMembership, requireSession } from "./lib/auth";
+import { getDrivePollSettings } from "@sbm/core";
+import { pollDriveCalls } from "./lib/drive-calls-poller";
 
 export interface Env {
   ENVIRONMENT: string;
@@ -90,6 +97,16 @@ export interface Env {
   PIN_PEPPER?: string;
   /** AES-256-GCM key (base64, 32 raw bytes) for reversible PIN storage — see src/lib/auth.ts encryptPin/decryptPin. */
   PIN_ENCRYPTION_KEY?: string;
+  /** Google service-account email for Drive API (JWT iss). */
+  GOOGLE_DRIVE_CLIENT_EMAIL?: string;
+  /** Google service-account private_key PEM (literal \\n ok). Used to sign JWTs at request time. */
+  GOOGLE_DRIVE_PRIVATE_KEY?: string;
+  /** Shared Drive "Calls" folder id. */
+  GOOGLE_DRIVE_CALLS_FOLDER_ID?: string;
+  /** Folder polled files move into after successful R2 ingest (e.g. Calls/Archived). */
+  GOOGLE_DRIVE_ARCHIVE_FOLDER_ID?: string;
+  /** Public origin for Sarvam webhook callbacks (cron has no request URL). */
+  PUBLIC_BASE_URL?: string;
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -437,6 +454,35 @@ export default {
       return handlePatchMaterialShortage(request, env, materialShortageMatch[1]);
     }
 
+    if (url.pathname === "/api/admin/drive-poll" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetDrivePollSettings(request, env);
+    }
+    if (url.pathname === "/api/admin/drive-poll" && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePatchDrivePollSettings(request, env);
+    }
+    if (url.pathname === "/api/admin/drive-poll" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostDrivePoll(request, env, ctx);
+    }
+
     return env.ASSETS.fetch(request);
+  },
+
+  async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    const settings = await getDrivePollSettings(env.DB);
+    if (!settings.enabled) {
+      console.log("[drive-poll] skipped — permanent polling off");
+      return;
+    }
+    try {
+      const result = await pollDriveCalls(env, ctx);
+      console.log(
+        `[drive-poll] ingested=${result.ingested.length} scanned=${result.scanned} skipped=${result.skippedExisting} errors=${result.errors.length}`
+      );
+    } catch (err) {
+      console.error("[drive-poll] failed:", String(err));
+    }
   },
 };

@@ -40,7 +40,8 @@ export function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0, s
           </div>
         </div>
         <div style={{ fontSize: 13, color: t.edge2, marginTop: 2 }}>
-          {fmtDate(call.recorded_at)} · {Math.round(call.duration_s / 60)} min
+          {fmtDate(call.recording_date || call.recorded_at)}
+          {call.duration_s != null ? ` · ${Math.round(call.duration_s / 60)} min` : ""}
         </div>
       </button>
 

@@ -9,3 +9,7 @@ web/dist/
 .DS_Store
 e2e/playwright-report/
 e2e/test-results/
+# Google service-account key downloads — use wrangler secret put / .dev.vars instead
+*-fcffde67b0be.json
+storied-surface-*.json
+**/service-account*.json

@@ -440,3 +440,35 @@ export async function patchMaterialShortage(id) {
   if (!res.ok) throw new Error(`PATCH /api/material-shortages/${id} → ${res.status}`);
   return res.json();
 }
+
+/** Drive Calls-folder poller — admin Calls page controls. */
+export async function fetchDrivePollSettings() {
+  return fetchJSON("/api/admin/drive-poll");
+}
+
+export async function patchDrivePollSettings(enabled) {
+  const res = await fetch("/api/admin/drive-poll", {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    credentials: "same-origin",
+    body: JSON.stringify({ enabled: Boolean(enabled) }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/admin/drive-poll → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function postDrivePoll() {
+  const res = await fetch("/api/admin/drive-poll", {
+    method: "POST",
+    headers: { "X-SBM-Key": SBM_KEY },
+    credentials: "same-origin",
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/admin/drive-poll → ${res.status}`);
+  }
+  return res.json();
+}

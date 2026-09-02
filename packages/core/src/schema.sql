@@ -12,10 +12,13 @@ CREATE TABLE calls (
   id              TEXT PRIMARY KEY,
   r2_key          TEXT NOT NULL UNIQUE,
   client_id       TEXT REFERENCES clients(id),
-  source          TEXT NOT NULL,        -- 'android' | 'ios'
+  source          TEXT NOT NULL,        -- 'android' | 'ios' | 'drive'
   recorded_at     TEXT,                 -- when this row was uploaded (not necessarily when the call happened)
   recording_date  TEXT,                 -- the recorder's own filename timestamp, if the filename matched (e.g. AUDIO-2026-08-20-22-05-33.m4a); NULL otherwise
   duration_s      INTEGER,
+
+  -- migration 0020: Google Drive file id for Calls-folder poller idempotency
+  drive_file_id   TEXT,
 
   stt_job_id      TEXT,
   stt_status      TEXT NOT NULL DEFAULT 'pending',
@@ -333,3 +336,15 @@ CREATE TABLE material_shortages (
 );
 CREATE INDEX idx_material_shortages_status ON material_shortages(status);
 CREATE INDEX idx_material_shortages_site ON material_shortages(site_id);
+
+-- migration 0020: feature toggles (Drive poll enabled, last-poll metadata)
+CREATE TABLE app_settings (
+  key         TEXT PRIMARY KEY,
+  value       TEXT NOT NULL,
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE UNIQUE INDEX idx_calls_drive_file_id
+  ON calls(drive_file_id)
+  WHERE drive_file_id IS NOT NULL;
+

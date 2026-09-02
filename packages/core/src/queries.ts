@@ -47,13 +47,17 @@ export interface NewCallInput {
   uploadedByUserId?: string | null;
   /** Set when this call is the required voice note for one installation checklist row — see src/handlers/installation.ts. */
   installationUpdateId?: string | null;
+  /** Linked caller from Drive filename (or later enrichment). */
+  clientId?: string | null;
+  /** Google Drive file id — unique when set (migration 0020). */
+  driveFileId?: string | null;
 }
 
 export async function insertCall(db: D1Database, input: NewCallInput): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO calls (id, r2_key, source, recorded_at, recording_date, duration_s, stt_status, recorded_for_site_id, uploaded_by_user_id, installation_update_id)
-       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+      `INSERT INTO calls (id, r2_key, source, recorded_at, recording_date, duration_s, stt_status, recorded_for_site_id, uploaded_by_user_id, installation_update_id, client_id, drive_file_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)`
     )
     .bind(
       input.id,
@@ -64,7 +68,9 @@ export async function insertCall(db: D1Database, input: NewCallInput): Promise<v
       input.durationS,
       input.recordedForSiteId ?? null,
       input.uploadedByUserId ?? null,
-      input.installationUpdateId ?? null
+      input.installationUpdateId ?? null,
+      input.clientId ?? null,
+      input.driveFileId ?? null
     )
     .run();
 }
@@ -72,6 +78,77 @@ export async function insertCall(db: D1Database, input: NewCallInput): Promise<v
 export async function getCallById(db: D1Database, id: string): Promise<Call | null> {
   const row = await db.prepare(`SELECT * FROM calls WHERE id = ?`).bind(id).first<Call>();
   return row ?? null;
+}
+
+export async function getCallByDriveFileId(db: D1Database, driveFileId: string): Promise<Call | null> {
+  const row = await db
+    .prepare(`SELECT * FROM calls WHERE drive_file_id = ?`)
+    .bind(driveFileId)
+    .first<Call>();
+  return row ?? null;
+}
+
+/** Find or create a clients row for a Drive caller (phone preferred for uniqueness). */
+export async function findOrCreateClient(
+  db: D1Database,
+  opts: { name: string; phone: string | null }
+): Promise<string> {
+  const name = opts.name.trim() || "Unknown caller";
+  const phone = opts.phone?.trim() || null;
+
+  if (phone) {
+    const byPhone = await db
+      .prepare(`SELECT id FROM clients WHERE phone = ?`)
+      .bind(phone)
+      .first<{ id: string }>();
+    if (byPhone) return byPhone.id;
+  }
+
+  const byName = await db
+    .prepare(`SELECT id FROM clients WHERE name = ? AND phone IS NULL`)
+    .bind(name)
+    .first<{ id: string }>();
+  if (byName && !phone) return byName.id;
+
+  const id = crypto.randomUUID();
+  await db.prepare(`INSERT INTO clients (id, name, phone) VALUES (?, ?, ?)`).bind(id, name, phone).run();
+  return id;
+}
+
+export const DRIVE_POLL_ENABLED_KEY = "drive_poll_enabled";
+export const DRIVE_POLL_LAST_AT_KEY = "drive_poll_last_at";
+export const DRIVE_POLL_LAST_RESULT_KEY = "drive_poll_last_result";
+
+export async function getAppSetting(db: D1Database, key: string): Promise<string | null> {
+  const row = await db.prepare(`SELECT value FROM app_settings WHERE key = ?`).bind(key).first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+export async function setAppSetting(db: D1Database, key: string, value: string): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO app_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+    )
+    .bind(key, value)
+    .run();
+}
+
+export async function getDrivePollSettings(db: D1Database): Promise<{
+  enabled: boolean;
+  lastAt: string | null;
+  lastResult: string | null;
+}> {
+  const [enabled, lastAt, lastResult] = await Promise.all([
+    getAppSetting(db, DRIVE_POLL_ENABLED_KEY),
+    getAppSetting(db, DRIVE_POLL_LAST_AT_KEY),
+    getAppSetting(db, DRIVE_POLL_LAST_RESULT_KEY),
+  ]);
+  return {
+    enabled: enabled === "1" || enabled === "true",
+    lastAt,
+    lastResult,
+  };
 }
 
 export interface InsightsSummary {
