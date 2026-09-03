@@ -463,6 +463,12 @@ export interface CallRow {
   source: CallSource;
   customer_waiting: 0 | 1;
   call_type: CallType | null;
+  /**
+   * Set when this row is a site voice memo (site page, complaints, measurements,
+   * installation checklist). NULL for Drive / phone uploads — used by the Calls
+   * grid to label Voice Note vs Voice Call without a schema migration.
+   */
+  recorded_for_site_id: string | null;
   sites: string[];
   deadline: string | null;
   summary: string | null;
@@ -510,6 +516,7 @@ interface RawCallJoinRow {
   recording_date: string | null;
   source: CallSource;
   call_type: CallType | null;
+  recorded_for_site_id: string | null;
   summary: string | null;
   key_takeaways: string | null;
   unresolved: string | null;
@@ -549,8 +556,8 @@ interface RawSiteRow {
 
 const CALL_SELECT = `
   SELECT calls.id, calls.duration_s, calls.recorded_at, calls.recording_date, calls.source,
-         calls.call_type, calls.summary, calls.key_takeaways, calls.unresolved, calls.material_needs,
-         calls.deadline,
+         calls.call_type, calls.recorded_for_site_id, calls.summary, calls.key_takeaways,
+         calls.unresolved, calls.material_needs, calls.deadline,
          transcripts.transcript AS transcript,
          CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
          COALESCE(clients.name, 'Unknown caller') AS client_name,
@@ -564,8 +571,8 @@ const CALL_SELECT = `
    selects the transcript blob (home/drilldowns use has_transcript instead). */
 const CALL_LIST_SELECT = `
   SELECT calls.id, calls.duration_s, calls.recorded_at, calls.recording_date, calls.source,
-         calls.call_type, calls.summary, calls.key_takeaways, calls.unresolved, calls.material_needs,
-         calls.deadline,
+         calls.call_type, calls.recorded_for_site_id, calls.summary, calls.key_takeaways,
+         calls.unresolved, calls.material_needs, calls.deadline,
          NULL AS transcript,
          CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
          COALESCE(clients.name, 'Unknown caller') AS client_name,
@@ -625,6 +632,7 @@ function toCallRow(
     source: c.source,
     customer_waiting: customerWaiting,
     call_type: c.call_type,
+    recorded_for_site_id: c.recorded_for_site_id ?? null,
     sites,
     deadline: c.deadline,
     summary: c.summary,

@@ -17,9 +17,14 @@ const CHECK_LABEL = {
   userSelect: "none",
 };
 
+const ENTRY_TYPE_OPTIONS = [
+  { value: "voice_call", label: "Voice Call" },
+  { value: "voice_note", label: "Voice Note" },
+];
+
 /**
  * Collapsible filter bar for the Calls grid.
- * filters: { dateFrom, dateTo, callers[], importantOnly, withTodosOnly }
+ * filters: { dateFrom, dateTo, callers[], importantOnly, withTodosOnly, entryTypes[] }
  */
 export function CallsFilterBar({ filters, callerOptions, onChange, resultCount }) {
   const [open, setOpen] = useState(false);
@@ -31,14 +36,18 @@ export function CallsFilterBar({ filters, callerOptions, onChange, resultCount }
       callers: [],
       importantOnly: false,
       withTodosOnly: false,
+      entryTypes: [],
     });
+
+  const entryTypes = filters.entryTypes ?? [];
 
   const hasActive =
     Boolean(filters.dateFrom) ||
     Boolean(filters.dateTo) ||
     (filters.callers?.length ?? 0) > 0 ||
     filters.importantOnly ||
-    filters.withTodosOnly;
+    filters.withTodosOnly ||
+    entryTypes.length > 0;
 
   const summaryParts = [];
   if (filters.dateFrom || filters.dateTo) {
@@ -49,8 +58,21 @@ export function CallsFilterBar({ filters, callerOptions, onChange, resultCount }
       filters.callers.length === 1 ? filters.callers[0] : `${filters.callers.length} callers`
     );
   }
+  if (entryTypes.length === 1) {
+    const opt = ENTRY_TYPE_OPTIONS.find((o) => o.value === entryTypes[0]);
+    summaryParts.push(opt?.label ?? entryTypes[0]);
+  } else if (entryTypes.length > 1) {
+    summaryParts.push("Both types");
+  }
   if (filters.importantOnly) summaryParts.push("Important");
   if (filters.withTodosOnly) summaryParts.push("With todos");
+
+  const toggleEntryType = (value) => {
+    const next = entryTypes.includes(value)
+      ? entryTypes.filter((v) => v !== value)
+      : [...entryTypes, value];
+    onChange({ ...filters, entryTypes: next });
+  };
 
   return (
     <Card style={{ marginBottom: 0, padding: "10px 14px", flexShrink: 0 }}>
@@ -118,6 +140,21 @@ export function CallsFilterBar({ filters, callerOptions, onChange, resultCount }
               onChange={(callers) => onChange({ ...filters, callers })}
             />
           </label>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "flex-end", paddingBottom: 4 }}>
+            <span style={{ fontSize: 11, color: t.edge2, fontWeight: 600 }}>Type</span>
+            {ENTRY_TYPE_OPTIONS.map((opt) => (
+              <label key={opt.value} style={CHECK_LABEL}>
+                <input
+                  type="checkbox"
+                  checked={entryTypes.includes(opt.value)}
+                  onChange={() => toggleEntryType(opt.value)}
+                  style={{ width: 16, height: 16, accentColor: "var(--color-accent)" }}
+                />
+                {opt.label}
+              </label>
+            ))}
+          </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8, justifyContent: "flex-end", paddingBottom: 4 }}>
             <label style={CHECK_LABEL}>

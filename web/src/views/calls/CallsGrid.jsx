@@ -20,7 +20,9 @@ const GRID_CSS = `
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 .sbm-calls-grid.ag-theme-quartz {
   --ag-font-family: var(--font-body), system-ui, sans-serif;
@@ -45,7 +47,12 @@ const GRID_CSS = `
   width: 100%;
   flex: 1 1 auto;
   min-height: 0;
-  height: 100%;
+  overscroll-behavior: none;
+}
+@media (max-width: 640px) {
+  .sbm-calls-grid.ag-theme-quartz {
+    --ag-row-height: 74px;
+  }
 }
 .sbm-calls-grid .ag-root-wrapper {
   border: none;
@@ -67,9 +74,39 @@ const GRID_CSS = `
   font-size: 11px;
   color: var(--color-ink);
 }
-.sbm-calls-grid .ag-center-cols-viewport,
-.sbm-calls-grid .ag-body-viewport {
-  overflow-y: auto !important;
+/* AG Grid 36 scroll surface is `.ag-grid-viewport` (older `.ag-body-viewport`
+   / `.ag-center-cols-viewport` no longer exist). Own vertical scroll here so
+   mobile overscroll cannot chain to the page. */
+.sbm-calls-grid .ag-grid-viewport {
+  overflow-y: scroll !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin !important;
+  scrollbar-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-line)) transparent;
+  -ms-overflow-style: auto !important;
+}
+.sbm-calls-grid .ag-grid-viewport::-webkit-scrollbar {
+  display: block !important;
+  width: 8px;
+  -webkit-appearance: none;
+}
+.sbm-calls-grid .ag-grid-viewport::-webkit-scrollbar-track {
+  background: color-mix(in srgb, #DCE6FF 40%, white);
+}
+.sbm-calls-grid .ag-grid-viewport::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-accent) 45%, var(--color-line));
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+/* Fake scrollbar track — don't let it become a second touch scroller. */
+.sbm-calls-grid .ag-body-vertical-scroll-viewport {
+  overscroll-behavior: none;
+  pointer-events: none;
 }
 .sbm-calls-grid .ag-row {
   cursor: pointer;
@@ -120,6 +157,12 @@ const GRID_CSS = `
 .sbm-calls-grid .sbm-col-caller {
   font-weight: 700;
   color: var(--color-ink-emphasis);
+}
+.sbm-calls-grid .sbm-col-type {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-slate);
+  white-space: nowrap;
 }
 .sbm-calls-grid .sbm-col-summary .ag-cell-value,
 .sbm-calls-grid .sbm-col-summary .ag-cell-wrapper {
@@ -266,7 +309,7 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
   }, []);
 
   const columnDefs = useMemo(() => {
-    return [
+    const cols = [
       {
         headerName: "Sl.",
         colId: "sl",
@@ -302,17 +345,30 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
         valueGetter: (p) => p.data?.meta?.caller ?? "Unknown caller",
       },
       {
+        headerName: "Type",
+        colId: "type",
+        width: narrow ? 104 : 118,
+        maxWidth: narrow ? 118 : 140,
+        suppressSizeToFit: true,
+        cellClass: "sbm-col-type",
+        valueGetter: (p) => p.data?.meta?.entryTypeLabel ?? "Voice Call",
+        comparator: (a, b) => (a || "").localeCompare(b || ""),
+      },
+    ];
+    if (!narrow) {
+      cols.push({
         headerName: "Summary",
         field: "summary",
         colId: "summary",
         flex: 2.4,
-        minWidth: narrow ? 140 : 220,
+        minWidth: 220,
         cellClass: "sbm-col-summary",
         wrapText: true,
         autoHeight: true,
         valueFormatter: (p) => p.value || "—",
-      },
-    ];
+      });
+    }
+    return cols;
   }, [narrow]);
 
   const defaultColDef = useMemo(
@@ -371,7 +427,16 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
     syncPageState();
     api.sizeColumnsToFit();
     api.resetRowHeights();
+    if (rows?.length) api.ensureIndexVisible(0, "top");
   }, [rows, syncPageState]);
+
+  useEffect(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    api.setGridOption("rowHeight", narrow ? 74 : 64);
+    api.resetRowHeights();
+    api.sizeColumnsToFit();
+  }, [narrow]);
 
   const goTo = (page) => {
     gridRef.current?.api?.paginationGoToPage(page);
@@ -411,6 +476,8 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
             pagination
             paginationPageSize={pageSize}
             suppressPaginationPanel
+            rowHeight={narrow ? 74 : 64}
+            alwaysShowVerticalScroll
             animateRows={false}
             suppressCellFocus
             enableBrowserTooltips={false}

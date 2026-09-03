@@ -464,9 +464,14 @@ export default function SimpleBusinessManager() {
     <div
       style={{
         background: t.pane,
-        minHeight: "100vh",
-        height: fillViewport ? "100vh" : undefined,
+        minHeight: fillViewport ? undefined : "100vh",
         overflow: fillViewport ? "hidden" : undefined,
+        overscrollBehavior: fillViewport ? "none" : undefined,
+        position: fillViewport ? "fixed" : undefined,
+        inset: fillViewport ? 0 : undefined,
+        width: fillViewport ? "100%" : undefined,
+        display: fillViewport ? "flex" : undefined,
+        flexDirection: fillViewport ? "column" : undefined,
         fontFamily: t.body,
         color: t.edge,
       }}
@@ -540,8 +545,11 @@ export default function SimpleBusinessManager() {
           height: fillViewport ? "100%" : undefined,
           minHeight: fillViewport ? 0 : undefined,
           overflow: fillViewport ? "hidden" : undefined,
+          overscrollBehavior: fillViewport ? "none" : undefined,
           display: fillViewport ? "flex" : undefined,
           flexDirection: fillViewport ? "column" : undefined,
+          flex: fillViewport ? "1 1 auto" : undefined,
+          width: fillViewport ? "100%" : undefined,
         }}
       >
         {children}

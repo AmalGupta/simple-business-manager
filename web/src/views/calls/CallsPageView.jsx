@@ -22,6 +22,7 @@ const EMPTY_FILTERS = {
   callers: [],
   importantOnly: false,
   withTodosOnly: false,
+  entryTypes: [],
 };
 
 /**
@@ -50,6 +51,115 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
     });
     setRows(decorated);
     return decorated;
+  }, []);
+
+  /* Entering from a scrolled home page left the window at the bottom; lock
+     to the top so Back / title are visible and the table owns scrolling. */
+  useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+  }, []);
+
+  useEffect(() => {
+    if (rows == null) return;
+    window.scrollTo(0, 0);
+  }, [rows]);
+
+  /* Prevent mobile scroll-chaining (iOS Safari + Chrome Android): once the
+     table hits the bottom, the next gesture was scrolling the document
+     instead of the grid. Lock html/body and contain overscroll at the
+     grid's top/bottom boundaries. */
+  useEffect(() => {
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      htmlOverscroll: html.style.overscrollBehavior,
+      bodyOverscroll: body.style.overscrollBehavior,
+      bodyPosition: body.style.position,
+      bodyTop: body.style.top,
+      bodyWidth: body.style.width,
+      htmlHeight: html.style.height,
+      bodyHeight: body.style.height,
+    };
+    const scrollY = window.scrollY || 0;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    html.style.overscrollBehavior = "none";
+    body.style.overscrollBehavior = "none";
+    /* Chrome Android: fixed body is more reliable than overflow:hidden alone
+       at stopping document scroll / pull-to-refresh after nested overscroll. */
+    html.style.height = "100%";
+    body.style.height = "100%";
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.width = "100%";
+
+    const findAllowedScroller = (node) => {
+      let el = node;
+      while (el && el !== html) {
+        if (!(el instanceof HTMLElement)) {
+          el = el.parentElement;
+          continue;
+        }
+        if (el.classList.contains("ag-grid-viewport") || el.classList.contains("ag-body-viewport")) {
+          return el;
+        }
+        const oy = window.getComputedStyle(el).overflowY;
+        if (
+          (oy === "auto" || oy === "scroll") &&
+          el.scrollHeight > el.clientHeight + 1 &&
+          el !== body &&
+          el.tagName !== "MAIN" &&
+          el.tagName !== "HTML"
+        ) {
+          return el;
+        }
+        el = el.parentElement;
+      }
+      return null;
+    };
+
+    let lastY = 0;
+    const onTouchStart = (e) => {
+      if (e.touches[0]) lastY = e.touches[0].clientY;
+    };
+    const onTouchMove = (e) => {
+      const scroller = findAllowedScroller(e.target);
+      if (!scroller) {
+        e.preventDefault();
+        return;
+      }
+      const y = e.touches[0]?.clientY;
+      if (y == null) return;
+      const dy = y - lastY;
+      lastY = y;
+      const atTop = scroller.scrollTop <= 0;
+      const atBottom = scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1;
+      /* Finger down at top, or finger up at bottom → would chain to the page. */
+      if ((atTop && dy > 0) || (atBottom && dy < 0)) {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+      html.style.overscrollBehavior = prev.htmlOverscroll;
+      body.style.overscrollBehavior = prev.bodyOverscroll;
+      body.style.position = prev.bodyPosition;
+      body.style.top = prev.bodyTop;
+      body.style.width = prev.bodyWidth;
+      html.style.height = prev.htmlHeight;
+      body.style.height = prev.bodyHeight;
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      window.scrollTo(0, scrollY);
+    };
   }, []);
 
   useEffect(() => {
@@ -129,7 +239,7 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
         overflow: "hidden",
       }}
     >
-      <div style={{ flexShrink: 0 }}>
+      <div style={{ flexShrink: 0, position: "sticky", top: 0, zIndex: 2, background: t.pane }}>
         <BackLink onClick={onBack}>Back</BackLink>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0.15rem 0 0" }}>
@@ -204,12 +314,14 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
         <EmptyState />
       ) : (
         <>
-          <CallsFilterBar
-            filters={filters}
-            callerOptions={callerOptions}
-            onChange={setFilters}
-            resultCount={filtered.length}
-          />
+          <div style={{ flexShrink: 0, position: "sticky", top: 0, zIndex: 1, background: t.pane }}>
+            <CallsFilterBar
+              filters={filters}
+              callerOptions={callerOptions}
+              onChange={setFilters}
+              resultCount={filtered.length}
+            />
+          </div>
           <h2
             style={{
               fontFamily: t.display,
