@@ -8,15 +8,18 @@ import {
   setAppSetting,
   setCallFailed,
   setCallSubmitted,
+  setDrivePollProgress,
   DRIVE_POLL_LAST_AT_KEY,
   DRIVE_POLL_LAST_RESULT_KEY,
+  type DrivePollProgress,
+  type DrivePollStep,
 } from "@sbm/core";
 import type { Env } from "../index";
 import { contentTypeForDriveCall, parseDriveCallFilename } from "./drive-call-filename";
 import { downloadDriveFile, listDriveFiles, moveDriveFile, type DriveFileListItem } from "./google-drive";
 import { submitRecording } from "./sarvam";
 
-export const DRIVE_POLL_BATCH_SIZE = 2;
+export const DRIVE_POLL_BATCH_SIZE = 20;
 
 export interface DrivePollIngested {
   callId: string;
@@ -24,6 +27,7 @@ export interface DrivePollIngested {
   fileName: string;
   clientName: string;
   archived: boolean;
+  skipped: boolean;
 }
 
 export interface DrivePollResult {
@@ -115,6 +119,14 @@ async function pickNewFiles(
   return { candidates: fresh.slice(0, limit), scanned, skippedExisting };
 }
 
+async function reportProgress(env: Env, progress: DrivePollProgress): Promise<void> {
+  try {
+    await setDrivePollProgress(env.DB, { ...progress, updatedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error("[drive-poll] progress write failed:", String(err));
+  }
+}
+
 async function ingestOne(
   env: Env,
   ctx: ExecutionContext,
@@ -122,7 +134,8 @@ async function ingestOne(
   callbackUrl: string,
   callsId: string,
   archiveId: string,
-  spamId: string | null
+  spamId: string | null,
+  onStep: (step: DrivePollStep, clientName?: string) => Promise<void>
 ): Promise<DrivePollIngested> {
   const parsed = parseDriveCallFilename(file.name);
   const caller = await findOrCreateCaller(env.DB, {
@@ -137,6 +150,7 @@ async function ingestOne(
   // spam-check (see stt-webhook.ts) only ever runs once per new/unknown
   // number; a number already tagged spam is pre-filtered here from then on.
   if (caller.category === "family" || caller.category === "spam") {
+    await onStep("skip", caller.name);
     await insertSkippedCall(env.DB, {
       id: callId,
       callerId: caller.id,
@@ -165,6 +179,7 @@ async function ingestOne(
       fileName: file.name,
       clientName: caller.name,
       archived,
+      skipped: true,
     };
   }
 
@@ -172,6 +187,7 @@ async function ingestOne(
   const ext = file.name.includes(".") ? file.name.split(".").pop()! : "m4a";
   const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
 
+  await onStep("download", caller.name);
   const downloaded = await downloadDriveFile(env, file.id);
   await env.RECORDINGS.put(r2Key, downloaded.body, {
     httpMetadata: {
@@ -179,6 +195,7 @@ async function ingestOne(
     },
   });
 
+  await onStep("insert", caller.name);
   await insertCall(env.DB, {
     id: callId,
     r2Key,
@@ -190,6 +207,7 @@ async function ingestOne(
     driveFileId: file.id,
   });
 
+  await onStep("submit", caller.name);
   ctx.waitUntil(
     submitRecording(env, r2Key, callbackUrl)
       .then((result) => setCallSubmitted(env.DB, callId, result.jobId))
@@ -197,6 +215,7 @@ async function ingestOne(
   );
 
   // Move out of Calls only after R2 + D1 succeeded — Drive is the backlog queue.
+  await onStep("archive", caller.name);
   let archived = false;
   try {
     await moveDriveFile(env, file.id, { addParentId: archiveId, removeParentId: callsId });
@@ -211,6 +230,7 @@ async function ingestOne(
     fileName: file.name,
     clientName: caller.name,
     archived,
+    skipped: false,
   };
 }
 
@@ -226,34 +246,98 @@ export async function pollDriveCalls(
   options: { limit?: number; callbackOrigin?: string } = {}
 ): Promise<DrivePollResult> {
   const limit = options.limit ?? DRIVE_POLL_BATCH_SIZE;
-  const callbackUrl = resolveCallbackUrl(env, options.callbackOrigin);
-  const callsId = callsFolderId(env);
-  const archiveId = archiveFolderId(env);
-  const spamId = spamFolderId(env); // null until GOOGLE_DRIVE_SPAM_FOLDER_ID is set — see spamFolderId
-  const known = await loadKnownDriveFileIds(env.DB);
-  const { candidates, scanned, skippedExisting } = await pickNewFiles(env, callsId, known, limit);
-
-  const result: DrivePollResult = {
-    scanned,
-    skippedExisting,
-    ingested: [],
+  const startedAt = new Date().toISOString();
+  const progress: DrivePollProgress = {
+    status: "running",
+    startedAt,
+    updatedAt: startedAt,
+    limit,
+    phase: "listing",
+    current: { fileName: "Calls folder", step: "listing" },
+    completed: [],
     errors: [],
+    scanned: 0,
+    skippedExisting: 0,
+    message: "Scanning Drive folder…",
   };
+  await reportProgress(env, progress);
 
-  for (const file of candidates) {
-    try {
-      result.ingested.push(await ingestOne(env, ctx, file, callbackUrl, callsId, archiveId, spamId));
-    } catch (err) {
-      result.errors.push({ fileName: file.name, error: String(err) });
+  try {
+    const callbackUrl = resolveCallbackUrl(env, options.callbackOrigin);
+    const callsId = callsFolderId(env);
+    const archiveId = archiveFolderId(env);
+    const spamId = spamFolderId(env); // null until GOOGLE_DRIVE_SPAM_FOLDER_ID is set — see spamFolderId
+    const known = await loadKnownDriveFileIds(env.DB);
+    const { candidates, scanned, skippedExisting } = await pickNewFiles(env, callsId, known, limit);
+
+    progress.scanned = scanned;
+    progress.skippedExisting = skippedExisting;
+    progress.phase = "ingest";
+    progress.current = null;
+    progress.message =
+      candidates.length === 0
+        ? "No new recordings in this cycle."
+        : `Ingesting ${candidates.length} of up to ${limit}…`;
+    await reportProgress(env, progress);
+
+    const result: DrivePollResult = {
+      scanned,
+      skippedExisting,
+      ingested: [],
+      errors: [],
+    };
+
+    for (const file of candidates) {
+      try {
+        const ingested = await ingestOne(
+          env,
+          ctx,
+          file,
+          callbackUrl,
+          callsId,
+          archiveId,
+          spamId,
+          async (step, clientName) => {
+            progress.current = { fileName: file.name, step, clientName };
+            progress.message = null;
+            await reportProgress(env, progress);
+          }
+        );
+        result.ingested.push(ingested);
+        progress.completed.push({
+          fileName: ingested.fileName,
+          clientName: ingested.clientName,
+          archived: ingested.archived,
+          skipped: ingested.skipped,
+        });
+      } catch (err) {
+        const error = String(err);
+        result.errors.push({ fileName: file.name, error });
+        progress.errors.push({ fileName: file.name, error });
+      }
+      progress.current = null;
+      await reportProgress(env, progress);
     }
+
+    const archived = result.ingested.filter((r) => r.archived).length;
+    const summary = `ingested ${result.ingested.length}/${limit}; archived ${archived}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`;
+    progress.status = "done";
+    progress.phase = "done";
+    progress.current = null;
+    progress.message = summary;
+    await Promise.all([
+      setAppSetting(env.DB, DRIVE_POLL_LAST_AT_KEY, new Date().toISOString()),
+      setAppSetting(env.DB, DRIVE_POLL_LAST_RESULT_KEY, summary),
+      reportProgress(env, progress),
+    ]);
+
+    return result;
+  } catch (err) {
+    progress.status = "error";
+    progress.phase = "done";
+    progress.current = null;
+    progress.message = String(err);
+    await reportProgress(env, progress);
+    throw err;
   }
-
-  const archived = result.ingested.filter((r) => r.archived).length;
-  const summary = `ingested ${result.ingested.length}/${limit}; archived ${archived}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`;
-  await Promise.all([
-    setAppSetting(env.DB, DRIVE_POLL_LAST_AT_KEY, new Date().toISOString()),
-    setAppSetting(env.DB, DRIVE_POLL_LAST_RESULT_KEY, summary),
-  ]);
-
-  return result;
 }

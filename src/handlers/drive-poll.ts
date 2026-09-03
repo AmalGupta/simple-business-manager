@@ -51,7 +51,7 @@ export async function handlePatchDrivePollSettings(request: Request, env: Env): 
   return json(settings);
 }
 
-/** Manual pull — always runs a batch of 2 regardless of the permanent toggle. */
+/** Manual pull — same batch size as the cron (DRIVE_POLL_BATCH_SIZE). */
 export async function handlePostDrivePoll(
   request: Request,
   env: Env,

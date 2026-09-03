@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { t } from "../../theme.js";
 import { Card } from "../../components/Card.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
@@ -15,6 +15,7 @@ import { withCallMetadata, uniqueCallers, filterCallsByMeta } from "../../lib/ca
 import { CallsFilterBar } from "./CallsFilterBar.jsx";
 import { CallsGrid } from "./CallsGrid.jsx";
 import { CallDetailModal } from "./CallDetailModal.jsx";
+import { DrivePollStatus } from "./DrivePollStatus.jsx";
 
 const EMPTY_FILTERS = {
   dateFrom: "",
@@ -37,6 +38,7 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
 
   const [pollEnabled, setPollEnabled] = useState(false);
   const [pollMeta, setPollMeta] = useState({ lastAt: null, lastResult: null });
+  const [pollProgress, setPollProgress] = useState(null);
   const [pollBusy, setPollBusy] = useState(false);
   const [pollStatus, setPollStatus] = useState("");
 
@@ -193,12 +195,51 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
         if (cancelled) return;
         setPollEnabled(Boolean(s.enabled));
         setPollMeta({ lastAt: s.lastAt ?? null, lastResult: s.lastResult ?? null });
+        setPollProgress(s.progress ?? null);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [loadRows]);
+
+  const applyPollSettings = useCallback((s) => {
+    setPollEnabled(Boolean(s.enabled));
+    setPollMeta({ lastAt: s.lastAt ?? null, lastResult: s.lastResult ?? null });
+    setPollProgress(s.progress ?? null);
+  }, []);
+
+  /* Live progress while a cron/manual run is in flight, or while permanent
+     polling is on (next cycle can start without a click). */
+  useEffect(() => {
+    const running = pollProgress?.status === "running" || pollBusy;
+    if (!pollEnabled && !running) return undefined;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await fetchDrivePollSettings();
+        if (cancelled) return;
+        applyPollSettings(s);
+      } catch {
+        /* keep last known progress */
+      }
+    };
+    const id = window.setInterval(tick, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [pollEnabled, pollBusy, pollProgress?.status, applyPollSettings]);
+
+  const prevPollStatus = useRef(pollProgress?.status);
+  useEffect(() => {
+    const status = pollProgress?.status;
+    if (prevPollStatus.current === "running" && status === "done") {
+      loadRows().catch(() => {});
+      if (typeof onCallsChanged === "function") onCallsChanged();
+    }
+    prevPollStatus.current = status;
+  }, [pollProgress?.status, loadRows, onCallsChanged]);
 
   const callerOptions = useMemo(() => uniqueCallers(rows ?? []), [rows]);
   const filtered = useMemo(
@@ -212,9 +253,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
     setPollStatus("");
     try {
       const s = await patchDrivePollSettings(next);
-      setPollEnabled(Boolean(s.enabled));
-      setPollMeta({ lastAt: s.lastAt ?? null, lastResult: s.lastResult ?? null });
-      setPollStatus(next ? "Permanent polling on — every 5 minutes." : "Permanent polling off.");
+      applyPollSettings(s);
+      setPollStatus("");
     } catch (err) {
       setPollStatus(`Could not update polling: ${err.message}`);
     } finally {
@@ -224,19 +264,11 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
 
   const onGetLatest = async () => {
     setPollBusy(true);
-    setPollStatus("Fetching latest calls from Drive…");
+    setPollStatus("");
     try {
-      const result = await postDrivePoll();
-      const n = result.ingested?.length ?? 0;
-      setPollMeta({
-        lastAt: new Date().toISOString(),
-        lastResult: `ingested ${n}; scanned ${result.scanned ?? 0}; skipped ${result.skippedExisting ?? 0}`,
-      });
-      setPollStatus(
-        n === 0
-          ? "No new calls to import."
-          : `Imported ${n} call${n === 1 ? "" : "s"} — transcription started.`
-      );
+      await postDrivePoll();
+      const s = await fetchDrivePollSettings();
+      applyPollSettings(s);
       await loadRows();
       if (typeof onCallsChanged === "function") await onCallsChanged();
     } catch (err) {
@@ -314,11 +346,10 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
             />
             Permanent polling
           </label>
-          {(pollStatus || pollMeta.lastResult) && (
-            <span style={{ fontSize: 12, color: t.edge2, flex: "1 1 160px" }}>
-              {pollStatus || pollMeta.lastResult}
-            </span>
-          )}
+          {pollStatus ? (
+            <span style={{ fontSize: 12, color: t.signal, flex: "1 1 120px" }}>{pollStatus}</span>
+          ) : null}
+          <DrivePollStatus progress={pollProgress} lastResult={pollMeta.lastResult} />
         </div>
       </Card>
 

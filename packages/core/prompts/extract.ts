@@ -9,6 +9,12 @@
 
 import { ACTIVE } from "./index";
 import type { CallExtraction, DiarizedEntry } from "../src/types";
+import {
+  ANTHROPIC_MESSAGES_URL,
+  anthropicRequestHeaders,
+  cachedSystemPrompt,
+  withCachedTool,
+} from "./anthropic";
 
 export interface ExtractInput {
   apiKey: string;
@@ -23,18 +29,14 @@ interface AnthropicMessageResponse {
 }
 
 export async function extractCall(input: ExtractInput): Promise<CallExtraction> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
-    headers: {
-      "x-api-key": input.apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: anthropicRequestHeaders(input.apiKey),
     body: JSON.stringify({
       model: input.model,
       max_tokens: 2000,
-      system: ACTIVE.system,
-      tools: [ACTIVE.tool],
+      system: cachedSystemPrompt(ACTIVE.system),
+      tools: [withCachedTool(ACTIVE.tool)],
       tool_choice: { type: "tool", name: "record_call" },
       messages: [
         {

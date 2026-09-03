@@ -333,3 +333,36 @@ export interface MaterialShortage {
   resolved_by_user_id: string | null;
   resolved_at: string | null;
 }
+
+/** Live Drive poll run — written to app_settings while cron / Get latest runs. */
+export type DrivePollStep =
+  | "listing"
+  | "download"
+  | "insert"
+  | "submit"
+  | "archive"
+  | "skip";
+
+export type DrivePollRunStatus = "idle" | "running" | "done" | "error";
+
+export interface DrivePollProgressItem {
+  fileName: string;
+  clientName: string;
+  archived: boolean;
+  /** Family / known-spam — no R2 / Sarvam. */
+  skipped?: boolean;
+}
+
+export interface DrivePollProgress {
+  status: DrivePollRunStatus;
+  startedAt: string | null;
+  updatedAt: string;
+  limit: number;
+  phase: "listing" | "ingest" | "done";
+  current: { fileName: string; step: DrivePollStep; clientName?: string } | null;
+  completed: DrivePollProgressItem[];
+  errors: { fileName: string; error: string }[];
+  scanned: number;
+  skippedExisting: number;
+  message?: string | null;
+}

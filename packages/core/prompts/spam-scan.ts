@@ -16,6 +16,12 @@
 // asymmetric cost, which the system prompt below states explicitly.
 
 import type { DiarizedEntry } from "../src/types";
+import {
+  ANTHROPIC_MESSAGES_URL,
+  anthropicRequestHeaders,
+  cachedSystemPrompt,
+  withCachedTool,
+} from "./anthropic";
 
 const SPAM_SCAN_TOOL = {
   name: "record_spam_verdict",
@@ -67,18 +73,14 @@ const NOT_SPAM: SpamScanResult = { isSpam: false, reason: "no verdict returned" 
 
 /** Never throws on a malformed/missing tool_use — treated as not-spam (see rule 3 above). Network/API failures still throw; the caller (stt-webhook.ts) treats any thrown error the same way, falling through to normal extraction. */
 export async function scanCallForSpam(input: SpamScanInput): Promise<SpamScanResult> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
-    headers: {
-      "x-api-key": input.apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: anthropicRequestHeaders(input.apiKey),
     body: JSON.stringify({
       model: input.model,
       max_tokens: 300,
-      system: SPAM_SCAN_SYSTEM_PROMPT,
-      tools: [SPAM_SCAN_TOOL],
+      system: cachedSystemPrompt(SPAM_SCAN_SYSTEM_PROMPT),
+      tools: [withCachedTool(SPAM_SCAN_TOOL)],
       tool_choice: { type: "tool", name: "record_spam_verdict" },
       messages: [{ role: "user", content: buildUserMessage(input.entries) }],
     }),

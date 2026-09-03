@@ -9,6 +9,7 @@ import type {
   CallSource,
   CallType,
   DiarizedEntry,
+  DrivePollProgress,
   Escalation,
   EscalationSource,
   EscalationStatus,
@@ -236,6 +237,7 @@ export async function softDeleteCallAsSpam(db: D1Database, callId: string): Prom
 export const DRIVE_POLL_ENABLED_KEY = "drive_poll_enabled";
 export const DRIVE_POLL_LAST_AT_KEY = "drive_poll_last_at";
 export const DRIVE_POLL_LAST_RESULT_KEY = "drive_poll_last_result";
+export const DRIVE_POLL_PROGRESS_KEY = "drive_poll_progress";
 
 export async function getAppSetting(db: D1Database, key: string): Promise<string | null> {
   const row = await db.prepare(`SELECT value FROM app_settings WHERE key = ?`).bind(key).first<{ value: string }>();
@@ -252,20 +254,38 @@ export async function setAppSetting(db: D1Database, key: string, value: string):
     .run();
 }
 
+export function parseDrivePollProgress(raw: string | null): DrivePollProgress | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as DrivePollProgress;
+    if (!parsed || typeof parsed !== "object" || !parsed.status) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export async function setDrivePollProgress(db: D1Database, progress: DrivePollProgress): Promise<void> {
+  await setAppSetting(db, DRIVE_POLL_PROGRESS_KEY, JSON.stringify(progress));
+}
+
 export async function getDrivePollSettings(db: D1Database): Promise<{
   enabled: boolean;
   lastAt: string | null;
   lastResult: string | null;
+  progress: DrivePollProgress | null;
 }> {
-  const [enabled, lastAt, lastResult] = await Promise.all([
+  const [enabled, lastAt, lastResult, progressRaw] = await Promise.all([
     getAppSetting(db, DRIVE_POLL_ENABLED_KEY),
     getAppSetting(db, DRIVE_POLL_LAST_AT_KEY),
     getAppSetting(db, DRIVE_POLL_LAST_RESULT_KEY),
+    getAppSetting(db, DRIVE_POLL_PROGRESS_KEY),
   ]);
   return {
     enabled: enabled === "1" || enabled === "true",
     lastAt,
     lastResult,
+    progress: parseDrivePollProgress(progressRaw),
   };
 }
 

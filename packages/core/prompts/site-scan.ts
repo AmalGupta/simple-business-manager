@@ -17,6 +17,12 @@
 
 import { SITE_ROSTER } from "./roster";
 import type { DiarizedEntry } from "../src/types";
+import {
+  ANTHROPIC_MESSAGES_URL,
+  anthropicRequestHeaders,
+  cachedSystemPrompt,
+  withCachedTool,
+} from "./anthropic";
 
 const SITE_SCAN_TOOL = {
   name: "record_sites",
@@ -62,18 +68,14 @@ interface AnthropicMessageResponse {
 
 /** Never throws on a malformed/missing tool_use — a failed site scan should never take down the main extraction. */
 export async function scanCallForSites(input: SiteScanInput): Promise<string[]> {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  const res = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
-    headers: {
-      "x-api-key": input.apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-    },
+    headers: anthropicRequestHeaders(input.apiKey),
     body: JSON.stringify({
       model: input.model,
       max_tokens: 500,
-      system: SITE_SCAN_SYSTEM_PROMPT,
-      tools: [SITE_SCAN_TOOL],
+      system: cachedSystemPrompt(SITE_SCAN_SYSTEM_PROMPT),
+      tools: [withCachedTool(SITE_SCAN_TOOL)],
       tool_choice: { type: "tool", name: "record_sites" },
       messages: [{ role: "user", content: buildUserMessage(input.entries) }],
     }),
