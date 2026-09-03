@@ -2,8 +2,9 @@
 // into R2 + the existing Sarvam → extract pipeline.
 
 import {
-  findOrCreateClient,
+  findOrCreateCaller,
   insertCall,
+  insertSkippedCall,
   setAppSetting,
   setCallFailed,
   setCallSubmitted,
@@ -48,6 +49,17 @@ function archiveFolderId(env: Env): string {
   const id = env.GOOGLE_DRIVE_ARCHIVE_FOLDER_ID?.trim();
   if (!id) throw new Error("GOOGLE_DRIVE_ARCHIVE_FOLDER_ID not configured");
   return id;
+}
+
+/**
+ * Callers Directory (migration 0021) — where known-Spam-caller Drive files
+ * move instead of Archive. Unlike callsFolderId/archiveFolderId, an unset
+ * var returns null rather than throwing: this folder is optional until the
+ * admin creates it, and its absence must not break polling for every other
+ * (family/staff/client) file in the same batch.
+ */
+function spamFolderId(env: Env): string | null {
+  return env.GOOGLE_DRIVE_SPAM_FOLDER_ID?.trim() || null;
 }
 
 function fileSortKeyMs(file: DriveFileListItem): number {
@@ -109,15 +121,54 @@ async function ingestOne(
   file: DriveFileListItem,
   callbackUrl: string,
   callsId: string,
-  archiveId: string
+  archiveId: string,
+  spamId: string | null
 ): Promise<DrivePollIngested> {
   const parsed = parseDriveCallFilename(file.name);
-  const clientId = await findOrCreateClient(env.DB, {
+  const caller = await findOrCreateCaller(env.DB, {
     name: parsed.callerLabel,
     phone: parsed.phone,
   });
 
   const callId = crypto.randomUUID();
+  const callTime = parsed.recordedAt ?? new Date().toISOString();
+
+  // Family: never touch R2/Sarvam. Known-Spam: same treatment — the LLM
+  // spam-check (see stt-webhook.ts) only ever runs once per new/unknown
+  // number; a number already tagged spam is pre-filtered here from then on.
+  if (caller.category === "family" || caller.category === "spam") {
+    await insertSkippedCall(env.DB, {
+      id: callId,
+      callerId: caller.id,
+      source: "drive",
+      recordedAt: callTime,
+      recordingDate: parsed.recordedAt,
+      driveFileId: file.id,
+    });
+
+    const destinationFolderId = caller.category === "family" ? archiveId : spamId;
+    let archived = false;
+    if (!destinationFolderId) {
+      console.error(`[drive-poll] GOOGLE_DRIVE_SPAM_FOLDER_ID not configured — leaving ${file.name} in Calls`);
+    } else {
+      try {
+        await moveDriveFile(env, file.id, { addParentId: destinationFolderId, removeParentId: callsId });
+        archived = true;
+      } catch (err) {
+        console.error(`[drive-poll] ${caller.category} move failed for ${file.name}:`, String(err));
+      }
+    }
+
+    return {
+      callId,
+      driveFileId: file.id,
+      fileName: file.name,
+      clientName: caller.name,
+      archived,
+    };
+  }
+
+  // staff / client (new or existing, unknown) — unchanged normal flow.
   const ext = file.name.includes(".") ? file.name.split(".").pop()! : "m4a";
   const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
 
@@ -128,7 +179,6 @@ async function ingestOne(
     },
   });
 
-  const callTime = parsed.recordedAt ?? new Date().toISOString();
   await insertCall(env.DB, {
     id: callId,
     r2Key,
@@ -136,7 +186,7 @@ async function ingestOne(
     recordedAt: callTime,
     recordingDate: parsed.recordedAt,
     durationS: null,
-    clientId,
+    clientId: caller.id,
     driveFileId: file.id,
   });
 
@@ -159,7 +209,7 @@ async function ingestOne(
     callId,
     driveFileId: file.id,
     fileName: file.name,
-    clientName: parsed.callerLabel,
+    clientName: caller.name,
     archived,
   };
 }
@@ -167,7 +217,8 @@ async function ingestOne(
 /**
  * Scan the Drive Calls folder (newest first), skip already-ingested
  * drive_file_id rows, transfer up to `limit` files into R2 + STT, then
- * move each successful file into the Archive folder.
+ * move each successful file into the Archive folder (or the Spam folder
+ * for a known-Spam caller / Family caller — see ingestOne).
  */
 export async function pollDriveCalls(
   env: Env,
@@ -178,6 +229,7 @@ export async function pollDriveCalls(
   const callbackUrl = resolveCallbackUrl(env, options.callbackOrigin);
   const callsId = callsFolderId(env);
   const archiveId = archiveFolderId(env);
+  const spamId = spamFolderId(env); // null until GOOGLE_DRIVE_SPAM_FOLDER_ID is set — see spamFolderId
   const known = await loadKnownDriveFileIds(env.DB);
   const { candidates, scanned, skippedExisting } = await pickNewFiles(env, callsId, known, limit);
 
@@ -190,7 +242,7 @@ export async function pollDriveCalls(
 
   for (const file of candidates) {
     try {
-      result.ingested.push(await ingestOne(env, ctx, file, callbackUrl, callsId, archiveId));
+      result.ingested.push(await ingestOne(env, ctx, file, callbackUrl, callsId, archiveId, spamId));
     } catch (err) {
       result.errors.push({ fileName: file.name, error: String(err) });
     }

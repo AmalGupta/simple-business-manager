@@ -1,7 +1,14 @@
 // Types matching the D1 schema — see schema.sql and docs/SCAFFOLDING.md §4.
 
 export type CallSource = "android" | "ios" | "drive";
-export type SttStatus = "pending" | "transcription_in_progress" | "transcribed" | "extracted" | "failed";
+/** 'skipped' (migration 0021) — Family / repeat-known-Spam minimal rows: no R2 download, no Sarvam submit, terminal. */
+export type SttStatus =
+  | "pending"
+  | "transcription_in_progress"
+  | "transcribed"
+  | "extracted"
+  | "failed"
+  | "skipped";
 /** Free text — a staff name, or the literal "self" for the business owner's own commitments. */
 export type TodoOwner = string;
 export type TodoStatus = "open" | "done" | "snoozed";
@@ -10,16 +17,29 @@ export type TodoOrigin = "llm" | "manual";
 export type CallType = "client" | "internal" | "low_signal";
 export type EscalationStatus = "open" | "done";
 
-export interface Client {
+/**
+ * Callers Directory — migration 0021. Renamed from `Client`: every caller
+ * who reaches the pipeline (family, staff, client, or spam) gets a row
+ * here, not just real clients, so ingestion can gate on `category`.
+ * Orthogonal to `CallType` — that's the LLM's per-call content classifier
+ * (client/internal/low_signal); this is the caller's own identity.
+ */
+export type CallerCategory = "family" | "staff" | "client" | "spam";
+
+export interface Caller {
   id: string;
   name: string;
   phone: string | null;
+  category: CallerCategory;
+  /** Set when this caller IS a staff member's own number — links to users.id. */
+  staff_user_id: string | null;
   created_at: string;
 }
 
 export interface Call {
   id: string;
   r2_key: string;
+  /** FK column name kept as client_id (pre-Callers-Directory) — references `callers`, see {@link Caller}. */
   client_id: string | null;
   source: CallSource;
   recorded_at: string | null; // when this row was uploaded
@@ -47,6 +67,10 @@ export interface Call {
 
   /** migration 0020: Google Drive file id when ingested by the Calls-folder poller. */
   drive_file_id: string | null;
+
+  /** migration 0021: soft-delete for a call the spam-scan prompt flagged. Row + transcript kept for audit; the R2 object is actually deleted. NULL for every ordinary call. */
+  deleted_at: string | null;
+  deleted_reason: string | null;
 
   created_at: string;
 }

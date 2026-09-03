@@ -15,6 +15,10 @@
     "INGEST_PREFIX": "inbox/",
     "GOOGLE_DRIVE_CALLS_FOLDER_ID": "1BVvqN0a_e8mb4S50yMb9X-XwKEfxO5RR",
     "GOOGLE_DRIVE_ARCHIVE_FOLDER_ID": "12v7xURXHMtL20fjOVLEzmMmXdmcCYhXg",
+    // Callers Directory (migration 0021): create a "Spam" folder in Drive next
+    // to Calls/Archived and paste its id here before deploying — until then,
+    // Drive moves for confirmed-spam calls fail gracefully (logged, not fatal).
+    "GOOGLE_DRIVE_SPAM_FOLDER_ID": "",
     "PUBLIC_BASE_URL": "https://sbm-pipeline.gupta-amal01.workers.dev"
   },
 

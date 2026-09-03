@@ -80,6 +80,14 @@ export async function handleGetCallRecording(
   if (session.user_role === "staff" && !(await isCallRecordingAccessibleToUser(env.DB, session.user_id, callId))) {
     return new Response("Forbidden", { status: 403 });
   }
+  // Callers Directory (migration 0021): Family/repeat-known-Spam rows
+  // (stt_status='skipped') never had an R2 object written, and a
+  // spam-flagged call has had its R2 object deliberately deleted —
+  // short-circuit both before streamR2Object hits R2 with a less clear
+  // failure mode.
+  if (call.stt_status === "skipped" || call.deleted_at) {
+    return new Response("No recording available", { status: 404 });
+  }
   // No content-type column on `calls` — streamR2Object falls back to
   // whatever was set on the object at upload time (see r2-stream.ts).
   return streamR2Object(env.RECORDINGS, call.r2_key, undefined, request);

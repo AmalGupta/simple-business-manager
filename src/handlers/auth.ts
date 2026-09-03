@@ -73,8 +73,8 @@ async function establishSession(request: Request, env: Env, userId: string): Pro
   };
 }
 
-/** admin/superadmin only — every new staff-management route needs this. Returns the session on success, or the Response to short-circuit with otherwise. */
-async function requireAdmin(request: Request, env: Env): Promise<SessionWithUser | Response> {
+/** admin/superadmin only — every new staff-management route needs this. Returns the session on success, or the Response to short-circuit with otherwise. Exported for src/handlers/callers.ts (Callers Directory), which follows this exact gate rather than duplicating it. */
+export async function requireAdmin(request: Request, env: Env): Promise<SessionWithUser | Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
   if (session.user_role === "staff") return json({ error: "forbidden" }, 403);

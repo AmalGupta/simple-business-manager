@@ -1,17 +1,29 @@
 -- D1 schema — see docs/SCAFFOLDING.md §4.
 -- Source of truth for `migrations/0001_init.sql`; keep the two in sync.
 
-CREATE TABLE clients (
-  id          TEXT PRIMARY KEY,
-  name        TEXT NOT NULL,
-  phone       TEXT UNIQUE,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+-- Callers Directory — migration 0021. Renamed from `clients`: every caller
+-- who reaches the pipeline (not just clients) gets a row here, classified
+-- so the ingestion pipeline can gate on it. category enforced in code (not
+-- a CHECK), same convention as users.role / sites.is_confirmed.
+CREATE TABLE callers (
+  id             TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  phone          TEXT UNIQUE,
+  category       TEXT NOT NULL DEFAULT 'client',  -- family | staff | client | spam
+  staff_user_id  TEXT REFERENCES users(id),        -- set when this caller IS a staff member's own number
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
+CREATE INDEX idx_callers_category ON callers(category);
+CREATE INDEX idx_callers_staff_user ON callers(staff_user_id);
 
 CREATE TABLE calls (
   id              TEXT PRIMARY KEY,
+  -- NOT NULL UNIQUE even for a 'skipped' row (Family / repeat-known-Spam,
+  -- see stt_status below) — those get a synthetic no-recording/{id} key
+  -- rather than relaxing this constraint; nothing ever reads/writes R2 for
+  -- them. See src/lib/drive-calls-poller.ts insertSkippedCall.
   r2_key          TEXT NOT NULL UNIQUE,
-  client_id       TEXT REFERENCES clients(id),
+  client_id       TEXT REFERENCES callers(id),      -- FK column name kept as client_id (pre-Callers-Directory); references callers, not clients
   source          TEXT NOT NULL,        -- 'android' | 'ios' | 'drive'
   recorded_at     TEXT,                 -- when this row was uploaded (not necessarily when the call happened)
   recording_date  TEXT,                 -- the recorder's own filename timestamp, if the filename matched (e.g. AUDIO-2026-08-20-22-05-33.m4a); NULL otherwise
@@ -23,6 +35,8 @@ CREATE TABLE calls (
   stt_job_id      TEXT,
   stt_status      TEXT NOT NULL DEFAULT 'pending',
                   -- pending | transcription_in_progress | transcribed | extracted | failed
+                  -- | skipped (migration 0021 — Family / repeat-known-Spam
+                  -- minimal rows; no R2 download, no Sarvam submit, terminal)
   stt_error       TEXT,
 
   -- the extracted fields — see docs/ADDITIONAL_FEATURES_M0.md "Revised extraction schema"
@@ -47,6 +61,13 @@ CREATE TABLE calls (
   -- installation_updates checklist row (the staff site-visit flow), rather
   -- than an ordinary site voice memo or phone call. NULL otherwise.
   installation_update_id TEXT REFERENCES installation_updates(id),
+
+  -- migration 0021: soft-delete for calls the spam-scan prompt flagged.
+  -- Row + transcript kept for audit; the R2 audio object is what's
+  -- actually deleted (src/handlers/stt-webhook.ts). NULL for every
+  -- ordinary call.
+  deleted_at      TEXT,
+  deleted_reason  TEXT,   -- e.g. 'spam'; code-enforced, not a CHECK
 
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -92,6 +113,15 @@ CREATE TABLE call_sites (
   call_id     TEXT NOT NULL REFERENCES calls(id),
   site_id     TEXT NOT NULL REFERENCES sites(id),
   PRIMARY KEY (call_id, site_id)
+);
+
+-- "Associated sites" on a caller — migration 0022. Mirrors call_sites
+-- exactly. Schema only for now; nothing populates it yet, linking logic is
+-- a later feature.
+CREATE TABLE caller_sites (
+  caller_id   TEXT NOT NULL REFERENCES callers(id),
+  site_id     TEXT NOT NULL REFERENCES sites(id),
+  PRIMARY KEY (caller_id, site_id)
 );
 
 -- Datetime, not date — "साढ़े दस बजे निकलियो", "कल सुबह अर्ली" — raw_phrase is
@@ -184,6 +214,7 @@ CREATE TABLE missed_deadlines (
 CREATE INDEX idx_todos_open ON todos(status, due_date);
 CREATE INDEX idx_calls_client ON calls(client_id, created_at DESC);
 CREATE INDEX idx_call_sites_site ON call_sites(site_id);
+CREATE INDEX idx_caller_sites_site ON caller_sites(site_id);
 CREATE INDEX idx_commitments_call ON commitments(call_id);
 CREATE INDEX idx_escalations_status ON escalations(status, created_at DESC);
 CREATE INDEX idx_site_team_members_site ON site_team_members(site_id);
