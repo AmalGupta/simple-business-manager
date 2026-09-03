@@ -18,8 +18,7 @@
     // Callers Directory (migration 0021): "Spam" subfolder inside Calls —
     // confirmed-spam Drive files move here instead of Archive.
     "GOOGLE_DRIVE_SPAM_FOLDER_ID": "130Xhaxx3Z0G5FgjxFOBIQ5e5FBaoute8",
-    "PUBLIC_BASE_URL": "https://sbm-pipeline.gupta-amal01.workers.dev",
-    "DRIVE_POLL_SUBREQUEST_BUDGET": "950"
+    "PUBLIC_BASE_URL": "https://sbm-pipeline.gupta-amal01.workers.dev"
   },
 
   "assets": {
@@ -66,15 +65,9 @@
   // Drive Calls-folder poller — only ingests when app_settings.drive_poll_enabled is on.
   "triggers": {
     "crons": ["*/5 * * * *"]
-  },
-
-  // Cron poll ingests up to 20 Drive files (Drive + D1 + R2 subrequests). Raise on
-  // paid Workers if batches hit "Too many subrequests" — free tier stays at 50.
-  "limits": {
-    "cpu_ms": 300000,
-    "subrequests": 1000
   }
 
-  // Digest-email vars are documented in docs/SCAFFOLDING.md §2-3 but remain
+  // Subrequest budget for batch size is DRIVE_POLL_SUBREQUEST_BUDGET (default ~4 files
+  // on Workers Free). Paid plans can raise it in vars and optionally add limits here.
   // out of scope — see the "Not in this milestone" list in docs/BUILD_BRIEF.md.
 }
