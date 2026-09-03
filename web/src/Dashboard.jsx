@@ -964,6 +964,18 @@ export default function SimpleBusinessManager() {
         }}
       >
         <StatCard value={closedToday} label="closed today" />
+        <button
+          onClick={() => setView({ name: "calls" })}
+          style={{ all: "unset", cursor: "pointer", display: "block" }}
+          aria-label={`Calls logged — ${callsCount}`}
+        >
+          <Card tile>
+            <TileLabel>calls logged</TileLabel>
+            <div style={TILE_VALUE_ROW_STYLE}>
+              <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
+            </div>
+          </Card>
+        </button>
         <SitesAttentionTile
           sites={sitesAttention}
           onOpenSite={(site) => setView({ name: "site", site, from: { name: "home" } })}
@@ -1012,18 +1024,6 @@ export default function SimpleBusinessManager() {
             <StatCard value={parkedCount} label="parked" />
           </button>
         )}
-        <button
-          onClick={() => setView({ name: "calls" })}
-          style={{ all: "unset", cursor: "pointer", display: "block" }}
-          aria-label={`Calls logged — ${callsCount}`}
-        >
-          <Card tile>
-            <TileLabel>calls logged</TileLabel>
-            <div style={TILE_VALUE_ROW_STYLE}>
-              <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
-            </div>
-          </Card>
-        </button>
       </div>
     </>
   );
