@@ -70,7 +70,8 @@ async function requireAdmin(request: Request, env: Env): Promise<SessionWithUser
 export async function handleGetCalls(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
-  return json(await listCallsWithTodos(env.DB));
+  const includeLowSignal = new URL(request.url).searchParams.get("include_low_signal") === "1";
+  return json(await listCallsWithTodos(env.DB, { includeLowSignal }));
 }
 
 /** Home-page "Calls logged" tile — total row count, including low_signal calls the feed itself never shows a card for. */

@@ -17,6 +17,11 @@ export async function fetchCalls() {
   return fetchJSON("/api/calls");
 }
 
+/** Calls dashboard grid — includes low_signal so Important / Regular filters work. */
+export async function fetchCallsForDashboard() {
+  return fetchJSON("/api/calls?include_low_signal=1");
+}
+
 /** Background hydrate after lean fetchCalls() — map of call id → transcript text (or null). */
 export async function fetchCallTranscripts() {
   return fetchJSON("/api/calls/transcripts");

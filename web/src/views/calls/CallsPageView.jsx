@@ -1,61 +1,82 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { t } from "../../theme.js";
-import { TILE_ROW_STYLE, TILE_NUMBER_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { DownloadButton } from "../../components/DownloadButton.jsx";
 import { EmptyState } from "../../components/EmptyState.jsx";
-import { CallCard } from "../../components/CallCard.jsx";
 import {
+  fetchCallsForDashboard,
   fetchDrivePollSettings,
   patchDrivePollSettings,
   postDrivePoll,
 } from "../../lib/api.js";
+import { withCallMetadata, uniqueCallers, filterCallsByMeta } from "../../lib/callMetadata.js";
+import { CallsFilterBar } from "./CallsFilterBar.jsx";
+import { CallsGrid } from "./CallsGrid.jsx";
+import { CallDetailModal } from "./CallDetailModal.jsx";
 
-/* Calls Transcripts page — everything that used to sit directly on the
-   admin home feed, relocated behind the "Calls logged" tile. Adds the two
-   summary tiles (Important/Regular — see CallTypeBadge above for the same
-   split) and per-card badges; todo toggling, park, and download are
-   unchanged from the old home feed. */
-export function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds, onCallsChanged }) {
-  const [filter, setFilter] = useState(null); // null = all, "important", "regular"
+const EMPTY_FILTERS = {
+  dateFrom: "",
+  dateTo: "",
+  callers: [],
+  importantOnly: false,
+  withTodosOnly: false,
+};
+
+/**
+ * Calls dashboard — fills the viewport (no page scroll). Table body scrolls.
+ * Call detail opens in a modal so grid state is preserved on close.
+ */
+export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChanged }) {
+  const [rows, setRows] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [selectedId, setSelectedId] = useState(null);
+
   const [pollEnabled, setPollEnabled] = useState(false);
   const [pollMeta, setPollMeta] = useState({ lastAt: null, lastResult: null });
   const [pollBusy, setPollBusy] = useState(false);
   const [pollStatus, setPollStatus] = useState("");
 
+  const loadRows = useCallback(async () => {
+    setLoadError("");
+    const data = await fetchCallsForDashboard();
+    const decorated = (Array.isArray(data) ? data : []).map(withCallMetadata);
+    decorated.sort((a, b) => {
+      const ad = a.meta.callDateIso || "";
+      const bd = b.meta.callDateIso || "";
+      return bd.localeCompare(ad);
+    });
+    setRows(decorated);
+    return decorated;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
+    loadRows().catch((err) => {
+      if (!cancelled) {
+        setRows([]);
+        setLoadError(err.message || "Failed to load calls");
+      }
+    });
     fetchDrivePollSettings()
       .then((s) => {
         if (cancelled) return;
         setPollEnabled(Boolean(s.enabled));
         setPollMeta({ lastAt: s.lastAt ?? null, lastResult: s.lastResult ?? null });
       })
-      .catch(() => {
-        /* settings endpoint may 401 briefly during login race — ignore */
-      });
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadRows]);
 
-  const importantCalls = useMemo(() => calls.filter((c) => c.call_type !== "low_signal"), [calls]);
-  const regularCalls = useMemo(() => calls.filter((c) => c.call_type === "low_signal"), [calls]);
-  const shown = filter === "important" ? importantCalls : filter === "regular" ? regularCalls : calls;
-  /* Drive-ingested calls show by caller name; list is newest call-time first. */
-  const ordered = useMemo(
-    () =>
-      [...shown].sort((a, b) => {
-        const ad = new Date(a.recording_date || a.recorded_at).getTime();
-        const bd = new Date(b.recording_date || b.recorded_at).getTime();
-        return bd - ad;
-      }),
-    [shown]
+  const callerOptions = useMemo(() => uniqueCallers(rows ?? []), [rows]);
+  const filtered = useMemo(
+    () => (rows ? filterCallsByMeta(rows, filters) : []),
+    [rows, filters]
   );
-
-  const toggle = (key) => setFilter((current) => (current === key ? null : key));
 
   const onTogglePolling = async () => {
     const next = !pollEnabled;
@@ -88,6 +109,7 @@ export function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds
           ? "No new calls to import."
           : `Imported ${n} call${n === 1 ? "" : "s"} — transcription started.`
       );
+      await loadRows();
       if (typeof onCallsChanged === "function") await onCallsChanged();
     } catch (err) {
       setPollStatus(`Get latest failed: ${err.message}`);
@@ -97,35 +119,47 @@ export function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds
   };
 
   return (
-    <div>
-      <BackLink onClick={onBack}>Back</BackLink>
-      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>Calls</h1>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: "100%",
+        minHeight: 0,
+        gap: 10,
+        overflow: "hidden",
+      }}
+    >
+      <div style={{ flexShrink: 0 }}>
+        <BackLink onClick={onBack}>Back</BackLink>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0.15rem 0 0" }}>
+            Calls
+          </h1>
+          {rows && rows.length > 0 && (
+            <DownloadButton calls={filtered} label="filtered">
+              Download
+            </DownloadButton>
+          )}
+        </div>
+      </div>
 
-      <Card style={{ marginBottom: "1.25rem", padding: "14px 16px" }}>
-        <TileLabel>Drive sync</TileLabel>
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 10,
-            alignItems: "center",
-            marginTop: 10,
-          }}
-        >
+      <Card style={{ marginBottom: 0, padding: "10px 14px", flexShrink: 0 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+          <TileLabel>Drive sync</TileLabel>
           <button
             type="button"
             onClick={onGetLatest}
             disabled={pollBusy}
             style={{
               fontFamily: t.body,
-              fontSize: 14,
+              fontSize: 13,
               fontWeight: 600,
               color: "#fff",
               background: t.accent,
               border: "none",
               borderRadius: t.radiusButton,
-              padding: "10px 14px",
-              minHeight: 44,
+              padding: "8px 12px",
+              minHeight: 36,
               cursor: pollBusy ? "wait" : "pointer",
               opacity: pollBusy ? 0.7 : 1,
             }}
@@ -137,7 +171,7 @@ export function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds
               display: "inline-flex",
               alignItems: "center",
               gap: 8,
-              fontSize: 14,
+              fontSize: 13,
               color: t.edge,
               cursor: pollBusy ? "wait" : "pointer",
               userSelect: "none",
@@ -148,62 +182,58 @@ export function CallsPageView({ calls, onBack, onOpen, onToggle, onPark, busyIds
               checked={pollEnabled}
               disabled={pollBusy}
               onChange={onTogglePolling}
-              style={{ width: 18, height: 18, accentColor: "var(--color-accent)" }}
+              style={{ width: 16, height: 16, accentColor: "var(--color-accent)" }}
             />
-            Permanent call polling
+            Permanent polling
           </label>
+          {(pollStatus || pollMeta.lastResult) && (
+            <span style={{ fontSize: 12, color: t.edge2, flex: "1 1 160px" }}>
+              {pollStatus || pollMeta.lastResult}
+            </span>
+          )}
         </div>
-        {(pollStatus || pollMeta.lastResult) && (
-          <p style={{ margin: "10px 0 0", fontSize: 13, color: t.edge2, lineHeight: 1.45 }}>
-            {pollStatus || pollMeta.lastResult}
-            {pollMeta.lastAt ? ` · last run ${new Date(pollMeta.lastAt).toLocaleString()}` : ""}
-          </p>
-        )}
       </Card>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: "1.5rem" }}>
-        <button onClick={() => toggle("important")} style={{ all: "unset", cursor: "pointer", display: "block" }}>
-          <Card style={{ borderColor: filter === "important" ? t.accent : t.frost }}>
-            <TileLabel>Important calls</TileLabel>
-            <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={TILE_NUMBER_STYLE}>{importantCalls.length}</span>
-            </div>
-          </Card>
-        </button>
-        <button onClick={() => toggle("regular")} style={{ all: "unset", cursor: "pointer", display: "block" }}>
-          <Card style={{ borderColor: filter === "regular" ? t.accent : t.frost }}>
-            <TileLabel>Regular calls</TileLabel>
-            <div style={{ ...TILE_ROW_STYLE, borderTop: "none", padding: "6px 0 0" }}>
-              <span style={TILE_NUMBER_STYLE}>{regularCalls.length}</span>
-            </div>
-          </Card>
-        </button>
-      </div>
+      {loadError && (
+        <p style={{ fontSize: 14, color: t.signal, margin: 0, flexShrink: 0 }}>{loadError}</p>
+      )}
 
-      {calls.length === 0 ? (
+      {rows === null ? (
+        <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>Loading calls…</p>
+      ) : rows.length === 0 ? (
         <EmptyState />
-      ) : ordered.length === 0 ? (
-        <p style={{ fontSize: 14, color: t.edge2 }}>No {filter} calls.</p>
       ) : (
         <>
-          {ordered.map((call, i) => (
-            <CallCard
-              key={call.id}
-              index={i}
-              call={call}
-              showTypeBadge
-              onOpen={onOpen}
-              onToggle={onToggle}
-              onPark={onPark}
-              busyIds={busyIds}
-            />
-          ))}
-          <div style={{ marginTop: "1.5rem", display: "flex", justifyContent: "flex-end" }}>
-            <DownloadButton calls={ordered} label={filter ?? "all"}>
-              Download {filter ?? "everything"}
-            </DownloadButton>
-          </div>
+          <CallsFilterBar
+            filters={filters}
+            callerOptions={callerOptions}
+            onChange={setFilters}
+            resultCount={filtered.length}
+          />
+          <h2
+            style={{
+              fontFamily: t.display,
+              fontSize: 16,
+              fontWeight: 600,
+              color: t.edge,
+              margin: "2px 0 0",
+              flexShrink: 0,
+            }}
+          >
+            Call / Voice Note Logs
+          </h2>
+          <CallsGrid rows={filtered} selectedId={selectedId} onSelect={setSelectedId} />
         </>
+      )}
+
+      {selectedId && (
+        <CallDetailModal
+          callId={selectedId}
+          onClose={() => setSelectedId(null)}
+          onToggle={onToggle}
+          onPark={onPark}
+          busyIds={busyIds}
+        />
       )}
     </div>
   );

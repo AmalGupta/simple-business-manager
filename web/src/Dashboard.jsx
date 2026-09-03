@@ -18,7 +18,6 @@ import { EscalationsTile } from "./views/home/EscalationsTile.jsx";
 import { StreakWall } from "./views/calls/StreakWall.jsx";
 import { DayView } from "./views/calls/DayView.jsx";
 import { CallsPageView } from "./views/calls/CallsPageView.jsx";
-import { RecordingsPageView } from "./views/calls/RecordingsPageView.jsx";
 import { CallDetail } from "./views/calls/CallDetail.jsx";
 import { OpenTodosView } from "./views/calls/OpenTodosView.jsx";
 import { MyOpenTodosView } from "./views/calls/MyOpenTodosView.jsx";
@@ -461,8 +460,17 @@ export default function SimpleBusinessManager() {
 
   const openCall = bulkCallReady ? bulkCall : view.name === "call" ? fetchedCall : null;
 
-  const shell = (children) => (
-    <div style={{ background: t.pane, minHeight: "100vh", fontFamily: t.body, color: t.edge }}>
+  const shell = (children, { wide = false, fillViewport = false } = {}) => (
+    <div
+      style={{
+        background: t.pane,
+        minHeight: "100vh",
+        height: fillViewport ? "100vh" : undefined,
+        overflow: fillViewport ? "hidden" : undefined,
+        fontFamily: t.body,
+        color: t.edge,
+      }}
+    >
       <style>{`
         *{box-sizing:border-box}
         button:focus-visible,a:focus-visible{outline:2px solid ${t.edge};outline-offset:2px}
@@ -524,7 +532,20 @@ export default function SimpleBusinessManager() {
           .sbm-unread-glow{animation:none;box-shadow:0 0 0 3px rgba(34,197,94,0.35)}
         }
       `}</style>
-      <main style={{ maxWidth: 720, margin: "0 auto", padding: "2rem 1.25rem 4rem" }}>{children}</main>
+      <main
+        style={{
+          maxWidth: wide ? 1100 : 720,
+          margin: "0 auto",
+          padding: fillViewport ? "1rem 1.25rem 1rem" : "2rem 1.25rem 4rem",
+          height: fillViewport ? "100%" : undefined,
+          minHeight: fillViewport ? 0 : undefined,
+          overflow: fillViewport ? "hidden" : undefined,
+          display: fillViewport ? "flex" : undefined,
+          flexDirection: fillViewport ? "column" : undefined,
+        }}
+      >
+        {children}
+      </main>
     </div>
   );
 
@@ -613,9 +634,7 @@ export default function SimpleBusinessManager() {
   if (view.name === "calls")
     return shell(
       <CallsPageView
-        calls={calls}
         onBack={() => setView(homeView)}
-        onOpen={(id) => setView({ name: "call", id, from: { name: "calls" } })}
         onToggle={onToggle}
         onPark={onPark}
         busyIds={busyIds}
@@ -623,7 +642,8 @@ export default function SimpleBusinessManager() {
           const callsData = await fetchCalls();
           setCalls(callsData);
         }}
-      />
+      />,
+      { wide: true, fillViewport: true }
     );
 
   if (view.name === "open-todos")
@@ -650,15 +670,6 @@ export default function SimpleBusinessManager() {
         onPark={onPark}
         busyIds={busyIds}
         status="snoozed"
-      />
-    );
-
-  if (view.name === "recordings")
-    return shell(
-      <RecordingsPageView
-        calls={calls}
-        onBack={() => setView(homeView)}
-        onOpen={(id) => setView({ name: "call", id, from: { name: "recordings" } })}
       />
     );
 
@@ -982,21 +993,6 @@ export default function SimpleBusinessManager() {
         >
           <Card tile>
             <TileLabel>calls logged</TileLabel>
-            <div style={TILE_VALUE_ROW_STYLE}>
-              <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
-            </div>
-          </Card>
-        </button>
-        {/* Admin/superadmin only, same as "calls logged" — staff never load
-            this home view at all (see homeView above). Separate control from
-            Calls: recordings + sentence-format todos, not a todo checklist. */}
-        <button
-          onClick={() => setView({ name: "recordings" })}
-          style={{ all: "unset", cursor: "pointer", display: "block" }}
-          aria-label={`Recordings — ${callsCount}`}
-        >
-          <Card tile>
-            <TileLabel>recordings</TileLabel>
             <div style={TILE_VALUE_ROW_STYLE}>
               <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
             </div>

@@ -9,7 +9,7 @@ export const TILE_ROW_STYLE = {
 };
 
 /* The value row in a fixed-height number tile (StatCard, StaffTile,
-   WorkflowTilesRow, "calls logged", "recordings") — grows to fill the
+   WorkflowTilesRow, "calls logged") — grows to fill the
    tile's remaining --tile-height below the label and centers the number
    in it, so every number tile looks the same regardless of row position. */
 export const TILE_VALUE_ROW_STYLE = {

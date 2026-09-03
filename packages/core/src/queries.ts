@@ -644,14 +644,19 @@ function toCallRow(
  * sort rule). Reconciled here: a call is waiting if any of its still-open
  * todos are marked customer_waiting.
  *
- * `low_signal` calls are excluded — see docs/ADDITIONAL_FEATURES_M0.md
- * "call_type = low_signal": they get no dashboard card by design. Rows from
- * before this column existed (call_type IS NULL) still show, since NULL
- * means "not classified yet," not "known to be low signal."
+ * By default `low_signal` calls are excluded — see docs/ADDITIONAL_FEATURES_M0.md
+ * "call_type = low_signal". Pass `includeLowSignal: true` for the Calls
+ * dashboard grid (Important vs Regular filters need both).
  */
-export async function listCallsWithTodos(db: D1Database): Promise<CallRow[]> {
+export async function listCallsWithTodos(
+  db: D1Database,
+  opts: { includeLowSignal?: boolean } = {}
+): Promise<CallRow[]> {
+  const where = opts.includeLowSignal
+    ? ""
+    : `WHERE calls.call_type IS NULL OR calls.call_type != 'low_signal'`;
   const { results: calls } = await db
-    .prepare(`${CALL_LIST_SELECT} WHERE calls.call_type IS NULL OR calls.call_type != 'low_signal' ORDER BY calls.recorded_at DESC`)
+    .prepare(`${CALL_LIST_SELECT} ${where} ORDER BY calls.recorded_at DESC`)
     .all<RawCallJoinRow>();
   if (calls.length === 0) return [];
 
