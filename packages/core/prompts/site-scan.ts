@@ -21,7 +21,6 @@ import {
   ANTHROPIC_MESSAGES_URL,
   anthropicRequestHeaders,
   cachedSystemPrompt,
-  withCachedTool,
 } from "./anthropic";
 
 const SITE_SCAN_TOOL = {
@@ -74,8 +73,8 @@ export async function scanCallForSites(input: SiteScanInput): Promise<string[]> 
     body: JSON.stringify({
       model: input.model,
       max_tokens: 500,
-      system: cachedSystemPrompt(SITE_SCAN_SYSTEM_PROMPT),
-      tools: [withCachedTool(SITE_SCAN_TOOL)],
+      system: cachedSystemPrompt(SITE_SCAN_SYSTEM_PROMPT, input.model),
+      tools: [SITE_SCAN_TOOL],
       tool_choice: { type: "tool", name: "record_sites" },
       messages: [{ role: "user", content: buildUserMessage(input.entries) }],
     }),

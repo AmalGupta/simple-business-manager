@@ -20,7 +20,6 @@ import {
   ANTHROPIC_MESSAGES_URL,
   anthropicRequestHeaders,
   cachedSystemPrompt,
-  withCachedTool,
 } from "./anthropic";
 
 const SPAM_SCAN_TOOL = {
@@ -79,8 +78,8 @@ export async function scanCallForSpam(input: SpamScanInput): Promise<SpamScanRes
     body: JSON.stringify({
       model: input.model,
       max_tokens: 300,
-      system: cachedSystemPrompt(SPAM_SCAN_SYSTEM_PROMPT),
-      tools: [withCachedTool(SPAM_SCAN_TOOL)],
+      system: cachedSystemPrompt(SPAM_SCAN_SYSTEM_PROMPT, input.model),
+      tools: [SPAM_SCAN_TOOL],
       tool_choice: { type: "tool", name: "record_spam_verdict" },
       messages: [{ role: "user", content: buildUserMessage(input.entries) }],
     }),

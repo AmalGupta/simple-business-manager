@@ -13,7 +13,6 @@ import {
   ANTHROPIC_MESSAGES_URL,
   anthropicRequestHeaders,
   cachedSystemPrompt,
-  withCachedTool,
 } from "./anthropic";
 
 export interface ExtractInput {
@@ -35,8 +34,8 @@ export async function extractCall(input: ExtractInput): Promise<CallExtraction> 
     body: JSON.stringify({
       model: input.model,
       max_tokens: 2000,
-      system: cachedSystemPrompt(ACTIVE.system),
-      tools: [withCachedTool(ACTIVE.tool)],
+      system: cachedSystemPrompt(ACTIVE.system, input.model),
+      tools: [ACTIVE.tool],
       tool_choice: { type: "tool", name: "record_call" },
       messages: [
         {
