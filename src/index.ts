@@ -110,6 +110,8 @@ export interface Env {
   GOOGLE_DRIVE_SPAM_FOLDER_ID?: string;
   /** Public origin for Sarvam webhook callbacks (cron has no request URL). */
   PUBLIC_BASE_URL?: string;
+  /** Subrequest budget for one Drive poll invocation (default 45 ≈ free tier). */
+  DRIVE_POLL_SUBREQUEST_BUDGET?: string;
 }
 
 function timingSafeEqual(a: string, b: string): boolean {

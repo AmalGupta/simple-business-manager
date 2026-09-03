@@ -2,11 +2,12 @@
 // into R2 + the existing Sarvam → extract pipeline.
 
 import {
+  deleteCallById,
   findOrCreateCaller,
   insertCall,
   insertSkippedCall,
   setAppSetting,
-  setCallFailed,
+  setCallDriveFileId,
   setCallSubmitted,
   setDrivePollProgress,
   DRIVE_POLL_LAST_AT_KEY,
@@ -18,6 +19,30 @@ import type { Env } from "../index";
 import { contentTypeForDriveCall, parseDriveCallFilename } from "./drive-call-filename";
 import { downloadDriveFile, listDriveFiles, moveDriveFile, type DriveFileListItem } from "./google-drive";
 import { submitRecording } from "./sarvam";
+
+/** Per-file: ~2 Drive fetches + 1 R2 put + ~4 D1 ops + 1 progress write. */
+const SUBREQUESTS_PER_FILE_EST = 8;
+/** Workers Free allows 50 subrequests/invocation; leave headroom for listing + setup. */
+const DEFAULT_SUBREQUEST_BUDGET = 45;
+
+function subrequestBudget(env: Env): number {
+  const raw = env.DRIVE_POLL_SUBREQUEST_BUDGET?.trim();
+  if (raw) {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DEFAULT_SUBREQUEST_BUDGET;
+}
+
+/**
+ * Max files one invocation can ingest without hitting the subrequest cap.
+ * Set DRIVE_POLL_SUBREQUEST_BUDGET in wrangler (e.g. 950) on paid Workers.
+ */
+export function drivePollBatchCap(env: Env, requested: number): number {
+  const budget = subrequestBudget(env);
+  const byBudget = Math.max(1, Math.floor((budget - 6) / SUBREQUESTS_PER_FILE_EST));
+  return Math.min(requested, byBudget);
+}
 
 export const DRIVE_POLL_BATCH_SIZE = 20;
 
@@ -127,15 +152,29 @@ async function reportProgress(env: Env, progress: DrivePollProgress): Promise<vo
   }
 }
 
+async function rollbackPreSubmitIngest(env: Env, callId: string, r2Key: string | null): Promise<void> {
+  try {
+    await deleteCallById(env.DB, callId);
+  } catch (err) {
+    console.error(`[drive-poll] rollback delete call ${callId}:`, String(err));
+  }
+  if (r2Key) {
+    try {
+      await env.RECORDINGS.delete(r2Key);
+    } catch (err) {
+      console.error(`[drive-poll] rollback delete R2 ${r2Key}:`, String(err));
+    }
+  }
+}
+
 async function ingestOne(
   env: Env,
-  ctx: ExecutionContext,
   file: DriveFileListItem,
   callbackUrl: string,
   callsId: string,
   archiveId: string,
   spamId: string | null,
-  onStep: (step: DrivePollStep, clientName?: string) => Promise<void>
+  onStep: (step: DrivePollStep, clientName?: string) => void
 ): Promise<DrivePollIngested> {
   const parsed = parseDriveCallFilename(file.name);
   const caller = await findOrCreateCaller(env.DB, {
@@ -150,27 +189,32 @@ async function ingestOne(
   // spam-check (see stt-webhook.ts) only ever runs once per new/unknown
   // number; a number already tagged spam is pre-filtered here from then on.
   if (caller.category === "family" || caller.category === "spam") {
-    await onStep("skip", caller.name);
+    onStep("skip", caller.name);
+    const destinationFolderId = caller.category === "family" ? archiveId : spamId;
+    if (!destinationFolderId) {
+      throw new Error(
+        caller.category === "spam"
+          ? "GOOGLE_DRIVE_SPAM_FOLDER_ID not configured"
+          : "GOOGLE_DRIVE_ARCHIVE_FOLDER_ID not configured"
+      );
+    }
+
     await insertSkippedCall(env.DB, {
       id: callId,
       callerId: caller.id,
       source: "drive",
       recordedAt: callTime,
       recordingDate: parsed.recordedAt,
-      driveFileId: file.id,
+      driveFileId: null,
     });
 
-    const destinationFolderId = caller.category === "family" ? archiveId : spamId;
-    let archived = false;
-    if (!destinationFolderId) {
-      console.error(`[drive-poll] GOOGLE_DRIVE_SPAM_FOLDER_ID not configured — leaving ${file.name} in Calls`);
-    } else {
-      try {
-        await moveDriveFile(env, file.id, { addParentId: destinationFolderId, removeParentId: callsId });
-        archived = true;
-      } catch (err) {
-        console.error(`[drive-poll] ${caller.category} move failed for ${file.name}:`, String(err));
-      }
+    try {
+      onStep("archive", caller.name);
+      await moveDriveFile(env, file.id, { addParentId: destinationFolderId, removeParentId: callsId });
+      await setCallDriveFileId(env.DB, callId, file.id);
+    } catch (err) {
+      await deleteCallById(env.DB, callId);
+      throw err;
     }
 
     return {
@@ -178,7 +222,7 @@ async function ingestOne(
       driveFileId: file.id,
       fileName: file.name,
       clientName: caller.name,
-      archived,
+      archived: true,
       skipped: true,
     };
   }
@@ -186,42 +230,40 @@ async function ingestOne(
   // staff / client (new or existing, unknown) — unchanged normal flow.
   const ext = file.name.includes(".") ? file.name.split(".").pop()! : "m4a";
   const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
+  let submitted = false;
 
-  await onStep("download", caller.name);
-  const downloaded = await downloadDriveFile(env, file.id);
-  await env.RECORDINGS.put(r2Key, downloaded.body, {
-    httpMetadata: {
-      contentType: contentTypeForDriveCall(file.name, downloaded.contentType),
-    },
-  });
-
-  await onStep("insert", caller.name);
-  await insertCall(env.DB, {
-    id: callId,
-    r2Key,
-    source: "drive",
-    recordedAt: callTime,
-    recordingDate: parsed.recordedAt,
-    durationS: null,
-    clientId: caller.id,
-    driveFileId: file.id,
-  });
-
-  await onStep("submit", caller.name);
-  ctx.waitUntil(
-    submitRecording(env, r2Key, callbackUrl)
-      .then((result) => setCallSubmitted(env.DB, callId, result.jobId))
-      .catch((err) => setCallFailed(env.DB, callId, `submit: ${String(err)}`))
-  );
-
-  // Move out of Calls only after R2 + D1 succeeded — Drive is the backlog queue.
-  await onStep("archive", caller.name);
-  let archived = false;
   try {
+    onStep("download", caller.name);
+    const downloaded = await downloadDriveFile(env, file.id);
+    await env.RECORDINGS.put(r2Key, downloaded.body, {
+      httpMetadata: {
+        contentType: contentTypeForDriveCall(file.name, downloaded.contentType),
+      },
+    });
+
+    onStep("insert", caller.name);
+    await insertCall(env.DB, {
+      id: callId,
+      r2Key,
+      source: "drive",
+      recordedAt: callTime,
+      recordingDate: parsed.recordedAt,
+      durationS: null,
+      clientId: caller.id,
+    });
+
+    onStep("submit", caller.name);
+    const submitResult = await submitRecording(env, r2Key, callbackUrl);
+    await setCallSubmitted(env.DB, callId, submitResult.jobId);
+    submitted = true;
+
+    // Archive only after R2 + D1 + STT submit — failed files stay in Calls for retry.
+    onStep("archive", caller.name);
     await moveDriveFile(env, file.id, { addParentId: archiveId, removeParentId: callsId });
-    archived = true;
+    await setCallDriveFileId(env.DB, callId, file.id);
   } catch (err) {
-    console.error(`[drive-poll] archive move failed for ${file.name}:`, String(err));
+    if (!submitted) await rollbackPreSubmitIngest(env, callId, r2Key);
+    throw err;
   }
 
   return {
@@ -229,7 +271,7 @@ async function ingestOne(
     driveFileId: file.id,
     fileName: file.name,
     clientName: caller.name,
-    archived,
+    archived: true,
     skipped: false,
   };
 }
@@ -242,10 +284,11 @@ async function ingestOne(
  */
 export async function pollDriveCalls(
   env: Env,
-  ctx: ExecutionContext,
+  _ctx: ExecutionContext,
   options: { limit?: number; callbackOrigin?: string } = {}
 ): Promise<DrivePollResult> {
-  const limit = options.limit ?? DRIVE_POLL_BATCH_SIZE;
+  const requested = options.limit ?? DRIVE_POLL_BATCH_SIZE;
+  const limit = drivePollBatchCap(env, requested);
   const startedAt = new Date().toISOString();
   const progress: DrivePollProgress = {
     status: "running",
@@ -291,16 +334,14 @@ export async function pollDriveCalls(
       try {
         const ingested = await ingestOne(
           env,
-          ctx,
           file,
           callbackUrl,
           callsId,
           archiveId,
           spamId,
-          async (step, clientName) => {
+          (step, clientName) => {
             progress.current = { fileName: file.name, step, clientName };
             progress.message = null;
-            await reportProgress(env, progress);
           }
         );
         result.ingested.push(ingested);
@@ -314,13 +355,17 @@ export async function pollDriveCalls(
         const error = String(err);
         result.errors.push({ fileName: file.name, error });
         progress.errors.push({ fileName: file.name, error });
+        if (/too many subrequests/i.test(error)) break;
       }
       progress.current = null;
       await reportProgress(env, progress);
     }
 
     const archived = result.ingested.filter((r) => r.archived).length;
-    const summary = `ingested ${result.ingested.length}/${limit}; archived ${archived}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`;
+    const summary =
+      limit < requested
+        ? `ingested ${result.ingested.length}/${limit} (cap ${requested} — subrequest budget); archived ${archived}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`
+        : `ingested ${result.ingested.length}/${limit}; archived ${archived}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`;
     progress.status = "done";
     progress.phase = "done";
     progress.current = null;

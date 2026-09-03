@@ -340,6 +340,16 @@ export async function setCallFailed(db: D1Database, callId: string, error: strin
     .run();
 }
 
+/** Drive poll — stamp drive_file_id only after Archive move succeeds (retry stays in Calls until then). */
+export async function setCallDriveFileId(db: D1Database, callId: string, driveFileId: string): Promise<void> {
+  await db.prepare(`UPDATE calls SET drive_file_id = ? WHERE id = ?`).bind(driveFileId, callId).run();
+}
+
+/** Roll back a Drive ingest row before STT submit — no child rows exist yet. */
+export async function deleteCallById(db: D1Database, callId: string): Promise<void> {
+  await db.prepare(`DELETE FROM calls WHERE id = ?`).bind(callId).run();
+}
+
 /** Task 4 — transcript landed. Written the moment fetchResult returns, so it's viewable immediately. */
 export async function setCallTranscribed(
   db: D1Database,
