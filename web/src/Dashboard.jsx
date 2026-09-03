@@ -467,16 +467,12 @@ export default function SimpleBusinessManager() {
 
   const shell = (children, { wide = false, fillViewport = false } = {}) => (
     <div
+      className={fillViewport ? "sbm-fill-viewport" : undefined}
       style={{
         background: t.pane,
-        minHeight: fillViewport ? undefined : "100vh",
+        minHeight: "100vh",
+        height: fillViewport ? "100vh" : undefined,
         overflow: fillViewport ? "hidden" : undefined,
-        overscrollBehavior: fillViewport ? "none" : undefined,
-        position: fillViewport ? "fixed" : undefined,
-        inset: fillViewport ? 0 : undefined,
-        width: fillViewport ? "100%" : undefined,
-        display: fillViewport ? "flex" : undefined,
-        flexDirection: fillViewport ? "column" : undefined,
         fontFamily: t.body,
         color: t.edge,
       }}
@@ -541,6 +537,21 @@ export default function SimpleBusinessManager() {
           .sbm-day{transition:none}
           .sbm-unread-glow{animation:none;box-shadow:0 0 0 3px rgba(34,197,94,0.35)}
         }
+
+        /* Mobile-only: pin the Calls fill-viewport shell to the visual
+           viewport so 100vh address-bar chrome cannot shrink the grid.
+           Desktop keeps the original 100vh / in-flow height chain. */
+        .sbm-fill-viewport{overscroll-behavior:none}
+        @media (max-width:640px){
+          .sbm-fill-viewport{
+            position:fixed;inset:0;width:100%;
+            height:auto;min-height:0;
+            display:flex;flex-direction:column;
+          }
+          .sbm-fill-viewport>main{
+            flex:1 1 auto;width:100%;overscroll-behavior:none;
+          }
+        }
       `}</style>
       <main
         style={{
@@ -550,11 +561,8 @@ export default function SimpleBusinessManager() {
           height: fillViewport ? "100%" : undefined,
           minHeight: fillViewport ? 0 : undefined,
           overflow: fillViewport ? "hidden" : undefined,
-          overscrollBehavior: fillViewport ? "none" : undefined,
           display: fillViewport ? "flex" : undefined,
           flexDirection: fillViewport ? "column" : undefined,
-          flex: fillViewport ? "1 1 auto" : undefined,
-          width: fillViewport ? "100%" : undefined,
         }}
       >
         {children}

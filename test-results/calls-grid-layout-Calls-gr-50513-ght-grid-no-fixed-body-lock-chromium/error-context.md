@@ -6,8 +6,8 @@
 
 # Test info
 
-- Name: calls-mobile-scroll.spec.ts >> Calls page mobile scroll (Android Chrome) >> table scrolls; document stays locked after hitting the last row
-- Location: e2e/tests/calls-mobile-scroll.spec.ts:116:3
+- Name: calls-grid-layout.spec.ts >> Calls grid desktop vs mobile layout >> desktop: summary column, full-height grid, no fixed-body lock
+- Location: e2e/tests/calls-grid-layout.spec.ts:5:3
 
 # Error details
 

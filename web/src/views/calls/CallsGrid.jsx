@@ -20,9 +20,8 @@ const GRID_CSS = `
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   overflow: hidden;
-  overscroll-behavior: none;
-  touch-action: manipulation;
 }
 .sbm-calls-grid.ag-theme-quartz {
   --ag-font-family: var(--font-body), system-ui, sans-serif;
@@ -47,12 +46,7 @@ const GRID_CSS = `
   width: 100%;
   flex: 1 1 auto;
   min-height: 0;
-  overscroll-behavior: none;
-}
-@media (max-width: 640px) {
-  .sbm-calls-grid.ag-theme-quartz {
-    --ag-row-height: 74px;
-  }
+  height: 100%;
 }
 .sbm-calls-grid .ag-root-wrapper {
   border: none;
@@ -75,24 +69,17 @@ const GRID_CSS = `
   color: var(--color-ink);
 }
 /* AG Grid 36 scroll surface is `.ag-grid-viewport` (older `.ag-body-viewport`
-   / `.ag-center-cols-viewport` no longer exist). Own vertical scroll here so
-   mobile overscroll cannot chain to the page. */
+   / `.ag-center-cols-viewport` no longer exist). Desktop: auto scroll, no
+   reserved gutter. Mobile: forced scroll + contain so overscroll cannot
+   chain to the page. */
 .sbm-calls-grid .ag-grid-viewport {
-  overflow-y: scroll !important;
-  overflow-x: hidden !important;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
+  overflow-y: auto !important;
   overscroll-behavior: contain;
-  touch-action: pan-y;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin !important;
+  scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-line)) transparent;
-  -ms-overflow-style: auto !important;
 }
 .sbm-calls-grid .ag-grid-viewport::-webkit-scrollbar {
-  display: block !important;
   width: 8px;
-  -webkit-appearance: none;
 }
 .sbm-calls-grid .ag-grid-viewport::-webkit-scrollbar-track {
   background: color-mix(in srgb, #DCE6FF 40%, white);
@@ -103,10 +90,34 @@ const GRID_CSS = `
   border: 2px solid transparent;
   background-clip: content-box;
 }
-/* Fake scrollbar track — don't let it become a second touch scroller. */
-.sbm-calls-grid .ag-body-vertical-scroll-viewport {
-  overscroll-behavior: none;
-  pointer-events: none;
+@media (max-width: 640px) {
+  .sbm-calls-grid-wrap {
+    overscroll-behavior: none;
+    touch-action: manipulation;
+  }
+  .sbm-calls-grid.ag-theme-quartz {
+    --ag-row-height: 74px;
+    overscroll-behavior: none;
+  }
+  .sbm-calls-grid .ag-grid-viewport {
+    overflow-y: scroll !important;
+    overflow-x: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin !important;
+    -ms-overflow-style: auto !important;
+  }
+  .sbm-calls-grid .ag-grid-viewport::-webkit-scrollbar {
+    display: block !important;
+    -webkit-appearance: none;
+  }
+  /* Fake scrollbar track — don't let it become a second touch scroller. */
+  .sbm-calls-grid .ag-body-vertical-scroll-viewport {
+    overscroll-behavior: none;
+    pointer-events: none;
+  }
 }
 .sbm-calls-grid .ag-row {
   cursor: pointer;
@@ -477,7 +488,7 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
             paginationPageSize={pageSize}
             suppressPaginationPanel
             rowHeight={narrow ? 74 : 64}
-            alwaysShowVerticalScroll
+            alwaysShowVerticalScroll={narrow}
             animateRows={false}
             suppressCellFocus
             enableBrowserTooltips={false}

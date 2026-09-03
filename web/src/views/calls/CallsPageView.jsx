@@ -66,13 +66,13 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
     window.scrollTo(0, 0);
   }, [rows]);
 
-  /* Prevent mobile scroll-chaining (iOS Safari + Chrome Android): once the
-     table hits the bottom, the next gesture was scrolling the document
-     instead of the grid. Lock html/body and contain overscroll at the
-     grid's top/bottom boundaries. */
+  /* Mobile-only scroll lock. The desktop Calls page already fills 100vh
+     via the shell; pinning body { position:fixed } there collapses the
+     height chain and squeezes the grid. */
   useEffect(() => {
     const html = document.documentElement;
     const body = document.body;
+    const mq = window.matchMedia("(max-width: 640px)");
     const prev = {
       htmlOverflow: html.style.overflow,
       bodyOverflow: body.style.overflow,
@@ -84,18 +84,6 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
       htmlHeight: html.style.height,
       bodyHeight: body.style.height,
     };
-    const scrollY = window.scrollY || 0;
-    html.style.overflow = "hidden";
-    body.style.overflow = "hidden";
-    html.style.overscrollBehavior = "none";
-    body.style.overscrollBehavior = "none";
-    /* Chrome Android: fixed body is more reliable than overflow:hidden alone
-       at stopping document scroll / pull-to-refresh after nested overscroll. */
-    html.style.height = "100%";
-    body.style.height = "100%";
-    body.style.position = "fixed";
-    body.style.top = `-${scrollY}px`;
-    body.style.width = "100%";
 
     const findAllowedScroller = (node) => {
       let el = node;
@@ -123,6 +111,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
     };
 
     let lastY = 0;
+    let scrollY = 0;
+    let locked = false;
     const onTouchStart = (e) => {
       if (e.touches[0]) lastY = e.touches[0].clientY;
     };
@@ -143,10 +133,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
         e.preventDefault();
       }
     };
-    document.addEventListener("touchstart", onTouchStart, { passive: true });
-    document.addEventListener("touchmove", onTouchMove, { passive: false });
 
-    return () => {
+    const restore = () => {
       html.style.overflow = prev.htmlOverflow;
       body.style.overflow = prev.bodyOverflow;
       html.style.overscrollBehavior = prev.htmlOverscroll;
@@ -158,7 +146,37 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
       body.style.height = prev.bodyHeight;
       document.removeEventListener("touchstart", onTouchStart);
       document.removeEventListener("touchmove", onTouchMove);
-      window.scrollTo(0, scrollY);
+    };
+
+    const apply = () => {
+      const wasLocked = locked;
+      restore();
+      if (wasLocked) window.scrollTo(0, scrollY);
+      locked = false;
+      if (!mq.matches) return;
+      locked = true;
+      scrollY = window.scrollY || 0;
+      html.style.overflow = "hidden";
+      body.style.overflow = "hidden";
+      html.style.overscrollBehavior = "none";
+      body.style.overscrollBehavior = "none";
+      /* Chrome Android: fixed body is more reliable than overflow:hidden alone
+         at stopping document scroll / pull-to-refresh after nested overscroll. */
+      html.style.height = "100%";
+      body.style.height = "100%";
+      body.style.position = "fixed";
+      body.style.top = `-${scrollY}px`;
+      body.style.width = "100%";
+      document.addEventListener("touchstart", onTouchStart, { passive: true });
+      document.addEventListener("touchmove", onTouchMove, { passive: false });
+    };
+
+    apply();
+    mq.addEventListener("change", apply);
+    return () => {
+      mq.removeEventListener("change", apply);
+      restore();
+      if (locked) window.scrollTo(0, scrollY);
     };
   }, []);
 
