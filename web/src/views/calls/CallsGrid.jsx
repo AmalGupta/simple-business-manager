@@ -68,8 +68,8 @@ const GRID_CSS = `
   font-size: 11px;
   color: var(--color-ink);
 }
-/* AG Grid 36 scroll surface is `.ag-grid-viewport` (older `.ag-body-viewport`
-   / `.ag-center-cols-viewport` no longer exist). Desktop: auto scroll, no
+/* AG Grid 36 scroll surface is '.ag-grid-viewport' (older '.ag-body-viewport'
+   / '.ag-center-cols-viewport' no longer exist). Desktop: auto scroll, no
    reserved gutter. Mobile: forced scroll + contain so overscroll cannot
    chain to the page. */
 .sbm-calls-grid .ag-grid-viewport {
