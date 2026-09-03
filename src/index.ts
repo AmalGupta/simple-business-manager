@@ -55,6 +55,7 @@ import {
   handleUpdateStaffPhone,
 } from "./handlers/auth";
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
+import { handleCreateCaller, handleListCallers, handleUpdateCaller } from "./handlers/callers";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
 import {
@@ -105,6 +106,8 @@ export interface Env {
   GOOGLE_DRIVE_CALLS_FOLDER_ID?: string;
   /** Folder polled files move into after successful R2 ingest (e.g. Calls/Archived). */
   GOOGLE_DRIVE_ARCHIVE_FOLDER_ID?: string;
+  /** Folder known-Spam-caller Drive files move into instead of Archive (migration 0021, Callers Directory) — both a repeat call from an already-known-spam number, and a first-time call the post-transcript spam-scan flags. */
+  GOOGLE_DRIVE_SPAM_FOLDER_ID?: string;
   /** Public origin for Sarvam webhook callbacks (cron has no request URL). */
   PUBLIC_BASE_URL?: string;
 }
@@ -336,6 +339,20 @@ export default {
     const staffResetMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/reset-pin$/);
     if (staffResetMatch && request.method === "POST") {
       return handleResetStaffPin(request, env, staffResetMatch[1]);
+    }
+
+    // --- Callers Directory (migration 0021) — admin/superadmin only,
+    // session-cookie gated only, same pattern as /api/staff*. ---
+
+    if (url.pathname === "/api/callers" && request.method === "GET") {
+      return handleListCallers(request, env);
+    }
+    if (url.pathname === "/api/callers" && request.method === "POST") {
+      return handleCreateCaller(request, env);
+    }
+    const callerMatch = url.pathname.match(/^\/api\/callers\/([^/]+)$/);
+    if (callerMatch && request.method === "PATCH") {
+      return handleUpdateCaller(request, env, callerMatch[1]);
     }
 
     // --- Site media, voice notes, and the unified timeline — session-cookie

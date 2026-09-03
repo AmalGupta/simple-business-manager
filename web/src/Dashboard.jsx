@@ -22,6 +22,8 @@ import { CallDetail } from "./views/calls/CallDetail.jsx";
 import { OpenTodosView } from "./views/calls/OpenTodosView.jsx";
 import { MyOpenTodosView } from "./views/calls/MyOpenTodosView.jsx";
 import { StaffDirectoryView } from "./views/staff/StaffDirectoryView.jsx";
+import { CallerTile } from "./views/callers/CallerTile.jsx";
+import { CallersDirectoryView } from "./views/callers/CallersDirectoryView.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
 import { SitesReviewView } from "./views/sites/SitesReviewView.jsx";
@@ -66,6 +68,7 @@ export default function SimpleBusinessManager() {
   const [allSites, setAllSites] = useState([]);
   const [staffRoster, setStaffRoster] = useState([]);
   const [callsCount, setCallsCount] = useState(0);
+  const [callersCount, setCallersCount] = useState(0);
   /* Home open/closed tiles — from GET /api/dashboard/summary, not derived from
      the (possibly still-loading) calls list. Kept in sync on todo toggles. */
   const [openToday, setOpenToday] = useState(0);
@@ -142,6 +145,7 @@ export default function SimpleBusinessManager() {
     setAllSites([]);
     setStaffRoster([]);
     setCallsCount(0);
+    setCallersCount(0);
     setOpenToday(0);
     setClosedToday(0);
     setParkedCount(0);
@@ -160,6 +164,7 @@ export default function SimpleBusinessManager() {
       setClosedToday(summary.closed_today ?? 0);
       setParkedCount(summary.parked_count ?? 0);
       setCallsCount(summary.calls_count ?? 0);
+      setCallersCount(summary.callers_count ?? 0);
       setSitesAttention(summary.sites_attention ?? []);
       setEscalations(summary.escalations ?? []);
       setStaffRoster(summary.staff_roster ?? []);
@@ -720,6 +725,8 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "staff-directory") return shell(<StaffDirectoryView onBack={() => setView(homeView)} />);
 
+  if (view.name === "callers-directory") return shell(<CallersDirectoryView onBack={() => setView(homeView)} />);
+
   if (view.name === "staff-home")
     return shell(
       <>
@@ -966,6 +973,9 @@ export default function SimpleBusinessManager() {
         />
         {(me.role === "admin" || me.role === "superadmin") && (
           <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <CallerTile count={callersCount} onOpen={() => setView({ name: "callers-directory" })} />
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
           <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />

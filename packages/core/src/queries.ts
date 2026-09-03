@@ -3,6 +3,8 @@
 import { matchStaffByOwner } from "./assignment";
 import type {
   Call,
+  Caller,
+  CallerCategory,
   CallExtraction,
   CallSource,
   CallType,
@@ -47,7 +49,7 @@ export interface NewCallInput {
   uploadedByUserId?: string | null;
   /** Set when this call is the required voice note for one installation checklist row — see src/handlers/installation.ts. */
   installationUpdateId?: string | null;
-  /** Linked caller from Drive filename (or later enrichment). */
+  /** Linked caller (callers.id) from Drive filename (or later enrichment). */
   clientId?: string | null;
   /** Google Drive file id — unique when set (migration 0020). */
   driveFileId?: string | null;
@@ -88,31 +90,147 @@ export async function getCallByDriveFileId(db: D1Database, driveFileId: string):
   return row ?? null;
 }
 
-/** Find or create a clients row for a Drive caller (phone preferred for uniqueness). */
-export async function findOrCreateClient(
+export interface FoundOrCreatedCaller {
+  id: string;
+  category: CallerCategory;
+  name: string;
+}
+
+/**
+ * Find or create a callers row for a Drive caller (phone preferred for
+ * uniqueness). Returns the resolved category too, so the Drive poller can
+ * branch (family/spam -> skip) without a second round trip. A brand-new
+ * caller always lands as 'client' — see Callers Directory design notes.
+ */
+export async function findOrCreateCaller(
   db: D1Database,
   opts: { name: string; phone: string | null }
-): Promise<string> {
-  const name = opts.name.trim() || "Unknown caller";
+): Promise<FoundOrCreatedCaller> {
+  const name = opts.name.trim() || "Unknown Caller";
   const phone = opts.phone?.trim() || null;
 
   if (phone) {
     const byPhone = await db
-      .prepare(`SELECT id FROM clients WHERE phone = ?`)
+      .prepare(`SELECT id, category, name FROM callers WHERE phone = ?`)
       .bind(phone)
-      .first<{ id: string }>();
-    if (byPhone) return byPhone.id;
+      .first<FoundOrCreatedCaller>();
+    if (byPhone) return byPhone;
   }
 
   const byName = await db
-    .prepare(`SELECT id FROM clients WHERE name = ? AND phone IS NULL`)
+    .prepare(`SELECT id, category, name FROM callers WHERE name = ? AND phone IS NULL`)
     .bind(name)
-    .first<{ id: string }>();
-  if (byName && !phone) return byName.id;
+    .first<FoundOrCreatedCaller>();
+  if (byName && !phone) return byName;
 
   const id = crypto.randomUUID();
-  await db.prepare(`INSERT INTO clients (id, name, phone) VALUES (?, ?, ?)`).bind(id, name, phone).run();
-  return id;
+  await db
+    .prepare(`INSERT INTO callers (id, name, phone, category) VALUES (?, ?, ?, 'client')`)
+    .bind(id, name, phone)
+    .run();
+  return { id, category: "client", name };
+}
+
+export async function getCallerById(db: D1Database, id: string): Promise<Caller | null> {
+  const row = await db.prepare(`SELECT * FROM callers WHERE id = ?`).bind(id).first<Caller>();
+  return row ?? null;
+}
+
+export interface CallerRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  category: CallerCategory;
+  staff_user_id: string | null;
+  staff_user_name: string | null;
+  created_at: string;
+}
+
+const CALLER_SELECT = `
+  SELECT callers.id, callers.name, callers.phone, callers.category,
+         callers.staff_user_id, users.name AS staff_user_name, callers.created_at
+  FROM callers
+  LEFT JOIN users ON users.id = callers.staff_user_id
+`;
+
+export async function listCallers(db: D1Database): Promise<CallerRow[]> {
+  const { results } = await db.prepare(`${CALLER_SELECT} ORDER BY callers.name ASC`).all<CallerRow>();
+  return results ?? [];
+}
+
+export async function createCaller(
+  db: D1Database,
+  input: { name: string; phone: string | null; category: CallerCategory; staffUserId?: string | null }
+): Promise<CallerRow> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(`INSERT INTO callers (id, name, phone, category, staff_user_id) VALUES (?, ?, ?, ?, ?)`)
+    .bind(id, input.name, input.phone, input.category, input.staffUserId ?? null)
+    .run();
+  const row = await db.prepare(`${CALLER_SELECT} WHERE callers.id = ?`).bind(id).first<CallerRow>();
+  return row!;
+}
+
+export async function updateCaller(
+  db: D1Database,
+  id: string,
+  patch: Partial<{ name: string; phone: string | null; category: CallerCategory; staff_user_id: string | null }>
+): Promise<CallerRow | null> {
+  const fields: string[] = [];
+  const binds: unknown[] = [];
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) continue;
+    fields.push(`${key} = ?`);
+    binds.push(value);
+  }
+  if (fields.length === 0) return getCallerRow(db, id);
+  binds.push(id);
+  await db.prepare(`UPDATE callers SET ${fields.join(", ")} WHERE id = ?`).bind(...binds).run();
+  return getCallerRow(db, id);
+}
+
+async function getCallerRow(db: D1Database, id: string): Promise<CallerRow | null> {
+  const row = await db.prepare(`${CALLER_SELECT} WHERE callers.id = ?`).bind(id).first<CallerRow>();
+  return row ?? null;
+}
+
+/**
+ * Minimal `calls` row for Family / repeat-known-Spam callers — never
+ * downloaded from Drive, never submitted to Sarvam. r2_key is a synthetic,
+ * still-unique placeholder (schema keeps r2_key NOT NULL UNIQUE) that's
+ * never written to or read from R2; every R2-touching code path checks
+ * stt_status = 'skipped' first and short-circuits instead.
+ */
+export async function insertSkippedCall(
+  db: D1Database,
+  input: {
+    id: string;
+    callerId: string;
+    source: CallSource;
+    recordedAt: string;
+    recordingDate: string | null;
+    driveFileId: string | null;
+  }
+): Promise<void> {
+  const r2Key = `no-recording/${input.id}`;
+  await db
+    .prepare(
+      `INSERT INTO calls (id, r2_key, client_id, source, recorded_at, recording_date, stt_status, drive_file_id)
+       VALUES (?, ?, ?, ?, ?, ?, 'skipped', ?)`
+    )
+    .bind(input.id, r2Key, input.callerId, input.source, input.recordedAt, input.recordingDate, input.driveFileId)
+    .run();
+}
+
+export async function markCallerSpam(db: D1Database, callerId: string): Promise<void> {
+  await db.prepare(`UPDATE callers SET category = 'spam' WHERE id = ?`).bind(callerId).run();
+}
+
+export async function softDeleteCallAsSpam(db: D1Database, callId: string): Promise<void> {
+  await db
+    .prepare(`UPDATE calls SET deleted_at = datetime('now'), deleted_reason = 'spam' WHERE id = ?`)
+    .bind(callId)
+    .run();
 }
 
 export const DRIVE_POLL_ENABLED_KEY = "drive_poll_enabled";
@@ -398,20 +516,21 @@ export async function replaceExtraction(
   await saveExtraction(db, callId, extraction, promptVersion);
 }
 
-/** Diarized entries + recorded_at for re-extract / offline eval. */
+/** Diarized entries + recorded_at + linked caller id for re-extract / offline eval. */
 export async function getCallDiarizedForExtract(
   db: D1Database,
   callId: string
-): Promise<{ recorded_at: string | null; entries: DiarizedEntry[] } | null> {
+): Promise<{ recorded_at: string | null; entries: DiarizedEntry[]; client_id: string | null } | null> {
   const row = await db
     .prepare(
-      `SELECT calls.recorded_at AS recorded_at, transcripts.diarized_transcript AS diarized_transcript
+      `SELECT calls.recorded_at AS recorded_at, calls.client_id AS client_id,
+              transcripts.diarized_transcript AS diarized_transcript
        FROM calls
        LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
        WHERE calls.id = ?`
     )
     .bind(callId)
-    .first<{ recorded_at: string | null; diarized_transcript: string | null }>();
+    .first<{ recorded_at: string | null; client_id: string | null; diarized_transcript: string | null }>();
   if (!row) return null;
   let entries: DiarizedEntry[] = [];
   if (row.diarized_transcript) {
@@ -422,7 +541,7 @@ export async function getCallDiarizedForExtract(
       entries = [];
     }
   }
-  return { recorded_at: row.recorded_at, entries };
+  return { recorded_at: row.recorded_at, entries, client_id: row.client_id };
 }
 
 // ---------------------------------------------------------------------------
@@ -560,10 +679,10 @@ const CALL_SELECT = `
          calls.unresolved, calls.material_needs, calls.deadline,
          transcripts.transcript AS transcript,
          CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
-         COALESCE(clients.name, 'Unknown caller') AS client_name,
-         clients.phone AS client_phone
+         COALESCE(callers.name, 'Unknown caller') AS client_name,
+         callers.phone AS client_phone
   FROM calls
-  LEFT JOIN clients ON calls.client_id = clients.id
+  LEFT JOIN callers ON calls.client_id = callers.id
   LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
 `;
 
@@ -575,10 +694,10 @@ const CALL_LIST_SELECT = `
          calls.unresolved, calls.material_needs, calls.deadline,
          NULL AS transcript,
          CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
-         COALESCE(clients.name, 'Unknown caller') AS client_name,
-         clients.phone AS client_phone
+         COALESCE(callers.name, 'Unknown caller') AS client_name,
+         callers.phone AS client_phone
   FROM calls
-  LEFT JOIN clients ON calls.client_id = clients.id
+  LEFT JOIN callers ON calls.client_id = callers.id
   LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
 `;
 
@@ -655,14 +774,19 @@ function toCallRow(
  * By default `low_signal` calls are excluded — see docs/ADDITIONAL_FEATURES_M0.md
  * "call_type = low_signal". Pass `includeLowSignal: true` for the Calls
  * dashboard grid (Important vs Regular filters need both).
+ *
+ * Soft-deleted spam calls (`deleted_at`) and skipped Family/repeat-Spam
+ * rows (`stt_status = 'skipped'`) are always excluded — see migration
+ * 0021 — regardless of `includeLowSignal`; they never produced a real
+ * dashboard card.
  */
 export async function listCallsWithTodos(
   db: D1Database,
   opts: { includeLowSignal?: boolean } = {}
 ): Promise<CallRow[]> {
-  const where = opts.includeLowSignal
-    ? ""
-    : `WHERE calls.call_type IS NULL OR calls.call_type != 'low_signal'`;
+  const clauses = ["calls.deleted_at IS NULL", "calls.stt_status != 'skipped'"];
+  if (!opts.includeLowSignal) clauses.push("(calls.call_type IS NULL OR calls.call_type != 'low_signal')");
+  const where = `WHERE ${clauses.join(" AND ")}`;
   const { results: calls } = await db
     .prepare(`${CALL_LIST_SELECT} ${where} ORDER BY calls.recorded_at DESC`)
     .all<RawCallJoinRow>();
@@ -2229,15 +2353,23 @@ export async function resolveMaterialShortage(db: D1Database, id: string, resolv
   return db.prepare(`SELECT * FROM material_shortages WHERE id = ?`).bind(id).first<MaterialShortage>();
 }
 
-/** Total row count in `calls`, including low_signal — the home-page "Calls logged" tile. */
+/**
+ * Total row count in `calls`, including low_signal — the home-page "Calls
+ * logged" tile. Excludes soft-deleted spam and skipped Family/repeat-Spam
+ * rows (migration 0021) — those were never actually processed, so counting
+ * them would inflate a stat that means "calls we did work on".
+ */
 export async function getCallsCount(db: D1Database): Promise<number> {
-  const row = await db.prepare(`SELECT COUNT(*) AS n FROM calls`).first<{ n: number }>();
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM calls WHERE deleted_at IS NULL AND stt_status != 'skipped'`)
+    .first<{ n: number }>();
   return row?.n ?? 0;
 }
 
 /**
  * Transcript bodies for the lean call list — same call set as listCallsWithTodos
- * (excludes low_signal). Keyed by call id; null when no transcripts row yet.
+ * (excludes low_signal, soft-deleted spam, and skipped rows).
+ * Keyed by call id; null when no transcripts row yet.
  */
 export async function listCallTranscripts(db: D1Database): Promise<Record<string, string | null>> {
   const { results } = await db
@@ -2245,7 +2377,9 @@ export async function listCallTranscripts(db: D1Database): Promise<Record<string
       `SELECT calls.id AS id, transcripts.transcript AS transcript
        FROM calls
        LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
-       WHERE calls.call_type IS NULL OR calls.call_type != 'low_signal'`
+       WHERE (calls.call_type IS NULL OR calls.call_type != 'low_signal')
+         AND calls.deleted_at IS NULL
+         AND calls.stt_status != 'skipped'`
     )
     .all<{ id: string; transcript: string | null }>();
   const out: Record<string, string | null> = {};
@@ -2281,6 +2415,8 @@ export interface DashboardSummary {
   my_open_todos: AssignedTodoRow[];
   confirmed_count: number;
   unconfirmed_count: number;
+  /** Callers Directory tile count — admin/superadmin only; 0 on the staff-scoped summary. */
+  callers_count: number;
 }
 
 export interface AssignedTodoRow {
@@ -2304,11 +2440,11 @@ export async function listMyOpenTodos(db: D1Database, userId: string): Promise<A
               todos.text AS text,
               todos.due_date AS due_date,
               todos.status AS status,
-              COALESCE(clients.name, 'Unknown caller') AS client_name,
+              COALESCE(callers.name, 'Unknown caller') AS client_name,
               calls.recorded_at AS recorded_at
        FROM todos
        JOIN calls ON calls.id = todos.call_id
-       LEFT JOIN clients ON clients.id = calls.client_id
+       LEFT JOIN callers ON callers.id = calls.client_id
        WHERE todos.status = 'open'
          AND todos.assigned_to_user_id = ?
        ORDER BY (todos.due_date IS NULL), todos.due_date ASC, calls.recorded_at DESC`
@@ -2346,6 +2482,7 @@ export async function getDashboardSummary(
       my_open_todos,
       confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
       unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
+      callers_count: 0,
     };
   }
 
@@ -2355,6 +2492,7 @@ export async function getDashboardSummary(
     closedRow,
     parkedRow,
     calls_count,
+    callersRow,
     sites_attention,
     escalations,
     sites,
@@ -2368,6 +2506,7 @@ export async function getDashboardSummary(
       .first<{ n: number }>(),
     db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'snoozed'`).first<{ n: number }>(),
     getCallsCount(db),
+    db.prepare(`SELECT COUNT(*) AS n FROM callers`).first<{ n: number }>(),
     getSitesNeedingAttention(db),
     listOpenEscalations(db),
     listSites(db),
@@ -2388,5 +2527,6 @@ export async function getDashboardSummary(
     my_open_todos: [],
     confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
     unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
+    callers_count: callersRow?.n ?? 0,
   };
 }

@@ -36,4 +36,7 @@ GOOGLE_DRIVE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY
 # wrangler.jsonc vars; override here for local if needed.
 GOOGLE_DRIVE_CALLS_FOLDER_ID=1BVvqN0a_e8mb4S50yMb9X-XwKEfxO5RR
 GOOGLE_DRIVE_ARCHIVE_FOLDER_ID=12v7xURXHMtL20fjOVLEzmMmXdmcCYhXg
+# Callers Directory (migration 0021) — confirmed-spam Drive files move here
+# instead of Archive. "Spam" subfolder inside Calls.
+GOOGLE_DRIVE_SPAM_FOLDER_ID=130Xhaxx3Z0G5FgjxFOBIQ5e5FBaoute8
 PUBLIC_BASE_URL=http://localhost:8787

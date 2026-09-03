@@ -258,6 +258,40 @@ export async function postResetStaffPin(id) {
   return res.json();
 }
 
+/* Callers Directory (migration 0021) — session-cookie only, admin/superadmin
+   gated server-side, same pattern as /api/staff* above. */
+export async function fetchCallers() {
+  const res = await fetch("/api/callers");
+  if (!res.ok) throw new Error(`GET /api/callers → ${res.status}`);
+  return res.json();
+}
+
+export async function postCreateCaller(input) {
+  const res = await fetch("/api/callers", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/callers → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function patchCaller(id, patch) {
+  const res = await fetch(`/api/callers/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/callers/${id} → ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function fetchSiteMedia(siteId) {
   const res = await fetch(`/api/sites/${siteId}/media`);
   if (!res.ok) throw new Error(`GET /api/sites/${siteId}/media → ${res.status}`);

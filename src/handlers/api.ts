@@ -16,6 +16,7 @@ import {
   getCallsCount,
   getCallDiarizedForExtract,
   getCallWithTodos,
+  getCallerById,
   getConfirmedSitesSummary,
   getDashboardSummary,
   getSitesNeedingAttention,
@@ -159,11 +160,13 @@ export async function handleReExtractCall(request: Request, env: Env, id: string
     return json({ error: "no diarized transcript to extract" }, 400);
   }
 
+  const caller = payload.client_id ? await getCallerById(env.DB, payload.client_id) : null;
+
   try {
     const extraction = await extractCall({
       apiKey: env.ANTHROPIC_API_KEY,
       model: env.ANTHROPIC_MODEL,
-      clientName: null,
+      clientName: caller?.name ?? null,
       recordedAt: payload.recorded_at,
       entries: payload.entries,
     });
