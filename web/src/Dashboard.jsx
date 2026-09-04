@@ -41,6 +41,8 @@ import { ComplaintsHomeView } from "./views/site-visit/ComplaintsHomeView.jsx";
 import { ComplaintsTile } from "./views/site-visit/ComplaintsTile.jsx";
 import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
+import { CallsNeedingActionTile } from "./views/home/CallsNeedingActionTile.jsx";
+import { CallsNeedingActionView } from "./views/calls/CallsNeedingActionView.jsx";
 import {
   fetchCall,
   fetchCallsCalendar,
@@ -70,6 +72,7 @@ export default function SimpleBusinessManager() {
   const [staffRoster, setStaffRoster] = useState([]);
   const [callsCount, setCallsCount] = useState(0);
   const [callersCount, setCallersCount] = useState(0);
+  const [callsNeedingActionCount, setCallsNeedingActionCount] = useState(0);
   /* Home open/closed tiles — from GET /api/dashboard/summary, not derived from
      the (possibly still-loading) calls list. Kept in sync on todo toggles. */
   const [openToday, setOpenToday] = useState(0);
@@ -149,6 +152,7 @@ export default function SimpleBusinessManager() {
     setStaffRoster([]);
     setCallsCount(0);
     setCallersCount(0);
+    setCallsNeedingActionCount(0);
     setOpenToday(0);
     setClosedToday(0);
     setParkedCount(0);
@@ -168,6 +172,7 @@ export default function SimpleBusinessManager() {
       setParkedCount(summary.parked_count ?? 0);
       setCallsCount(summary.calls_count ?? 0);
       setCallersCount(summary.callers_count ?? 0);
+      setCallsNeedingActionCount(summary.calls_needing_action_count ?? 0);
       setSitesAttention(summary.sites_attention ?? []);
       setEscalations(summary.escalations ?? []);
       setStaffRoster(summary.staff_roster ?? []);
@@ -379,13 +384,12 @@ export default function SimpleBusinessManager() {
     [mutate]
   );
 
-  /* Optimistic write, rolled back if D1 rejects it — same shape as `mutate`
-     above, kept separate since assignment patches a different field and
-     rollback needs the todo's own prior assigned_to_user_id, not the
-     {status, completed_at} pair `mutate` restores. */
-  const onAssignTodo = useCallback(async (todoId, staffId) => {
+  /* Not optimistic — assignment (migration 0025: a todo can go to more than
+     one staff member now) refreshes via key bump rather than a client-side
+     merge, since the server response carries the full assignees[] list. */
+  const onAssignTodo = useCallback(async (todoId, userIds) => {
     try {
-      await patchTodo(todoId, { assigned_to_user_id: staffId });
+      await patchTodo(todoId, { assigned_to_user_ids: userIds });
       setTodoRefreshKey((k) => k + 1);
     } catch (err) {
       throw err;
@@ -681,6 +685,17 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "callers-directory") return shell(<CallersDirectoryView onBack={() => setView(homeView)} />);
 
+  if (view.name === "calls-needing-action")
+    return shell(
+      <CallsNeedingActionView
+        staffRoster={staffRoster}
+        onAssignTodo={onAssignTodo}
+        onResolved={() => setCallsNeedingActionCount((n) => Math.max(0, n - 1))}
+        onBack={() => setView(view.from ?? homeView)}
+      />,
+      { wide: true }
+    );
+
   if (view.name === "staff-home")
     return shell(
       <>
@@ -945,6 +960,12 @@ export default function SimpleBusinessManager() {
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
           <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <CallsNeedingActionTile
+            count={callsNeedingActionCount}
+            onOpen={() => setView({ name: "calls-needing-action", from: { name: "home" } })}
+          />
         )}
         <ComplaintsTile
           refreshKey={complaintsRefreshKey}

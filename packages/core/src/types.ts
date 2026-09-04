@@ -73,6 +73,10 @@ export interface Call {
   deleted_reason: string | null;
 
   created_at: string;
+
+  /** migration 0025: manual admin ack from the Calls Needing Action carousel, independent of todo completion. */
+  resolved_at: string | null;
+  resolved_by_user_id: string | null;
 }
 
 /** NULL = unreviewed, 'Y' = confirmed valid, 'N' = confirmed not a real site. */
@@ -196,10 +200,33 @@ export interface Todo {
 
   closed_by_call_id: string | null; // M1 placeholder — unused in M0
   created_at: string;
+}
 
-  assigned_to_user_id: string | null;
+/** migration 0025: replaces todos.assigned_to_user_id — a todo can now be
+ *  assigned to more than one staff member. Scoped to todos only; site_tasks
+ *  and escalations keep their own single-assignee columns. */
+export interface TodoAssignee {
+  id: string;
+  name: string;
+}
+
+export interface TodoAssigneeRow {
+  todo_id: string;
+  user_id: string;
   assigned_by_user_id: string | null;
-  assigned_at: string | null;
+  assigned_at: string;
+}
+
+/** migration 0025: raw-audio clip an admin attaches to one todo from the
+ *  Calls Needing Action carousel. Never transcribed — see schema.sql. */
+export interface TodoVoiceNote {
+  id: string;
+  todo_id: string;
+  r2_key: string;
+  content_type: string;
+  duration_s: number | null;
+  uploaded_by_user_id: string | null;
+  created_at: string;
 }
 
 /** One row per call's fetched transcript, linked by r2_key — see schema.sql. */

@@ -49,8 +49,8 @@ export function OpenTodosView({
         .flatMap((c) => c.todos.filter((td) => td.status === status).map((td) => ({ ...td, call: c })))
         .sort((a, b) => {
           if (status === "open") {
-            const aUn = a.assigned_to_user_id ? 1 : 0;
-            const bUn = b.assigned_to_user_id ? 1 : 0;
+            const aUn = (a.assignees?.length ?? 0) > 0 ? 1 : 0;
+            const bUn = (b.assignees?.length ?? 0) > 0 ? 1 : 0;
             if (aUn !== bUn) return aUn - bUn;
           }
           const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity;

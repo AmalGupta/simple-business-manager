@@ -23,7 +23,9 @@ import type {
   SiteMediaType,
   SiteTaskStatus,
   Todo,
+  TodoAssignee,
   TodoOwner,
+  TodoVoiceNote,
   User,
   UserRole,
   WorkflowCategory,
@@ -489,22 +491,24 @@ export async function saveExtraction(
 
   for (const todo of extraction.todos) {
     const matched = matchStaffByOwner(todo.owner, staff);
+    const todoId = crypto.randomUUID();
     statements.push(
       db
         .prepare(
-          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, assigned_to_user_id, assigned_at)
-           VALUES (?, ?, ?, ?, ?, 'llm', ?, ?)`
+          `INSERT INTO todos (id, call_id, owner, text, due_date, origin)
+           VALUES (?, ?, ?, ?, ?, 'llm')`
         )
-        .bind(
-          crypto.randomUUID(),
-          callId,
-          todo.owner,
-          todo.text,
-          todo.due_date || null,
-          matched?.id ?? null,
-          matched ? new Date().toISOString() : null
-        )
+        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null)
     );
+    if (matched) {
+      statements.push(
+        db
+          .prepare(
+            `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at) VALUES (?, ?, NULL, datetime('now'))`
+          )
+          .bind(todoId, matched.id)
+      );
+    }
   }
 
   for (const c of extraction.commitments) {
@@ -521,15 +525,17 @@ export async function saveExtraction(
 }
 
 /**
- * One-shot / recovery: assign open todos that still have no assigned_to_user_id
- * when owner matches a staff name. Returns how many rows were updated.
+ * One-shot / recovery: assign open todos that still have no assignees when
+ * owner matches a staff name. Returns how many rows were updated.
  */
 export async function autoAssignOpenTodosByOwner(db: D1Database): Promise<number> {
   const staff = await listStaffRoster(db);
   if (staff.length === 0) return 0;
   const { results } = await db
     .prepare(
-      `SELECT id, owner FROM todos WHERE status = 'open' AND assigned_to_user_id IS NULL AND owner IS NOT NULL`
+      `SELECT todos.id AS id, todos.owner AS owner FROM todos
+       WHERE todos.status = 'open' AND todos.owner IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id)`
     )
     .all<{ id: string; owner: string }>();
   let updated = 0;
@@ -538,9 +544,11 @@ export async function autoAssignOpenTodosByOwner(db: D1Database): Promise<number
     if (!matched) continue;
     await db
       .prepare(
-        `UPDATE todos SET assigned_to_user_id = ?, assigned_at = datetime('now') WHERE id = ? AND assigned_to_user_id IS NULL`
+        `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at)
+         SELECT ?, ?, NULL, datetime('now')
+         WHERE NOT EXISTS (SELECT 1 FROM todo_assignees WHERE todo_id = ?)`
       )
-      .bind(matched.id, row.id)
+      .bind(row.id, matched.id, row.id)
       .run();
     updated += 1;
   }
@@ -607,7 +615,8 @@ export interface TodoRow {
   status: Todo["status"];
   completed_at: string | null;
   closed_by_call_id: string | null;
-  assigned_to_user_id: string | null;
+  /** migration 0025 — a todo can be assigned to more than one staff member. */
+  assignees: TodoAssignee[];
 }
 
 export interface CommitmentRow {
@@ -707,7 +716,6 @@ interface RawTodoRow {
   completed_at: string | null;
   closed_by_call_id: string | null;
   customer_waiting: 0 | 1;
-  assigned_to_user_id: string | null;
 }
 
 interface RawCommitmentRow {
@@ -752,7 +760,7 @@ const CALL_LIST_SELECT = `
 `;
 
 const TODO_SELECT = `
-  SELECT id, call_id, owner, text, due_date, status, completed_at, closed_by_call_id, customer_waiting, assigned_to_user_id
+  SELECT id, call_id, owner, text, due_date, status, completed_at, closed_by_call_id, customer_waiting
   FROM todos
 `;
 
@@ -779,8 +787,61 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     status: t.status,
     completed_at: t.completed_at,
     closed_by_call_id: t.closed_by_call_id,
-    assigned_to_user_id: t.assigned_to_user_id,
+    assignees: [], // filled in by hydrateTodoAssignees — see hydrateCallRows/getCallWithTodos
   };
+}
+
+/** Batch-fetch assignees for many todos at once (mirrors queryAllByIdChunks
+ *  usage elsewhere, e.g. getSitesNeedingAttention). */
+export async function getAssigneesByTodoIds(db: D1Database, todoIds: string[]): Promise<Map<string, TodoAssignee[]>> {
+  if (todoIds.length === 0) return new Map();
+  const rows = await queryAllByIdChunks<{ todo_id: string; id: string; name: string }>(db, todoIds, (ph) =>
+    `SELECT todo_assignees.todo_id AS todo_id, users.id AS id, users.name AS name
+     FROM todo_assignees JOIN users ON users.id = todo_assignees.user_id
+     WHERE todo_assignees.todo_id IN (${ph})`
+  );
+  const out = new Map<string, TodoAssignee[]>();
+  for (const r of rows) {
+    const list = out.get(r.todo_id) ?? [];
+    list.push({ id: r.id, name: r.name });
+    out.set(r.todo_id, list);
+  }
+  return out;
+}
+
+/** Mutates each TodoRow in place, attaching its assignees. Not baked into
+ *  TODO_SELECT itself — a flat JOIN would duplicate todo rows for a
+ *  multi-assignee todo. */
+async function hydrateTodoAssignees(db: D1Database, todos: TodoRow[]): Promise<TodoRow[]> {
+  if (todos.length === 0) return todos;
+  const map = await getAssigneesByTodoIds(db, todos.map((t) => t.id));
+  for (const t of todos) t.assignees = map.get(t.id) ?? [];
+  return todos;
+}
+
+export async function isTodoAssignee(db: D1Database, todoId: string, userId: string): Promise<boolean> {
+  const row = await db.prepare(`SELECT 1 FROM todo_assignees WHERE todo_id = ? AND user_id = ?`).bind(todoId, userId).first();
+  return row != null;
+}
+
+/** Replaces the full assignee set for one todo (not incremental add/remove
+ *  — matches a multi-select "Save" UI action). Empty array clears assignment. */
+export async function setTodoAssignees(
+  db: D1Database,
+  todoId: string,
+  userIds: string[],
+  assignedByUserId: string | null
+): Promise<void> {
+  await db.batch([
+    db.prepare(`DELETE FROM todo_assignees WHERE todo_id = ?`).bind(todoId),
+    ...userIds.map((uid) =>
+      db
+        .prepare(
+          `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at) VALUES (?, ?, ?, datetime('now'))`
+        )
+        .bind(todoId, uid, assignedByUserId)
+    ),
+  ]);
 }
 
 function toCallRow(
@@ -911,14 +972,17 @@ async function hydrateCallRows(db: D1Database, calls: RawCallJoinRow[]): Promise
     queryAllByIdChunks<RawSiteRow>(db, callIds, (ph) => `${SITE_SELECT} AND call_sites.call_id IN (${ph})`),
   ]);
 
+  const todoRows = todos.map(toTodoRow);
+  await hydrateTodoAssignees(db, todoRows);
+
   const todosByCall = new Map<string, TodoRow[]>();
   const waitingByCall = new Map<string, boolean>();
-  for (const t of todos) {
+  todos.forEach((t, i) => {
     const list = todosByCall.get(t.call_id) ?? [];
-    list.push(toTodoRow(t));
+    list.push(todoRows[i]);
     todosByCall.set(t.call_id, list);
     if (t.status !== "done" && t.customer_waiting) waitingByCall.set(t.call_id, true);
-  }
+  });
 
   const commitmentsByCall = new Map<string, CommitmentRow[]>();
   for (const c of commitments) {
@@ -1164,6 +1228,7 @@ export async function getCallWithTodos(db: D1Database, id: string): Promise<Call
     if (t.status !== "done" && t.customer_waiting) customerWaiting = 1;
     return toTodoRow(t);
   });
+  await hydrateTodoAssignees(db, todos);
   const commitments = rawCommitments.map((c) => ({
     id: c.id,
     raw_phrase: c.raw_phrase,
@@ -1180,6 +1245,128 @@ export async function getTodoById(db: D1Database, id: string): Promise<Todo | nu
   return row ?? null;
 }
 
+/** getTodoById plus its assignees — what API responses after a mutation
+ *  should return, since Todo itself no longer carries assignment fields. */
+export async function getTodoRowWithAssignees(db: D1Database, id: string): Promise<(Todo & { assignees: TodoAssignee[] }) | null> {
+  const todo = await getTodoById(db, id);
+  if (!todo) return null;
+  const map = await getAssigneesByTodoIds(db, [id]);
+  return { ...todo, assignees: map.get(id) ?? [] };
+}
+
+// ---------------------------------------------------------------------------
+// Calls Needing Action — admin carousel of every call with an AI-generated
+// todo list not yet explicitly resolved. See migration 0025.
+// ---------------------------------------------------------------------------
+
+/**
+ * Every call with >=1 LLM-generated todo, not yet explicitly resolved by an
+ * admin. NOT gated on remaining open todos — resolve is a manual ack,
+ * independent of todo completion, so an all-done-but-unresolved call stays
+ * listed until the admin taps Resolve. Ordered oldest-first so the carousel
+ * and its date slider agree on ordering.
+ */
+export async function getCallsNeedingAction(db: D1Database, limit = 200): Promise<CallRow[]> {
+  const { results } = await db
+    .prepare(
+      `${CALL_LIST_SELECT} WHERE calls.resolved_at IS NULL
+         AND calls.deleted_at IS NULL
+         AND EXISTS (SELECT 1 FROM todos WHERE todos.call_id = calls.id AND todos.origin = 'llm')
+       ORDER BY COALESCE(calls.recording_date, substr(calls.recorded_at, 1, 10)) ASC, calls.recorded_at ASC
+       LIMIT ?`
+    )
+    .bind(limit)
+    .all<RawCallJoinRow>();
+  return hydrateCallRows(db, results ?? []);
+}
+
+export async function countCallsNeedingAction(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM calls
+       WHERE calls.resolved_at IS NULL AND calls.deleted_at IS NULL
+         AND EXISTS (SELECT 1 FROM todos WHERE todos.call_id = calls.id AND todos.origin = 'llm')`
+    )
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/** Manual admin ack — unconditional, no gate on remaining open todos. */
+export async function resolveCall(db: D1Database, callId: string, resolvedByUserId: string): Promise<void> {
+  await db
+    .prepare(`UPDATE calls SET resolved_at = datetime('now'), resolved_by_user_id = ? WHERE id = ?`)
+    .bind(resolvedByUserId, callId)
+    .run();
+}
+
+/**
+ * Logs "assigned {todo text} to {names}" against every site the todo's call
+ * is linked to via call_sites — same free-text pattern updateSite/createSite
+ * already use for site_edits. No-op if the call isn't linked to any site
+ * (an ordinary phone call with no site tag). getSiteTimeline's `call` entries
+ * only carry todo details for site voice memos (recorded_for_site_id ===
+ * siteId), not ordinary phone calls, so this explicit log is what actually
+ * makes an assignment show up in a site's timeline.
+ */
+export async function logTodoAssignmentToSiteTimeline(db: D1Database, todoId: string, actorUserId: string): Promise<void> {
+  const { results: rows } = await db
+    .prepare(
+      `SELECT todos.text AS text, call_sites.site_id AS site_id
+       FROM todos JOIN call_sites ON call_sites.call_id = todos.call_id
+       WHERE todos.id = ?`
+    )
+    .bind(todoId)
+    .all<{ text: string; site_id: string }>();
+  if (!rows || rows.length === 0) return;
+
+  const assignees = (await getAssigneesByTodoIds(db, [todoId])).get(todoId) ?? [];
+  const names = assignees.length ? assignees.map((a) => a.name).join(", ") : "no one";
+  const summary = `Todo "${rows[0].text}" assigned to ${names}`;
+  await db.batch(
+    rows.map((r) =>
+      db
+        .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
+        .bind(crypto.randomUUID(), r.site_id, actorUserId, summary)
+    )
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Todo voice notes — raw R2 audio an admin attaches to one todo row from the
+// Calls Needing Action carousel. Never transcribed. See migration 0025.
+// ---------------------------------------------------------------------------
+
+export async function addTodoVoiceNote(
+  db: D1Database,
+  input: { todoId: string; r2Key: string; contentType: string; durationS: number | null; uploadedByUserId: string }
+): Promise<TodoVoiceNote> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO todo_voice_notes (id, todo_id, r2_key, content_type, duration_s, uploaded_by_user_id) VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(id, input.todoId, input.r2Key, input.contentType, input.durationS, input.uploadedByUserId)
+    .run();
+  const row = await db.prepare(`SELECT * FROM todo_voice_notes WHERE id = ?`).bind(id).first<TodoVoiceNote>();
+  return row!;
+}
+
+/** Latest voice note per todo id — older rows are kept for audit but the UI
+ *  only ever plays the most recent one. */
+export async function getLatestVoiceNotesByTodoIds(db: D1Database, todoIds: string[]): Promise<Map<string, TodoVoiceNote>> {
+  if (todoIds.length === 0) return new Map();
+  const rows = await queryAllByIdChunks<TodoVoiceNote>(db, todoIds, (ph) =>
+    `SELECT * FROM todo_voice_notes WHERE todo_id IN (${ph}) ORDER BY created_at DESC`
+  );
+  const out = new Map<string, TodoVoiceNote>();
+  for (const r of rows) if (!out.has(r.todo_id)) out.set(r.todo_id, r); // first-seen per id = most recent
+  return out;
+}
+
+export async function getTodoVoiceNoteById(db: D1Database, id: string): Promise<TodoVoiceNote | null> {
+  return (await db.prepare(`SELECT * FROM todo_voice_notes WHERE id = ?`).bind(id).first<TodoVoiceNote>()) ?? null;
+}
+
 const TODO_PATCH_FIELDS = ["status", "completed_at", "snoozed_until"] as const;
 type TodoPatchField = (typeof TODO_PATCH_FIELDS)[number];
 
@@ -1188,9 +1375,9 @@ export async function updateTodo(
   db: D1Database,
   id: string,
   patch: Partial<Record<TodoPatchField, string | null>>
-): Promise<Todo | null> {
+): Promise<(Todo & { assignees: TodoAssignee[] }) | null> {
   const fields = TODO_PATCH_FIELDS.filter((f) => f in patch);
-  if (fields.length === 0) return getTodoById(db, id);
+  if (fields.length === 0) return getTodoRowWithAssignees(db, id);
 
   const setClause = fields.map((f) => `${f} = ?`).join(", ");
   const values = fields.map((f) => patch[f] ?? null);
@@ -1198,22 +1385,7 @@ export async function updateTodo(
     .prepare(`UPDATE todos SET ${setClause} WHERE id = ?`)
     .bind(...values, id)
     .run();
-  return getTodoById(db, id);
-}
-
-/** Assign or reassign one todo to a real staff account. Mirrors assignSiteTask. */
-export async function assignTodo(
-  db: D1Database,
-  id: string,
-  input: { assignedToUserId: string; assignedByUserId: string }
-): Promise<Todo | null> {
-  await db
-    .prepare(
-      `UPDATE todos SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now') WHERE id = ?`
-    )
-    .bind(input.assignedToUserId, input.assignedByUserId, id)
-    .run();
-  return getTodoById(db, id);
+  return getTodoRowWithAssignees(db, id);
 }
 
 // ---------------------------------------------------------------------------
@@ -1557,7 +1729,10 @@ export async function isCallAccessibleToUser(db: D1Database, userId: string, cal
   if (row !== null) return true;
   // Staff with an assigned call-todo can open that call for context (incl. voice memos).
   const assigned = await db
-    .prepare(`SELECT 1 FROM todos WHERE call_id = ? AND assigned_to_user_id = ? LIMIT 1`)
+    .prepare(
+      `SELECT 1 FROM todos JOIN todo_assignees ON todo_assignees.todo_id = todos.id
+       WHERE todos.call_id = ? AND todo_assignees.user_id = ? LIMIT 1`
+    )
     .bind(callId, userId)
     .first();
   return assigned !== null;
@@ -2291,11 +2466,13 @@ export async function getSiteTimeline(
     const rawTodos = await queryAllByIdChunks<RawTodoRow>(db, voiceMemoCallIds, (ph) =>
       `${TODO_SELECT} WHERE call_id IN (${ph}) ORDER BY created_at ASC`
     );
-    for (const rt of rawTodos) {
+    const rows = rawTodos.map(toTodoRow);
+    await hydrateTodoAssignees(db, rows);
+    rawTodos.forEach((rt, i) => {
       const list = todosByVoiceMemoCall.get(rt.call_id) ?? [];
-      list.push(toTodoRow(rt));
+      list.push(rows[i]);
       todosByVoiceMemoCall.set(rt.call_id, list);
-    }
+    });
   }
 
   for (const c of callRows) {
@@ -2730,6 +2907,8 @@ export interface DashboardSummary {
   unconfirmed_count: number;
   /** Callers Directory tile count — admin/superadmin only; 0 on the staff-scoped summary. */
   callers_count: number;
+  /** Calls Needing Action tile count (migration 0025) — admin/superadmin only; 0 on the staff-scoped summary. */
+  calls_needing_action_count: number;
 }
 
 export interface AssignedTodoRow {
@@ -2759,7 +2938,7 @@ export async function listMyOpenTodos(db: D1Database, userId: string): Promise<A
        JOIN calls ON calls.id = todos.call_id
        LEFT JOIN callers ON callers.id = calls.client_id
        WHERE todos.status = 'open'
-         AND todos.assigned_to_user_id = ?
+         AND EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?)
        ORDER BY (todos.due_date IS NULL), todos.due_date ASC, calls.recorded_at DESC`
     )
     .bind(userId)
@@ -2796,6 +2975,7 @@ export async function getDashboardSummary(
       confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
       unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
       callers_count: 0,
+      calls_needing_action_count: 0,
     };
   }
 
@@ -2811,6 +2991,7 @@ export async function getDashboardSummary(
     sites,
     staff_roster,
     open_site_tasks,
+    callsNeedingActionCount,
   ] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'open'`).first<{ n: number }>(),
     db
@@ -2825,6 +3006,7 @@ export async function getDashboardSummary(
     listSites(db),
     listStaffRoster(db),
     listOpenSiteTasks(db),
+    countCallsNeedingAction(db),
   ]);
 
   return {
@@ -2841,5 +3023,6 @@ export async function getDashboardSummary(
     confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
     unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
     callers_count: callersRow?.n ?? 0,
+    calls_needing_action_count: callsNeedingActionCount,
   };
 }

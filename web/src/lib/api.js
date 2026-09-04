@@ -366,6 +366,38 @@ export async function postSiteVoiceNote(siteId, blob, fileName) {
   return res.json();
 }
 
+/* Calls Needing Action carousel (migration 0025) — same session-cookie-only
+   auth as site voice notes, not the X-SBM-Key mechanism. */
+
+/** Returns { items, voiceNotesByTodoId } — the latter a Map<todoId, TodoVoiceNote>. */
+export async function fetchCallsNeedingAction() {
+  const res = await fetch("/api/calls/needing-action", { headers: { "X-SBM-Key": SBM_KEY } });
+  if (!res.ok) throw new Error(`GET /api/calls/needing-action → ${res.status}`);
+  const data = await res.json();
+  return {
+    items: data.items ?? [],
+    voiceNotesByTodoId: new Map(Object.entries(data.voice_notes_by_todo_id ?? {})),
+  };
+}
+
+export async function resolveCall(callId) {
+  const res = await fetch(`/api/calls/${callId}/resolve`, {
+    method: "PATCH",
+    headers: { "X-SBM-Key": SBM_KEY },
+  });
+  if (!res.ok) throw new Error(`PATCH /api/calls/${callId}/resolve → ${res.status}`);
+  return res.json();
+}
+
+/** Quick raw-audio clip attached to one todo row — no transcription, unlike postSiteVoiceNote. */
+export async function postTodoVoiceNote(todoId, blob, fileName) {
+  const fd = new FormData();
+  fd.append("recording", blob, fileName);
+  const res = await fetch(`/api/todos/${todoId}/voice-note`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`POST /api/todos/${todoId}/voice-note → ${res.status}`);
+  return res.json();
+}
+
 export async function fetchSiteTimeline(siteId) {
   const res = await fetch(`/api/sites/${siteId}/timeline`);
   if (!res.ok) throw new Error(`GET /api/sites/${siteId}/timeline → ${res.status}`);
