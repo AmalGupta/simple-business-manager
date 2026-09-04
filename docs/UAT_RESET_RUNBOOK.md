@@ -6,6 +6,16 @@ via the Google Drive poller. **Nothing in this file has been run.** Every comman
 below is for you to run yourself and review before executing, per your instruction —
 this is a plan, not an executed action.
 
+**Automated version:** `scripts/uat_reset.sh` runs Steps 2–5 below (wipe +
+contacts import, optionally enabling the poller) as one script, with an
+interactive confirmation, a mandatory backup first, and a hard failure if the
+contacts import doesn't land the expected row count in `callers` — see the
+script's own `--help`. It defaults to the **scoped** wipe (Option B below,
+preserving the 11 site memos / 3 checklist voice notes) — pass `--wipe-all` if
+you want the literal full wipe you confirmed earlier in this doc. Step 0/0b
+(backup, R2 audio backup) and Step 1 (generating the contacts SQL) still need
+to be done separately first; the script only takes over from "wipe" onward.
+
 Current state as of 2026-09-04 (checked, not assumed):
 - 305 rows in `calls`, 291 via the Drive poller (`drive_file_id` set).
 - 96 rows in `callers` (90 client, 3 family, 3 spam).
