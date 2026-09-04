@@ -384,7 +384,18 @@ CREATE UNIQUE INDEX idx_calls_drive_file_id
 -- these columns as call volume grows — the actual scaling limit, independent
 -- of which pagination model the UI uses.
 CREATE INDEX idx_calls_recorded_at ON calls(recorded_at DESC, id DESC);
-CREATE INDEX idx_calls_recording_date ON calls(recording_date);
 CREATE INDEX idx_calls_call_type ON calls(call_type);
 CREATE INDEX idx_todos_call_id ON todos(call_id);
+
+-- migration 0024: 0023's idx_calls_recording_date never actually helped —
+-- buildCallListWhere's date_from/date_to comparison filters on
+-- COALESCE(recording_date, substr(recorded_at, 1, 10)), a function-wrapped
+-- expression a plain column index can't serve. Replaced with an expression
+-- index matching that exact shape. countCallsMatching's
+-- deleted_at/stt_status filter also had no index at all and reran on every
+-- page fetch, not just the first — idx_calls_deleted_status turns it into
+-- a narrower index-only scan instead of a full table-row scan.
+CREATE INDEX idx_calls_effective_date
+  ON calls(COALESCE(recording_date, substr(recorded_at, 1, 10)));
+CREATE INDEX idx_calls_deleted_status ON calls(deleted_at, stt_status);
 
