@@ -6,7 +6,6 @@
 
 import {
   addSiteTeamMember,
-  assignTodo,
   assignComplaint,
   closeEscalation,
   countOpenComplaints,
@@ -17,15 +16,19 @@ import {
   getCallsCalendar,
   getCallsDayView,
   getCallDiarizedForExtract,
+  getCallsNeedingAction,
   getCallWithTodos,
   getCallerById,
   getConfirmedSitesSummary,
   getDashboardSummary,
+  getLatestVoiceNotesByTodoIds,
   getSitesNeedingAttention,
   getTodoById,
+  getTodoRowWithAssignees,
   getUnreadActivityCounts,
   getUserById,
   isCallAccessibleToUser,
+  isTodoAssignee,
   isUserAssignedToSite,
   linkCallToSites,
   listCallCallerOptions,
@@ -39,9 +42,12 @@ import {
   listSiteTeamMembers,
   listSites,
   autoAssignOpenTodosByOwner,
+  logTodoAssignmentToSiteTimeline,
   replaceExtraction,
+  resolveCall,
   setCallFailed,
   setCallSubmitted,
+  setTodoAssignees,
   updateSite,
   updateTodo,
   type SessionWithUser,
@@ -165,6 +171,26 @@ export async function handleGetCallsByTodoStatus(request: Request, env: Env): Pr
   return json(await listCallsByTodoStatus(env.DB, status));
 }
 
+/** Calls Needing Action carousel — every call with an AI-generated todo list not yet resolved. */
+export async function handleGetCallsNeedingAction(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const items = await getCallsNeedingAction(env.DB);
+  const todoIds = items.flatMap((c) => c.todos.map((td) => td.id));
+  const voiceNotesByTodo = await getLatestVoiceNotesByTodoIds(env.DB, todoIds);
+  return json({ items, voice_notes_by_todo_id: Object.fromEntries(voiceNotesByTodo) });
+}
+
+/** Manual admin ack that a call has been reviewed — unconditional, no gate on open todos. */
+export async function handleResolveCall(request: Request, env: Env, callId: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  await resolveCall(env.DB, callId, gate.user_id);
+  const call = await getCallWithTodos(env.DB, callId);
+  if (!call) return json({ error: "not found" }, 404);
+  return json(call);
+}
+
 /** Home-page "Calls logged" tile — total row count, including low_signal calls the feed itself never shows a card for. */
 export async function handleGetCallsCount(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
@@ -271,8 +297,9 @@ export async function handleReExtractCall(request: Request, env: Env, id: string
 const TODO_PATCH_KEYS = ["status", "completed_at", "snoozed_until"] as const;
 
 /**
- * Admin: assign or patch any todo. Staff: status/completed_at/snoozed_until
- * only on todos assigned to them (personal work queue).
+ * Admin: assign (to one or more staff) or patch any todo. Staff:
+ * status/completed_at/snoozed_until only on todos assigned to them
+ * (personal work queue) — see isTodoAssignee, migration 0025.
  */
 export async function handlePatchTodo(request: Request, env: Env, id: string): Promise<Response> {
   const session = await requireSession(request, env);
@@ -288,11 +315,11 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
   const record = body as Record<string, unknown>;
 
   if (session.user_role === "staff") {
-    if ("assigned_to_user_id" in record) return json({ error: "forbidden" }, 403);
+    if ("assigned_to_user_ids" in record) return json({ error: "forbidden" }, 403);
     if (record.status === "snoozed") return json({ error: "staff cannot park todos" }, 403);
     const existing = await getTodoById(env.DB, id);
     if (!existing) return json({ error: "not found" }, 404);
-    if (existing.assigned_to_user_id !== session.user_id) return json({ error: "forbidden" }, 403);
+    if (!(await isTodoAssignee(env.DB, id, session.user_id))) return json({ error: "forbidden" }, 403);
     const patch: Partial<Record<(typeof TODO_PATCH_KEYS)[number], string | null>> = {};
     for (const key of TODO_PATCH_KEYS) {
       if (key in record) patch[key] = record[key] as string | null;
@@ -302,13 +329,13 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
     return json(updated);
   }
 
-  if (typeof record.assigned_to_user_id === "string" && record.assigned_to_user_id) {
-    const assigned = await assignTodo(env.DB, id, {
-      assignedToUserId: record.assigned_to_user_id,
-      assignedByUserId: session.user_id,
-    });
-    if (!assigned) return json({ error: "not found" }, 404);
-    return json(assigned);
+  if (Array.isArray(record.assigned_to_user_ids)) {
+    const userIds = record.assigned_to_user_ids.filter((v): v is string => typeof v === "string");
+    await setTodoAssignees(env.DB, id, userIds, session.user_id);
+    await logTodoAssignmentToSiteTimeline(env.DB, id, session.user_id);
+    const updated = await getTodoRowWithAssignees(env.DB, id);
+    if (!updated) return json({ error: "not found" }, 404);
+    return json(updated);
   }
 
   const patch: Partial<Record<(typeof TODO_PATCH_KEYS)[number], string | null>> = {};

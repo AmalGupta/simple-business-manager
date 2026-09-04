@@ -69,7 +69,12 @@ CREATE TABLE calls (
   deleted_at      TEXT,
   deleted_reason  TEXT,   -- e.g. 'spam'; code-enforced, not a CHECK
 
-  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+
+  -- migration 0025: manual admin ack from the "Calls Needing Action"
+  -- carousel, independent of whether the call's todos are done.
+  resolved_at         TEXT,
+  resolved_by_user_id TEXT REFERENCES users(id)
 );
 
 -- The organising unit in speech is the site, not the client — a call
@@ -180,12 +185,37 @@ CREATE TABLE todos (
   -- Column exists now so M1 needs no migration against live data.
   closed_by_call_id TEXT REFERENCES calls(id),
 
-  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 
-  -- Assignment (migration 0015) — mirrors site_tasks' assigned_to_user_id.
-  assigned_to_user_id TEXT REFERENCES users(id),
+  -- Assignment lived here as assigned_to_user_id/assigned_by_user_id/
+  -- assigned_at (migration 0015). Migration 0025 replaced it with the
+  -- many-to-many todo_assignees table below, so a todo can be assigned to
+  -- more than one staff member — see the Calls Needing Action carousel.
+);
+
+-- migration 0025: replaces todos.assigned_to_user_id (single-assignee).
+-- Scoped to todos only — site_tasks/escalations keep their own single
+-- assigned_to_user_id columns, this was not a general assignment rewrite.
+CREATE TABLE todo_assignees (
+  todo_id             TEXT NOT NULL REFERENCES todos(id),
+  user_id             TEXT NOT NULL REFERENCES users(id),
   assigned_by_user_id TEXT REFERENCES users(id),
-  assigned_at         TEXT
+  assigned_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (todo_id, user_id)
+);
+
+-- migration 0025: raw-audio clip an admin attaches to one todo row from the
+-- Calls Needing Action carousel. Never transcribed (unlike site voice memos
+-- / installation_updates.voice_note_call_id), so this is not modeled as a
+-- `calls` row. Multiple rows per todo allowed; UI plays back the latest.
+CREATE TABLE todo_voice_notes (
+  id                  TEXT PRIMARY KEY,
+  todo_id             TEXT NOT NULL REFERENCES todos(id),
+  r2_key              TEXT NOT NULL,
+  content_type        TEXT NOT NULL,
+  duration_s          INTEGER,
+  uploaded_by_user_id TEXT REFERENCES users(id),
+  created_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- One row per call's fetched transcript, linked by r2_key rather than a
@@ -216,6 +246,11 @@ CREATE INDEX idx_calls_client ON calls(client_id, created_at DESC);
 CREATE INDEX idx_call_sites_site ON call_sites(site_id);
 CREATE INDEX idx_caller_sites_site ON caller_sites(site_id);
 CREATE INDEX idx_commitments_call ON commitments(call_id);
+
+-- migration 0025
+CREATE INDEX idx_calls_resolved_at ON calls(resolved_at);
+CREATE INDEX idx_todo_assignees_user ON todo_assignees(user_id);
+CREATE INDEX idx_todo_voice_notes_todo ON todo_voice_notes(todo_id, created_at DESC);
 CREATE INDEX idx_escalations_status ON escalations(status, created_at DESC);
 CREATE INDEX idx_site_team_members_site ON site_team_members(site_id);
 CREATE INDEX idx_site_team_members_user ON site_team_members(user_id);

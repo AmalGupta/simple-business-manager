@@ -34,6 +34,8 @@ import {
   handlePostSitesBackfill,
   handlePostSiteTeamMember,
   handleAutoAssignTodos,
+  handleGetCallsNeedingAction,
+  handleResolveCall,
   handleReExtractCall,
   handleRetryCallStt,
 } from "./handlers/api";
@@ -61,6 +63,7 @@ import {
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
 import { handleCreateCaller, handleListCallers, handleUpdateCaller } from "./handlers/callers";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
+import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
 import {
   handleGetDrivePollSettings,
@@ -187,6 +190,12 @@ export default {
       return handleGetCallTranscripts(request, env);
     }
 
+    // Must come before callMatch below — "needing-action" would otherwise parse as a call id.
+    if (url.pathname === "/api/calls/needing-action" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallsNeedingAction(request, env);
+    }
+
     if (url.pathname === "/api/dashboard/summary" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetDashboardSummary(request, env);
@@ -208,6 +217,12 @@ export default {
     if (reExtractMatch && request.method === "POST") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleReExtractCall(request, env, reExtractMatch[1]);
+    }
+
+    const resolveCallMatch = url.pathname.match(/^\/api\/calls\/([^/]+)\/resolve$/);
+    if (resolveCallMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleResolveCall(request, env, resolveCallMatch[1]);
     }
 
     const todoMatch = url.pathname.match(/^\/api\/todos\/([^/]+)$/);
@@ -418,6 +433,24 @@ export default {
       const session = await requireSession(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       return handleGetCallRecording(request, env, recordingMatch[1], session);
+    }
+
+    // Todo voice notes (migration 0025) — admin-only mic button on the Calls
+    // Needing Action carousel; not the Sarvam pipeline (no STT), see
+    // handlers/todo-voice-note.ts.
+    const todoVoiceNoteMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/voice-note$/);
+    if (todoVoiceNoteMatch && request.method === "POST") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (session.user_role === "staff") return new Response("Forbidden", { status: 403 });
+      return handlePostTodoVoiceNote(request, env, todoVoiceNoteMatch[1], session.user_id);
+    }
+
+    const getTodoVoiceNoteMatch = url.pathname.match(/^\/api\/todo-voice-notes\/([^/]+)$/);
+    if (getTodoVoiceNoteMatch && request.method === "GET") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      return handleGetTodoVoiceNote(request, env, getTodoVoiceNoteMatch[1], session);
     }
 
     const timelineMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/timeline$/);

@@ -1,0 +1,127 @@
+/* One card in the Calls Needing Action carousel. Flat white surface,
+   hairline border, one radius — no shadows/tints, per
+   docs/DESIGN_LANGUAGE.md "Surface" (the same rule Card.jsx enforces via
+   inline styles; this file mirrors it in CSS since the carousel card was
+   asked to be "a separate component, externalized CSS design").
+   Fixed height, internal scroll on the todos region — see plan doc scope
+   decision #1 / the SitesAttentionTile/EscalationsTile pattern. */
+
+.cna-card {
+  --cna-card-height: 560px;
+
+  height: var(--cna-card-height);
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  padding: 1rem 1.25rem;
+  font-family: var(--font-body);
+  color: var(--color-ink);
+  overflow: hidden;
+}
+
+.cna-card__header {
+  flex-shrink: 0;
+}
+
+.cna-card__title {
+  margin: 0 0 2px;
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--color-ink);
+}
+
+.cna-card__meta {
+  font-size: 12px;
+  color: var(--color-slate);
+}
+
+.cna-card__section-label {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  color: var(--color-slate);
+}
+
+.cna-card__summary {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--color-ink);
+  flex-shrink: 0;
+}
+
+.cna-card__transcript-toggle {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--color-slate);
+  margin-top: 12px;
+}
+
+.cna-card__transcript {
+  margin: 6px 0 0;
+  padding: 10px;
+  max-height: 140px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  flex-shrink: 0;
+}
+
+.cna-card__todos {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
+
+.cna-card__todo-row {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.cna-card__todo-text {
+  margin: 0 0 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-ink);
+}
+
+.cna-card__todo-controls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cna-card__todo-controls > :first-child {
+  flex: 1;
+  min-width: 0;
+}
+
+.cna-card__empty {
+  margin: 12px 0 0;
+  font-size: 13px;
+  color: var(--color-slate);
+}
+
+.cna-card__footer {
+  flex-shrink: 0;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+  display: flex;
+  justify-content: flex-end;
+}
