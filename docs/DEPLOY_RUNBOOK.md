@@ -8,6 +8,8 @@ For any agent (or human) shipping a change to this repo. Follow it in order. It 
 
 Local D1 (`--local`, under `.wrangler/state/`) is a completely separate SQLite file, seeded independently. Nothing you do there touches remote data, and nothing you do remotely is visible locally.
 
+**`pnpm run deploy [env]` (`scripts/deploy.sh`) is now the entry point** for everything below — `pnpm run deploy` with no argument does exactly what this doc describes (typecheck, build, migrate --remote with a confirmation prompt, deploy, verify), against today's one real environment. It also knows how to provision and deploy additional environments (`pnpm run deploy uat`, `pnpm run deploy prod`, or a future tenant slug — see `docs/UAT_ENVIRONMENT_PLAN.md` and `docs/MULTI_TENANCY_PLAN.md`) once those are actually set up; today only "dev" exists, so the fact above still holds. `pnpm run deploy:raw` is the old one-line `pnpm build && wrangler deploy` if you specifically want to skip the safety checks. Read `scripts/deploy.sh --help` for the full option list (`--yes`, `--skip-migrate`, `--dry-run`).
+
 ## Before touching anything
 
 1. `git status` — confirm you know what's already uncommitted and whether it's yours.
