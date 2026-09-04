@@ -3,12 +3,13 @@
 export const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 export const ANTHROPIC_API_VERSION = "2023-06-01";
 
-/** Sonnet 5 / Opus 5 — 5-minute ephemeral cache (default TTL, stated explicitly). */
+/** Anthropic accepts "5m" (default) and "1h" (extended) — no 2h pool on the API. */
 export type AnthropicCacheControl = { type: "ephemeral"; ttl?: "5m" | "1h" };
 
-export const SONNET5_EPHEMERAL_CACHE: AnthropicCacheControl = {
+/** Extended TTL for static system prompts (Sonnet + Haiku). */
+export const PROMPT_EPHEMERAL_CACHE: AnthropicCacheControl = {
   type: "ephemeral",
-  ttl: "5m",
+  ttl: "1h",
 };
 
 export type CachedTextBlock = {
@@ -33,20 +34,20 @@ export function anthropicRequestHeaders(apiKey: string): HeadersInit {
 }
 
 /**
- * Claude Sonnet 5 / Opus 5 — 1,024-token minimum per cache breakpoint.
- * Haiku 4.5 needs 4,096 tokens; our scan prompts are below that, so skip.
- * Place one breakpoint on the system block; the cached prefix includes
- * tools + system (API order: tools → system → messages).
+ * Sonnet / Haiku / Opus — cache the static system block (prefix includes
+ * tools + system per API order). Minimum cacheable length: ~1k tokens
+ * (Sonnet), ~4k (Haiku 4.5 / Opus); prompts below that are sent with
+ * cache_control but may not create a cache entry.
  */
 export function promptCacheControlForModel(model: string): AnthropicCacheControl | null {
   const m = model.toLowerCase();
-  if (m.includes("claude-sonnet-5") || m.includes("claude-opus-5")) {
-    return SONNET5_EPHEMERAL_CACHE;
+  if (m.includes("haiku") || m.includes("sonnet") || m.includes("opus")) {
+    return PROMPT_EPHEMERAL_CACHE;
   }
   return null;
 }
 
-/** Static system prompt — cached for Sonnet 5 when the roster-heavy block clears 1k tokens. */
+/** Static system prompt — cached for Sonnet and Haiku when above model minimums. */
 export function cachedSystemPrompt(
   text: string,
   model: string

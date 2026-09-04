@@ -30,12 +30,32 @@ import type {
 } from "./types";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./types";
 
+/** Cloudflare D1 — https://developers.cloudflare.com/d1/platform/limits/ */
+const D1_MAX_BOUND_PARAMS = 100;
+
 function staffHiddenCategorySql(alias = "workflow_stages.category"): { clause: string; binds: string[] } {
   const placeholders = STAFF_HIDDEN_WORKFLOW_CATEGORIES.map(() => "?").join(", ");
   return {
     clause: `AND ${alias} NOT IN (${placeholders})`,
     binds: [...STAFF_HIDDEN_WORKFLOW_CATEGORIES],
   };
+}
+
+/** D1 allows at most 100 bound params — chunk dynamic `IN (...)` lists. */
+async function queryAllByIdChunks<T>(
+  db: D1Database,
+  ids: string[],
+  buildSql: (placeholders: string) => string
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += D1_MAX_BOUND_PARAMS) {
+    const chunk = ids.slice(i, i + D1_MAX_BOUND_PARAMS);
+    const placeholders = chunk.map(() => "?").join(",");
+    const { results } = await db.prepare(buildSql(placeholders)).bind(...chunk).all<T>();
+    if (results?.length) out.push(...results);
+  }
+  return out;
 }
 
 export interface NewCallInput {
@@ -822,12 +842,15 @@ export async function listCallsWithTodos(
     .all<RawCallJoinRow>();
   if (calls.length === 0) return [];
 
-  const placeholders = calls.map(() => "?").join(",");
   const callIds = calls.map((c) => c.id);
-  const [{ results: todos }, { results: commitments }, { results: siteRows }] = await Promise.all([
-    db.prepare(`${TODO_SELECT} WHERE call_id IN (${placeholders}) ORDER BY created_at ASC`).bind(...callIds).all<RawTodoRow>(),
-    db.prepare(`${COMMITMENT_SELECT} WHERE call_id IN (${placeholders}) ORDER BY created_at ASC`).bind(...callIds).all<RawCommitmentRow>(),
-    db.prepare(`${SITE_SELECT} AND call_sites.call_id IN (${placeholders})`).bind(...callIds).all<RawSiteRow>(),
+  const [todos, commitments, siteRows] = await Promise.all([
+    queryAllByIdChunks<RawTodoRow>(db, callIds, (ph) =>
+      `${TODO_SELECT} WHERE call_id IN (${ph}) ORDER BY created_at ASC`
+    ),
+    queryAllByIdChunks<RawCommitmentRow>(db, callIds, (ph) =>
+      `${COMMITMENT_SELECT} WHERE call_id IN (${ph}) ORDER BY created_at ASC`
+    ),
+    queryAllByIdChunks<RawSiteRow>(db, callIds, (ph) => `${SITE_SELECT} AND call_sites.call_id IN (${ph})`),
   ]);
 
   const todosByCall = new Map<string, TodoRow[]>();
@@ -1346,11 +1369,11 @@ export async function getSitesNeedingAttention(db: D1Database, limit = 4): Promi
   if (siteCalls.length === 0) return [];
 
   const callIds = [...new Set(siteCalls.map((r) => r.call_id))];
-  const placeholders = callIds.map(() => "?").join(",");
-  const { results: openTodos } = await db
-    .prepare(`SELECT call_id, due_date FROM todos WHERE status = 'open' AND call_id IN (${placeholders})`)
-    .bind(...callIds)
-    .all<{ call_id: string; due_date: string | null }>();
+  const openTodos = await queryAllByIdChunks<{ call_id: string; due_date: string | null }>(
+    db,
+    callIds,
+    (ph) => `SELECT call_id, due_date FROM todos WHERE status = 'open' AND call_id IN (${ph})`
+  );
 
   const openTodosByCall = new Map<string, Array<string | null>>();
   for (const t of openTodos) {
@@ -2003,11 +2026,9 @@ export async function getSiteTimeline(
     : [];
   const todosByVoiceMemoCall = new Map<string, TodoRow[]>();
   if (voiceMemoCallIds.length > 0) {
-    const placeholders = voiceMemoCallIds.map(() => "?").join(",");
-    const { results: rawTodos } = await db
-      .prepare(`${TODO_SELECT} WHERE call_id IN (${placeholders}) ORDER BY created_at ASC`)
-      .bind(...voiceMemoCallIds)
-      .all<RawTodoRow>();
+    const rawTodos = await queryAllByIdChunks<RawTodoRow>(db, voiceMemoCallIds, (ph) =>
+      `${TODO_SELECT} WHERE call_id IN (${ph}) ORDER BY created_at ASC`
+    );
     for (const rt of rawTodos) {
       const list = todosByVoiceMemoCall.get(rt.call_id) ?? [];
       list.push(toTodoRow(rt));
