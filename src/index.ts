@@ -90,9 +90,10 @@ export interface Env {
   SARVAM_LANGUAGE_CODE: string;
   ANTHROPIC_MODEL: string;
   ANTHROPIC_HAIKU_MODEL: string;
-  INGEST_PREFIX: string;
 
   RECORDINGS: R2Bucket;
+  /** Voice-note audio only (calls, site memos, checklist/complaint voice notes, todo voice notes) — see docs/VOICE_NOTE_BUCKET_PLAN.md. site_media stays on RECORDINGS. */
+  VOICE_NOTES: R2Bucket;
   DB: D1Database;
   ASSETS: Fetcher;
 

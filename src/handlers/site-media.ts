@@ -90,5 +90,7 @@ export async function handleGetCallRecording(
   }
   // No content-type column on `calls` — streamR2Object falls back to
   // whatever was set on the object at upload time (see r2-stream.ts).
-  return streamR2Object(env.RECORDINGS, call.r2_key, undefined, request);
+  // Call audio lives in VOICE_NOTES, not RECORDINGS (which is site_media
+  // photos/videos only) — see docs/VOICE_NOTE_BUCKET_PLAN.md.
+  return streamR2Object(env.VOICE_NOTES, call.r2_key, undefined, request);
 }

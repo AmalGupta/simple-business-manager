@@ -79,7 +79,7 @@ export async function submitRecording(
   if (!uploadRes.ok) throw new Error(`Sarvam upload-files failed: ${uploadRes.status} ${await uploadRes.text()}`);
   const upload = await uploadRes.json<{ upload_urls: Record<string, { file_url: string }> }>();
 
-  const object = await env.RECORDINGS.get(r2Key);
+  const object = await env.VOICE_NOTES.get(r2Key);
   if (!object) throw new Error(`missing R2 object: ${r2Key}`);
 
   const uploadUrl = upload.upload_urls[fileName]?.file_url;

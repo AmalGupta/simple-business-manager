@@ -14,6 +14,8 @@ import {
   createMaterialShortage,
   getInstallationById,
   getInstallationUpdateById,
+  getSiteName,
+  getUserById,
   insertCall,
   linkCallToInstallationUpdate,
   linkCallToSiteExplicit,
@@ -30,6 +32,7 @@ import {
 } from "@sbm/core";
 import { assertSiteMembership, requireSession } from "../lib/auth";
 import { normalizeAudioContentType, submitRecording } from "../lib/sarvam";
+import { buildVoiceNoteKey } from "../lib/voice-note-key";
 import type { Env } from "../index";
 
 function json(data: unknown, status = 200): Response {
@@ -125,9 +128,17 @@ export async function handlePostInstallationUpdate(
   const installationUpdateId = crypto.randomUUID();
   const callId = crypto.randomUUID();
   const ext = file.name.includes(".") ? file.name.split(".").pop() : "m4a";
-  const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
+  const recordedAt = new Date().toISOString();
+  const [reporter, siteName] = await Promise.all([getUserById(env.DB, reportedByUserId), getSiteName(env.DB, installation.site_id)]);
+  const r2Key = buildVoiceNoteKey({
+    speaker: reporter?.name ?? "Unknown",
+    metadata: [siteName ?? "", installation.label, category].filter(Boolean),
+    recordedAtIso: recordedAt,
+    id: callId,
+    ext: ext ?? "m4a",
+  });
 
-  await env.RECORDINGS.put(r2Key, file.stream(), {
+  await env.VOICE_NOTES.put(r2Key, file.stream(), {
     httpMetadata: { contentType: normalizeAudioContentType(file.type) },
   });
 
@@ -139,7 +150,7 @@ export async function handlePostInstallationUpdate(
     id: callId,
     r2Key,
     source: "ios",
-    recordedAt: new Date().toISOString(),
+    recordedAt,
     recordingDate: null,
     durationS: null,
     recordedForSiteId: installation.site_id,
@@ -236,24 +247,32 @@ export async function handlePostSiteComplaint(
     return json({ error: "voice recording is required" }, 400);
   }
 
+  const [reporter, siteName] = await Promise.all([getUserById(env.DB, reportedByUserId), getSiteName(env.DB, siteId)]);
+
   const textField = form.get("text");
   let text = typeof textField === "string" ? textField.trim() : "";
   if (!text) {
-    const siteRow = await env.DB.prepare(`SELECT name FROM sites WHERE id = ?`).bind(siteId).first<{ name: string }>();
-    text = siteRow?.name ? `Complaint at ${siteRow.name}` : "Site complaint (voice note)";
+    text = siteName ? `Complaint at ${siteName}` : "Site complaint (voice note)";
   }
 
   const callId = crypto.randomUUID();
   const ext = recording.name.includes(".") ? recording.name.split(".").pop() : "m4a";
-  const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
-  await env.RECORDINGS.put(r2Key, recording.stream(), {
+  const recordedAt = new Date().toISOString();
+  const r2Key = buildVoiceNoteKey({
+    speaker: reporter?.name ?? "Unknown",
+    metadata: [siteName ?? "", "Complaint"].filter(Boolean),
+    recordedAtIso: recordedAt,
+    id: callId,
+    ext: ext ?? "m4a",
+  });
+  await env.VOICE_NOTES.put(r2Key, recording.stream(), {
     httpMetadata: { contentType: normalizeAudioContentType(recording.type) },
   });
   await insertCall(env.DB, {
     id: callId,
     r2Key,
     source: "ios",
-    recordedAt: new Date().toISOString(),
+    recordedAt,
     recordingDate: null,
     durationS: null,
     recordedForSiteId: siteId,

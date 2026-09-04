@@ -4,6 +4,7 @@
 
 import { getInsightsSummary, insertCall, setCallFailed, setCallSubmitted, type InsightsSummary } from "@sbm/core";
 import { normalizeAudioContentType, submitRecording } from "../lib/sarvam";
+import { buildVoiceNoteKey } from "../lib/voice-note-key";
 import type { Env } from "../index";
 
 // Recorder filenames look like "AUDIO-2026-08-20-22-05-33.m4a" — the
@@ -143,9 +144,14 @@ export async function handleUploadPost(
 
   const callId = crypto.randomUUID();
   const ext = file.name.includes(".") ? file.name.split(".").pop() : "m4a";
-  const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
+  const recordedAt = new Date().toISOString();
+  const recordingDate = parseRecordedAtFromFilename(file.name);
+  // No caller identity is known at upload time (unlike the Drive poller,
+  // which resolves a caller before ever touching R2) — "Unknown" until
+  // extraction/manual classification happens.
+  const r2Key = buildVoiceNoteKey({ speaker: "Unknown", recordedAtIso: recordingDate ?? recordedAt, id: callId, ext: ext ?? "m4a" });
 
-  await env.RECORDINGS.put(r2Key, file.stream(), {
+  await env.VOICE_NOTES.put(r2Key, file.stream(), {
     httpMetadata: { contentType: normalizeAudioContentType(file.type) },
   });
 
@@ -157,8 +163,8 @@ export async function handleUploadPost(
     // filename timestamp (see docs/SCAFFOLDING.md §10) when parseable, kept
     // as a separate field — the two can legitimately differ by hours or
     // days when a recording is uploaded well after the call happened.
-    recordedAt: new Date().toISOString(),
-    recordingDate: parseRecordedAtFromFilename(file.name),
+    recordedAt,
+    recordingDate,
     durationS: null,
   });
 

@@ -2212,6 +2212,12 @@ export async function getUserById(db: D1Database, id: string): Promise<User | nu
   return row ?? null;
 }
 
+/** Name only — for contexts (e.g. voice-note key naming) that don't need the full site row. */
+export async function getSiteName(db: D1Database, siteId: string): Promise<string | null> {
+  const row = await db.prepare(`SELECT name FROM sites WHERE id = ?`).bind(siteId).first<{ name: string }>();
+  return row?.name ?? null;
+}
+
 /**
  * PIN reset (self-service POST /api/me/pin, admin-create, or admin
  * POST /api/staff/:id/reset-pin) — a fresh salt is generated for every

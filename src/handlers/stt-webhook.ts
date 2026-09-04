@@ -95,7 +95,7 @@ async function handleSpamVerdict(env: Env, ctx: ExecutionContext, call: Call, ca
   if (callerId) await markCallerSpam(env.DB, callerId);
   await softDeleteCallAsSpam(env.DB, call.id);
   try {
-    await env.RECORDINGS.delete(call.r2_key);
+    await env.VOICE_NOTES.delete(call.r2_key);
   } catch (err) {
     console.error("[spam] R2 delete failed for call", call.id, err);
   }

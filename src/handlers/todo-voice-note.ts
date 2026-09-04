@@ -6,11 +6,10 @@
 // Multiple notes per todo are allowed (append-only); getLatestVoiceNotesByTodoIds
 // always returns the most recent one for playback.
 
-import { addTodoVoiceNote, getTodoVoiceNoteById, isTodoAssignee, type SessionWithUser } from "@sbm/core";
+import { addTodoVoiceNote, getTodoById, getTodoVoiceNoteById, getUserById, isTodoAssignee, type SessionWithUser } from "@sbm/core";
 import { streamR2Object } from "../lib/r2-stream";
+import { buildVoiceNoteKey } from "../lib/voice-note-key";
 import type { Env } from "../index";
-
-const TODO_VOICE_NOTE_PREFIX = "todo-voice-notes/";
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
@@ -25,8 +24,16 @@ export async function handlePostTodoVoiceNote(request: Request, env: Env, todoId
   const file = form.get("recording");
   if (!(file instanceof File)) return json({ error: "Missing 'recording' file" }, 400);
 
-  const r2Key = `${TODO_VOICE_NOTE_PREFIX}${todoId}/${crypto.randomUUID()}.${extOf(file)}`;
-  await env.RECORDINGS.put(r2Key, file.stream(), {
+  const noteId = crypto.randomUUID();
+  const [uploader, todo] = await Promise.all([getUserById(env.DB, uploadedByUserId), getTodoById(env.DB, todoId)]);
+  const r2Key = buildVoiceNoteKey({
+    speaker: uploader?.name ?? "Unknown",
+    metadata: todo ? [todo.text] : [],
+    recordedAtIso: new Date().toISOString(),
+    id: noteId,
+    ext: extOf(file),
+  });
+  await env.VOICE_NOTES.put(r2Key, file.stream(), {
     httpMetadata: { contentType: file.type || "application/octet-stream" },
   });
 
@@ -53,5 +60,5 @@ export async function handleGetTodoVoiceNote(
   if (session.user_role === "staff" && !(await isTodoAssignee(env.DB, note.todo_id, session.user_id))) {
     return new Response("Forbidden", { status: 403 });
   }
-  return streamR2Object(env.RECORDINGS, note.r2_key, note.content_type, request);
+  return streamR2Object(env.VOICE_NOTES, note.r2_key, note.content_type, request);
 }

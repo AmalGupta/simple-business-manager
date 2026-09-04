@@ -18,6 +18,7 @@ import {
 import type { Env } from "../index";
 import { contentTypeForDriveCall, parseDriveCallFilename } from "./drive-call-filename";
 import { downloadDriveFile, listDriveFiles, moveDriveFile, type DriveFileListItem } from "./google-drive";
+import { buildVoiceNoteKey } from "./voice-note-key";
 import { submitRecording } from "./sarvam";
 
 /** Per-file: ~2 Drive fetches + 1 R2 put + ~4 D1 ops + 1 progress write. */
@@ -160,7 +161,7 @@ async function rollbackPreSubmitIngest(env: Env, callId: string, r2Key: string |
   }
   if (r2Key) {
     try {
-      await env.RECORDINGS.delete(r2Key);
+      await env.VOICE_NOTES.delete(r2Key);
     } catch (err) {
       console.error(`[drive-poll] rollback delete R2 ${r2Key}:`, String(err));
     }
@@ -229,13 +230,13 @@ async function ingestOne(
 
   // staff / client (new or existing, unknown) — unchanged normal flow.
   const ext = file.name.includes(".") ? file.name.split(".").pop()! : "m4a";
-  const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
+  const r2Key = buildVoiceNoteKey({ speaker: caller.name, recordedAtIso: callTime, id: callId, ext });
   let submitted = false;
 
   try {
     onStep("download", caller.name);
     const downloaded = await downloadDriveFile(env, file.id);
-    await env.RECORDINGS.put(r2Key, downloaded.body, {
+    await env.VOICE_NOTES.put(r2Key, downloaded.body, {
       httpMetadata: {
         contentType: contentTypeForDriveCall(file.name, downloaded.contentType),
       },

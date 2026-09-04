@@ -6,8 +6,9 @@
 // and uploader are set explicitly at upload time instead of waiting for
 // extraction to infer a site from transcript content.
 
-import { insertCall, linkCallToSiteExplicit, setCallFailed, setCallSubmitted } from "@sbm/core";
+import { getSiteName, getUserById, insertCall, linkCallToSiteExplicit, setCallFailed, setCallSubmitted } from "@sbm/core";
 import { normalizeAudioContentType, submitRecording } from "../lib/sarvam";
+import { buildVoiceNoteKey } from "../lib/voice-note-key";
 import type { Env } from "../index";
 
 function json(data: unknown, status = 200): Response {
@@ -27,9 +28,17 @@ export async function handlePostSiteVoiceNote(
 
   const callId = crypto.randomUUID();
   const ext = file.name.includes(".") ? file.name.split(".").pop() : "m4a";
-  const r2Key = `${env.INGEST_PREFIX}${callId}.${ext}`;
+  const recordedAt = new Date().toISOString();
+  const [uploader, siteName] = await Promise.all([getUserById(env.DB, uploadedByUserId), getSiteName(env.DB, siteId)]);
+  const r2Key = buildVoiceNoteKey({
+    speaker: uploader?.name ?? "Unknown",
+    metadata: siteName ? [siteName] : [],
+    recordedAtIso: recordedAt,
+    id: callId,
+    ext: ext ?? "m4a",
+  });
 
-  await env.RECORDINGS.put(r2Key, file.stream(), {
+  await env.VOICE_NOTES.put(r2Key, file.stream(), {
     httpMetadata: { contentType: normalizeAudioContentType(file.type) },
   });
 
@@ -37,7 +46,7 @@ export async function handlePostSiteVoiceNote(
     id: callId,
     r2Key,
     source: "ios",
-    recordedAt: new Date().toISOString(),
+    recordedAt,
     recordingDate: null,
     durationS: null,
     recordedForSiteId: siteId,

@@ -12,7 +12,6 @@
     "SARVAM_LANGUAGE_CODE": "unknown",
     "ANTHROPIC_MODEL": "claude-sonnet-5",
     "ANTHROPIC_HAIKU_MODEL": "claude-haiku-4-5-20251001",
-    "INGEST_PREFIX": "inbox/",
     "GOOGLE_DRIVE_CALLS_FOLDER_ID": "1BVvqN0a_e8mb4S50yMb9X-XwKEfxO5RR",
     "GOOGLE_DRIVE_ARCHIVE_FOLDER_ID": "12v7xURXHMtL20fjOVLEzmMmXdmcCYhXg",
     // Callers Directory (migration 0021): "Spam" subfolder inside Calls —
@@ -39,7 +38,13 @@
   // ],
 
   "r2_buckets": [
-    { "binding": "RECORDINGS", "bucket_name": "sbm-recordings-dev" }
+    { "binding": "RECORDINGS", "bucket_name": "sbm-recordings-dev" },
+    // Voice-note audio only (calls, site memos, checklist/complaint voice
+    // notes, todo voice notes) — see docs/VOICE_NOTE_BUCKET_PLAN.md.
+    // site_media (photos/videos) stays on RECORDINGS above. Bucket must be
+    // created remotely (`wrangler r2 bucket create sbm-voice-notes-dev`)
+    // before this can deploy — not done as part of this change.
+    { "binding": "VOICE_NOTES", "bucket_name": "sbm-voice-notes-dev" }
   ],
 
   "d1_databases": [
