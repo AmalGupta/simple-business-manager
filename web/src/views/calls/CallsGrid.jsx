@@ -289,7 +289,7 @@ function pageNumbers(current, total) {
  * Viewport-filling grid: internal body scroll only, no cell tooltips,
  * mild hover zoom, light-blue header (vs home accent panel).
  */
-export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null }) {
+export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null, dimmed = false }) {
   const gridRef = useRef(null);
   const serverMode = Boolean(serverPagination);
   const [pageSize, setPageSize] = useState(serverMode ? rows?.length || DEFAULT_PAGE_SIZE : DEFAULT_PAGE_SIZE);
@@ -478,6 +478,8 @@ export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null 
         minHeight: 0,
         display: "flex",
         flexDirection: "column",
+        opacity: dimmed ? 0.65 : 1,
+        transition: "opacity 140ms ease",
       }}
     >
       <style>{GRID_CSS}</style>

@@ -30,6 +30,17 @@ const EMPTY_FILTERS = {
 
 const PAGE_SIZE = 50;
 
+function filtersActive(filters) {
+  return Boolean(
+    filters.dateFrom ||
+      filters.dateTo ||
+      (filters.callers?.length ?? 0) > 0 ||
+      filters.importantOnly ||
+      filters.withTodosOnly ||
+      (filters.entryTypes?.length ?? 0) > 0
+  );
+}
+
 function filtersToApi(filters) {
   return {
     include_low_signal: true,
@@ -56,8 +67,11 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
   const [callerOptions, setCallerOptions] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [exportBusy, setExportBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const pageCache = useRef([]);
+  const loadGen = useRef(0);
+  const hasLoadedOnce = useRef(false);
 
   const [pollEnabled, setPollEnabled] = useState(false);
   const [pollMeta, setPollMeta] = useState({ lastAt: null, lastResult: null });
@@ -92,16 +106,24 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
 
   const resetAndLoad = useCallback(
     async (nextFilters) => {
+      const gen = ++loadGen.current;
       setLoadError("");
-      setRows(null);
+      if (hasLoadedOnce.current) setRefreshing(true);
       pageCache.current = [];
+      setPageIndex(0);
       const apiFilters = filtersToApi(nextFilters);
       try {
         await fetchPage(0, apiFilters);
+        if (gen !== loadGen.current) return;
+        hasLoadedOnce.current = true;
       } catch (err) {
+        if (gen !== loadGen.current) return;
         setRows([]);
         setTotal(0);
         setLoadError(err.message || "Failed to load calls");
+        hasLoadedOnce.current = true;
+      } finally {
+        if (gen === loadGen.current) setRefreshing(false);
       }
     },
     [fetchPage]
@@ -343,7 +365,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
 
   const serverOffset = pageIndex * PAGE_SIZE;
   const hasServerNext = Boolean(pageCache.current[pageIndex]?.next_cursor);
-  const showEmpty = rows !== null && total === 0;
+  const initialLoading = rows === null;
+  const noCallsAtAll = !initialLoading && total === 0 && !filtersActive(filters) && !refreshing;
 
   return (
     <div
@@ -424,9 +447,9 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
         <p style={{ fontSize: 14, color: t.signal, margin: 0, flexShrink: 0 }}>{loadError}</p>
       )}
 
-      {rows === null ? (
+      {initialLoading ? (
         <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>Loading calls…</p>
-      ) : showEmpty ? (
+      ) : noCallsAtAll ? (
         <EmptyState />
       ) : (
         <>
@@ -449,11 +472,15 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
             }}
           >
             Call / Voice Note Logs
+            {refreshing ? (
+              <span style={{ fontSize: 13, fontWeight: 500, color: t.edge2, marginLeft: 10 }}>Updating…</span>
+            ) : null}
           </h2>
           <CallsGrid
-            rows={rows}
+            rows={rows ?? []}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            dimmed={refreshing}
             serverPagination={{
               total,
               offset: serverOffset,
