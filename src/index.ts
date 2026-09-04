@@ -12,6 +12,10 @@ import {
   handleCloseEscalation,
   handleGetCall,
   handleGetCalls,
+  handleGetCallCallers,
+  handleGetCallsByTodoStatus,
+  handleGetCallsCalendar,
+  handleGetCallsDay,
   handleGetComplaints,
   handleGetComplaintsCount,
   handlePatchComplaint,
@@ -150,6 +154,26 @@ export default {
     if (url.pathname === "/api/calls" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetCalls(request, env);
+    }
+
+    if (url.pathname === "/api/calls/callers" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallCallers(request, env);
+    }
+
+    if (url.pathname === "/api/calls/calendar" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallsCalendar(request, env);
+    }
+
+    if (url.pathname === "/api/calls/day" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallsDay(request, env);
+    }
+
+    if (url.pathname === "/api/calls/by-todo-status" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallsByTodoStatus(request, env);
     }
 
     // Must come before callMatch below — "count" / "transcripts" would otherwise parse as a call id.

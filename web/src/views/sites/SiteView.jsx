@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { t } from "../../theme.js";
 import { fmtDate, daysUntil } from "../../lib/dates.js";
-import { sortCalls } from "../../lib/constants.js";
 import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { fetchSiteTeam, fetchSiteTimeline, patchSite, postSiteTeamMember, postSiteVoiceNote } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
@@ -23,7 +22,6 @@ import { WorkTimelinePopup } from "./WorkTimelinePopup.jsx";
 export function SiteView({
   site,
   siteRecord,
-  calls,
   onBack,
   onOpen,
   onSiteUpdated,
@@ -35,11 +33,6 @@ export function SiteView({
   onAssignTodo,
 }) {
   const [showWorkTimeline, setShowWorkTimeline] = useState(false);
-  const siteCalls = useMemo(
-    () => sortCalls(calls.filter((c) => c.sites?.includes(site))),
-    [calls, site]
-  );
-
   /* "Assign new site" only for a genuinely blank site — no details AND no
      call history yet. Anything with either already shows "Add more site
      details" instead, since it's not really a fresh/untouched site. */
@@ -50,7 +43,6 @@ export function SiteView({
       siteRecord?.sector?.trim() ||
       siteRecord?.city?.trim()
   );
-  const isBlankSite = !hasDetails && siteCalls.length === 0;
   const daysMissed = siteRecord?.target_closure_date ? -daysUntil(siteRecord.target_closure_date) : 0;
   const targetMissed = daysMissed > 0;
 
@@ -67,6 +59,12 @@ export function SiteView({
   const [team, setTeam] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [timeline, setTimeline] = useState(null);
+
+  const hasCallHistory = useMemo(
+    () => (timeline == null ? null : timeline.some((e) => e.type === "call")),
+    [timeline]
+  );
+  const isBlankSite = !hasDetails && hasCallHistory === false;
 
   useEffect(() => {
     if (!siteRecord?.id) {

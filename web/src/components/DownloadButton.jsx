@@ -2,12 +2,17 @@ import { Download } from "lucide-react";
 import { t } from "../theme.js";
 import { downloadReport } from "../lib/csv.js";
 
-export function DownloadButton({ calls, label, children }) {
-  const empty = calls.length === 0;
+export function DownloadButton({ calls, label, children, onBeforeOpen, disabled = false }) {
+  const empty = !calls?.length && !onBeforeOpen;
+  const onClick = async () => {
+    let data = calls;
+    if (onBeforeOpen) data = await onBeforeOpen();
+    if (data?.length) downloadReport(data, label);
+  };
   return (
     <button
-      onClick={() => downloadReport(calls, label)}
-      disabled={empty}
+      onClick={onClick}
+      disabled={disabled || empty}
       style={{
         display: "inline-flex",
         alignItems: "center",

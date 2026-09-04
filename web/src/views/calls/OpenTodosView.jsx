@@ -1,7 +1,8 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { t } from "../../theme.js";
 import { fmtShort, isUrgent } from "../../lib/dates.js";
 import { TILE_ROW_STYLE } from "../../styles.js";
+import { fetchCallsByTodoStatus } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { TodoRow } from "../../components/TodoRow.jsx";
@@ -11,7 +12,6 @@ import { TodoAssignControl } from "./TodoAssignControl.jsx";
    `status` is "open" or "snoozed". Parked list uses TodoRow so admin can
    unpark or complete; open list keeps assign-first layout. */
 export function OpenTodosView({
-  calls,
   staffRoster,
   onBack,
   onOpen,
@@ -20,7 +20,29 @@ export function OpenTodosView({
   onPark,
   busyIds,
   status = "open",
+  refreshKey = 0,
 }) {
+  const [calls, setCalls] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchCallsByTodoStatus(status)
+      .then((data) => {
+        if (!cancelled) setCalls(Array.isArray(data) ? data : []);
+      })
+      .catch(() => {
+        if (!cancelled) setCalls([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [status, refreshKey]);
+
   const todos = useMemo(
     () =>
       calls
@@ -41,6 +63,15 @@ export function OpenTodosView({
   const title = status === "snoozed" ? "Parked" : "Open today";
   const empty = status === "snoozed" ? "Nothing parked right now." : "Nothing open right now.";
 
+  if (loading) {
+    return (
+      <div>
+        <BackLink onClick={onBack}>Back</BackLink>
+        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+      </div>
+    );
+  }
+
   return (
     <div>
       <BackLink onClick={onBack}>Back</BackLink>
@@ -58,37 +89,35 @@ export function OpenTodosView({
             const urgent = isUrgent(td);
             return (
               <div key={td.id} style={{ ...TILE_ROW_STYLE, display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                  <TodoRow
+                    todo={td}
+                    urgent={urgent}
+                    onToggle={onToggle}
+                    onPark={onPark}
+                    busy={busyIds?.has(td.id)}
+                    showDue
+                  />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, paddingLeft: 28 }}>
                   <button
-                    onClick={() => onOpen(td.call.id)}
-                    style={{ all: "unset", cursor: "pointer", fontFamily: t.display, fontSize: 14, fontWeight: 500, color: t.edge }}
+                    type="button"
+                    onClick={() => onOpen(td.call_id)}
+                    style={{
+                      all: "unset",
+                      cursor: "pointer",
+                      fontSize: 13,
+                      color: t.accent,
+                      fontWeight: 500,
+                    }}
                   >
                     {td.call.client_name}
+                    {td.call.recorded_at ? ` · ${fmtShort(td.call.recorded_at)}` : ""}
                   </button>
-                  {td.due_date && (
-                    <span
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        padding: "2px 8px",
-                        borderRadius: t.radius,
-                        whiteSpace: "nowrap",
-                        color: urgent ? t.white : t.edge2,
-                        background: urgent ? t.signal : t.frost,
-                      }}
-                    >
-                      {fmtShort(td.due_date)}
-                    </span>
-                  )}
+                  {status === "open" && onAssign ? (
+                    <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} />
+                  ) : null}
                 </div>
-                {status === "snoozed" ? (
-                  <TodoRow todo={td} onToggle={onToggle} onPark={onPark} busy={busyIds?.has(td.id)} />
-                ) : (
-                  <>
-                    <span style={{ fontSize: 14, color: t.edge, lineHeight: 1.5 }}>{td.text}</span>
-                    <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} alwaysEditing />
-                  </>
-                )}
               </div>
             );
           })}

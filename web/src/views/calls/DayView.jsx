@@ -1,8 +1,9 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check } from "lucide-react";
 import { t } from "../../theme.js";
-import { fmtLong, dayKey } from "../../lib/dates.js";
+import { fmtLong } from "../../lib/dates.js";
 import { sortCalls } from "../../lib/constants.js";
+import { fetchCallsDay } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { DownloadButton } from "../../components/DownloadButton.jsx";
@@ -12,22 +13,47 @@ import { CallCard } from "../../components/CallCard.jsx";
    Day view — calls recorded that day, plus everything closed that day
    regardless of which call it came from.
    ------------------------------------------------------------------ */
-export function DayView({ date, calls, onBack, onOpen, onToggle, onPark, busyIds }) {
-  const dayCalls = useMemo(
-    () => sortCalls(calls.filter((c) => dayKey(c.recorded_at) === date)),
-    [calls, date]
+export function DayView({ date, onBack, onOpen, onToggle, onPark, busyIds, refreshKey = 0 }) {
+  const [loading, setLoading] = useState(true);
+  const [dayCalls, setDayCalls] = useState([]);
+  const [closures, setClosures] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchCallsDay(date)
+      .then((data) => {
+        if (cancelled) return;
+        setDayCalls(sortCalls(data.calls ?? []));
+        setClosures(data.closures ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDayCalls([]);
+          setClosures([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [date, refreshKey]);
+
+  const minutes = useMemo(
+    () => dayCalls.reduce((n, c) => n + (c.duration_s ?? 0), 0) / 60,
+    [dayCalls]
   );
 
-  const closures = useMemo(() => {
-    const out = [];
-    for (const c of calls)
-      for (const td of c.todos)
-        if (td.status === "done" && dayKey(td.completed_at) === date)
-          out.push({ ...td, client_name: c.client_name });
-    return out;
-  }, [calls, date]);
-
-  const minutes = dayCalls.reduce((n, c) => n + c.duration_s, 0) / 60;
+  if (loading) {
+    return (
+      <div>
+        <BackLink onClick={onBack}>Back</BackLink>
+        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+      </div>
+    );
+  }
 
   return (
     <div>

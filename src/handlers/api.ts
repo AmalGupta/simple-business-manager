@@ -14,6 +14,8 @@ import {
   createSite,
   getCallById,
   getCallsCount,
+  getCallsCalendar,
+  getCallsDayView,
   getCallDiarizedForExtract,
   getCallWithTodos,
   getCallerById,
@@ -26,9 +28,12 @@ import {
   isCallAccessibleToUser,
   isUserAssignedToSite,
   linkCallToSites,
+  listCallCallerOptions,
   listCallTranscripts,
+  listCallsByTodoStatus,
   listCallsForSiteScan,
-  listCallsWithTodos,
+  listCallsPage,
+  CALLS_PAGE_DEFAULT_LIMIT,
   listComplaints,
   listOpenEscalations,
   listSiteTeamMembers,
@@ -40,6 +45,8 @@ import {
   updateSite,
   updateTodo,
   type SessionWithUser,
+  type CallEntryTypeFilter,
+  type CallListFilters,
 } from "@sbm/core";
 import { ACTIVE } from "../../packages/core/prompts";
 import { extractCall } from "../../packages/core/prompts/extract";
@@ -68,11 +75,94 @@ async function requireAdmin(request: Request, env: Env): Promise<SessionWithUser
   return session;
 }
 
+function parseCallListFilters(params: URLSearchParams): CallListFilters {
+  const entryRaw = params.get("entry_types")?.trim();
+  const entryTypes = entryRaw
+    ? entryRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s): s is CallEntryTypeFilter => s === "voice_call" || s === "voice_note")
+    : undefined;
+  const callersRaw = params.get("callers")?.trim();
+  const callers = callersRaw
+    ? callersRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
+
+  return {
+    includeLowSignal: params.get("include_low_signal") === "1",
+    dateFrom: params.get("date_from")?.trim() || null,
+    dateTo: params.get("date_to")?.trim() || null,
+    callers: callers?.length ? callers : undefined,
+    importantOnly: params.get("important_only") === "1",
+    withTodosOnly: params.get("with_todos_only") === "1",
+    entryTypes: entryTypes?.length ? entryTypes : undefined,
+  };
+}
+
 export async function handleGetCalls(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
+  const params = new URL(request.url).searchParams;
+  const filters = parseCallListFilters(params);
+  const limitRaw = params.get("limit");
+  const limit = limitRaw ? Number.parseInt(limitRaw, 10) : CALLS_PAGE_DEFAULT_LIMIT;
+  const cursor = params.get("cursor")?.trim() || null;
+
+  try {
+    const page = await listCallsPage(env.DB, {
+      ...filters,
+      limit: Number.isFinite(limit) ? limit : CALLS_PAGE_DEFAULT_LIMIT,
+      cursor,
+    });
+    return json(page);
+  } catch (err) {
+    if (String(err).includes("invalid cursor")) return json({ error: "invalid cursor" }, 400);
+    throw err;
+  }
+}
+
+export async function handleGetCallCallers(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
   const includeLowSignal = new URL(request.url).searchParams.get("include_low_signal") === "1";
-  return json(await listCallsWithTodos(env.DB, { includeLowSignal }));
+  return json(await listCallCallerOptions(env.DB, { includeLowSignal }));
+}
+
+export async function handleGetCallsCalendar(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const params = new URL(request.url).searchParams;
+  const year = Number.parseInt(params.get("year") ?? "", 10);
+  const month = Number.parseInt(params.get("month") ?? "", 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return json({ error: "year and month (1–12) required" }, 400);
+  }
+  return json(await getCallsCalendar(env.DB, year, month));
+}
+
+export async function handleGetCallsDay(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const date = new URL(request.url).searchParams.get("date")?.trim() ?? "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ error: "date (yyyy-mm-dd) required" }, 400);
+  try {
+    return json(await getCallsDayView(env.DB, date));
+  } catch (err) {
+    return json({ error: String(err) }, 400);
+  }
+}
+
+export async function handleGetCallsByTodoStatus(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const status = new URL(request.url).searchParams.get("status");
+  if (status !== "open" && status !== "snoozed") {
+    return json({ error: "status must be open or snoozed" }, 400);
+  }
+  return json(await listCallsByTodoStatus(env.DB, status));
 }
 
 /** Home-page "Calls logged" tile — total row count, including low_signal calls the feed itself never shows a card for. */

@@ -14,12 +14,63 @@ async function fetchJSON(path) {
 }
 
 export async function fetchCalls() {
-  return fetchJSON("/api/calls");
+  const page = await fetchCallsPage({ include_low_signal: false });
+  return page.items;
+}
+
+function buildCallsQueryParams(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.include_low_signal) params.set("include_low_signal", "1");
+  if (filters.date_from) params.set("date_from", filters.date_from);
+  if (filters.date_to) params.set("date_to", filters.date_to);
+  if (filters.callers?.length) params.set("callers", filters.callers.join(","));
+  if (filters.important_only) params.set("important_only", "1");
+  if (filters.with_todos_only) params.set("with_todos_only", "1");
+  if (filters.entry_types?.length) params.set("entry_types", filters.entry_types.join(","));
+  if (filters.limit) params.set("limit", String(filters.limit));
+  if (filters.cursor) params.set("cursor", filters.cursor);
+  return params;
+}
+
+/** Paginated calls list — { items, total, next_cursor, has_more }. */
+export async function fetchCallsPage(filters = {}) {
+  const qs = buildCallsQueryParams(filters);
+  return fetchJSON(`/api/calls?${qs.toString()}`);
+}
+
+/** All pages matching filters (for CSV export). */
+export async function fetchAllCallsPages(filters = {}) {
+  const items = [];
+  let cursor = null;
+  for (;;) {
+    const page = await fetchCallsPage({ ...filters, cursor, limit: 50 });
+    items.push(...(page.items ?? []));
+    if (!page.has_more || !page.next_cursor) break;
+    cursor = page.next_cursor;
+  }
+  return items;
 }
 
 /** Calls dashboard grid — includes low_signal so Important / Regular filters work. */
-export async function fetchCallsForDashboard() {
-  return fetchJSON("/api/calls?include_low_signal=1");
+export async function fetchCallsForDashboard(filters = {}) {
+  return fetchCallsPage({ include_low_signal: true, ...filters });
+}
+
+export async function fetchCallCallers(includeLowSignal = true) {
+  const qs = includeLowSignal ? "?include_low_signal=1" : "";
+  return fetchJSON(`/api/calls/callers${qs}`);
+}
+
+export async function fetchCallsCalendar(year, month) {
+  return fetchJSON(`/api/calls/calendar?year=${year}&month=${month}`);
+}
+
+export async function fetchCallsDay(date) {
+  return fetchJSON(`/api/calls/day?date=${encodeURIComponent(date)}`);
+}
+
+export async function fetchCallsByTodoStatus(status) {
+  return fetchJSON(`/api/calls/by-todo-status?status=${encodeURIComponent(status)}`);
 }
 
 /** Background hydrate after lean fetchCalls() — map of call id → transcript text (or null). */

@@ -42,9 +42,8 @@ import { ComplaintsTile } from "./views/site-visit/ComplaintsTile.jsx";
 import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
 import {
-  fetchCalls,
   fetchCall,
-  fetchCallTranscripts,
+  fetchCallsCalendar,
   fetchDashboardSummary,
   fetchEscalations,
   fetchSitesAttention,
@@ -62,7 +61,9 @@ import {
 } from "./lib/api.js";
 
 export default function SimpleBusinessManager() {
-  const [calls, setCalls] = useState([]);
+  const [calendarDays, setCalendarDays] = useState({});
+  const [calendarMinYear, setCalendarMinYear] = useState(() => today().getFullYear());
+  const [todoRefreshKey, setTodoRefreshKey] = useState(0);
   const [escalations, setEscalations] = useState([]);
   const [sitesAttention, setSitesAttention] = useState([]);
   const [allSites, setAllSites] = useState([]);
@@ -139,7 +140,9 @@ export default function SimpleBusinessManager() {
 
     // Clear prior session slices so a re-login does not flash stale tiles
     // while the new requests are in flight.
-    setCalls([]);
+    setCalendarDays({});
+    setCalendarMinYear(today().getFullYear());
+    setTodoRefreshKey(0);
     setEscalations([]);
     setSitesAttention([]);
     setAllSites([]);
@@ -187,23 +190,6 @@ export default function SimpleBusinessManager() {
       .then((summary) => {
         if (cancelled) return;
         applySummary(summary);
-        fetchCalls()
-          .then((callsData) => {
-            if (cancelled) return null;
-            setCalls(callsData);
-            return fetchCallTranscripts();
-          })
-          .then((transcripts) => {
-            if (cancelled || !transcripts) return;
-            setCalls((cs) =>
-              cs.map((c) => {
-                if (!Object.prototype.hasOwnProperty.call(transcripts, c.id)) return c;
-                const text = transcripts[c.id];
-                return { ...c, transcript: text, has_transcript: text != null };
-              })
-            );
-          })
-          .catch((err) => console.error("[sbm] failed to load calls archive", err));
       })
       .catch((err) => console.error("[sbm] failed to load dashboard summary", err));
 
@@ -287,11 +273,6 @@ export default function SimpleBusinessManager() {
   });
 
   const monthDays = useMemo(() => {
-    const byDay = {};
-    for (const c of calls) {
-      const k = dayKey(c.recorded_at);
-      byDay[k] = (byDay[k] ?? 0) + 1;
-    }
     const now = today();
     const todayIso = isoDate(now.getFullYear(), now.getMonth(), now.getDate());
     const { year, month } = calMonth;
@@ -300,21 +281,33 @@ export default function SimpleBusinessManager() {
     for (let day = 1; day <= daysInMonth; day++) {
       const iso = isoDate(year, month, day);
       const future = iso > todayIso;
-      days.push({ date: iso, held: future ? null : true, calls: byDay[iso] ?? 0, future });
+      days.push({ date: iso, held: future ? null : true, calls: calendarDays[iso] ?? 0, future });
     }
     return days;
-  }, [calls, calMonth]);
+  }, [calendarDays, calMonth]);
 
   const yearOptions = useMemo(() => {
     const current = today().getFullYear();
-    const earliest = calls.reduce((min, c) => {
-      const y = c.recorded_at ? new Date(c.recorded_at).getFullYear() : current;
-      return Math.min(min, y);
-    }, current);
+    const earliest = Math.min(calendarMinYear, current - 1);
     const out = [];
-    for (let y = Math.min(earliest, current - 1); y <= current + 1; y++) out.push(y);
+    for (let y = earliest; y <= current + 1; y++) out.push(y);
     return out;
-  }, [calls]);
+  }, [calendarMinYear]);
+
+  const refreshCalendar = useCallback(async (year, month) => {
+    try {
+      const data = await fetchCallsCalendar(year, month + 1);
+      setCalendarDays(data.days ?? {});
+      if (data.min_year) setCalendarMinYear(data.min_year);
+    } catch (err) {
+      console.error("[sbm] failed to load calls calendar", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (me?.role === "staff") return;
+    refreshCalendar(calMonth.year, calMonth.month);
+  }, [me?.role, calMonth.year, calMonth.month, refreshCalendar, todoRefreshKey]);
 
   const goToMonth = useCallback((year, month) => {
     if (month < 0) {
@@ -355,29 +348,11 @@ export default function SimpleBusinessManager() {
     };
 
     setBusyIds((s) => new Set(s).add(todo.id));
-    setCalls((cs) =>
-      cs.map((c) => ({ ...c, todos: c.todos.map((td) => (td.id === todo.id ? { ...td, ...patch } : td)) }))
-    );
-    setMyOpenTodos((list) => {
-      if (!list.some((td) => td.id === todo.id)) return list;
-      if (patch.status === "open") return list.map((td) => (td.id === todo.id ? { ...td, ...patch } : td));
-      return list.filter((td) => td.id !== todo.id);
-    });
     applyCountDelta(true);
     try {
       await patchTodo(todo.id, patch);
+      setTodoRefreshKey((k) => k + 1);
     } catch {
-      setCalls((cs) =>
-        cs.map((c) => ({ ...c, todos: c.todos.map((td) => (td.id === todo.id ? { ...td, ...prev } : td)) }))
-      );
-      setMyOpenTodos((list) => {
-        // Restore only if this todo belonged on the personal queue before.
-        if (prev.status !== "open") return list.filter((td) => td.id !== todo.id);
-        if (list.some((td) => td.id === todo.id)) {
-          return list.map((td) => (td.id === todo.id ? { ...td, ...prev } : td));
-        }
-        return [...list, { ...todo, ...prev }];
-      });
       applyCountDelta(false);
     } finally {
       setBusyIds((s) => {
@@ -409,44 +384,19 @@ export default function SimpleBusinessManager() {
      rollback needs the todo's own prior assigned_to_user_id, not the
      {status, completed_at} pair `mutate` restores. */
   const onAssignTodo = useCallback(async (todoId, staffId) => {
-    let prevAssignedToUserId;
-    setCalls((cs) =>
-      cs.map((c) => ({
-        ...c,
-        todos: c.todos.map((td) => {
-          if (td.id !== todoId) return td;
-          prevAssignedToUserId = td.assigned_to_user_id;
-          return { ...td, assigned_to_user_id: staffId };
-        }),
-      }))
-    );
     try {
       await patchTodo(todoId, { assigned_to_user_id: staffId });
+      setTodoRefreshKey((k) => k + 1);
     } catch (err) {
-      setCalls((cs) =>
-        cs.map((c) => ({
-          ...c,
-          todos: c.todos.map((td) => (td.id === todoId ? { ...td, assigned_to_user_id: prevAssignedToUserId } : td)),
-        }))
-      );
       throw err;
     }
   }, []);
 
-  const bulkCall = view.name === "call" ? calls.find((c) => c.id === view.id) : null;
-  /* Lean list rows may have has_transcript without the blob yet — treat as
-     not ready and fetch GET /api/calls/:id. No transcript expected
-     (has_transcript false) can use the lean row as-is. */
-  const bulkCallReady =
-    bulkCall && (bulkCall.transcript != null || bulkCall.has_transcript === false);
-
   useEffect(() => {
-    if (view.name !== "call" || bulkCallReady) {
+    if (view.name !== "call") {
       setFetchedCall(null);
       return;
     }
-    // undefined = fetch in flight, distinct from null ("fetched, not found /
-    // not permitted") so the render below can tell the two apart.
     setFetchedCall(undefined);
     let cancelled = false;
     fetchCall(view.id)
@@ -461,9 +411,9 @@ export default function SimpleBusinessManager() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view.name, view.id, bulkCallReady]);
+  }, [view.name, view.id]);
 
-  const openCall = bulkCallReady ? bulkCall : view.name === "call" ? fetchedCall : null;
+  const openCall = view.name === "call" ? fetchedCall : null;
 
   const shell = (children, { wide = false, fillViewport = false } = {}) => (
     <div
@@ -575,7 +525,7 @@ export default function SimpleBusinessManager() {
     return <LoginScreen error={loginError} initialName={loginInitialName} />;
   }
 
-  if (view.name === "call" && !bulkCallReady && fetchedCall === undefined) {
+  if (view.name === "call" && fetchedCall === undefined) {
     return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
   }
 
@@ -606,12 +556,12 @@ export default function SimpleBusinessManager() {
     return shell(
       <DayView
         date={view.date}
-        calls={calls}
         onBack={() => setView(homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "day", date: view.date } })}
         onToggle={onToggle}
         onPark={onPark}
         busyIds={busyIds}
+        refreshKey={todoRefreshKey}
       />
     );
 
@@ -620,7 +570,6 @@ export default function SimpleBusinessManager() {
       <SiteView
         site={view.site}
         siteRecord={allSites.find((s) => s.name === view.site)}
-        calls={calls}
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "site", site: view.site, from: view.from } })}
         onSiteUpdated={refreshSites}
@@ -659,10 +608,7 @@ export default function SimpleBusinessManager() {
         onToggle={onToggle}
         onPark={onPark}
         busyIds={busyIds}
-        onCallsChanged={async () => {
-          const callsData = await fetchCalls();
-          setCalls(callsData);
-        }}
+        onCallsChanged={() => refreshCalendar(calMonth.year, calMonth.month)}
       />,
       { wide: true, fillViewport: true }
     );
@@ -670,19 +616,18 @@ export default function SimpleBusinessManager() {
   if (view.name === "open-todos")
     return shell(
       <OpenTodosView
-        calls={calls}
         staffRoster={staffRoster}
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "open-todos" } })}
         onAssign={onAssignTodo}
         status="open"
+        refreshKey={todoRefreshKey}
       />
     );
 
   if (view.name === "parked-todos")
     return shell(
       <OpenTodosView
-        calls={calls}
         staffRoster={staffRoster}
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "parked-todos" } })}
@@ -691,6 +636,7 @@ export default function SimpleBusinessManager() {
         onPark={onPark}
         busyIds={busyIds}
         status="snoozed"
+        refreshKey={todoRefreshKey}
       />
     );
 

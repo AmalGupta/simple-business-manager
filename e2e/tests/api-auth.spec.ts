@@ -25,7 +25,8 @@ test.describe("X-SBM-Key gate", () => {
 
     const res = await request.get("/api/calls", { headers: { "X-SBM-Key": sbmApiKey() } });
     expect(res.status()).toBe(200);
-    expect(Array.isArray(await res.json())).toBe(true);
+    const body = await res.json();
+    expect(body).toMatchObject({ items: expect.any(Array), total: expect.any(Number) });
   });
 
   test("GET /api/calls with the correct key but no session is still rejected", async ({ request }) => {

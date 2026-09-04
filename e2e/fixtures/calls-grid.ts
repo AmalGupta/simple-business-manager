@@ -40,14 +40,33 @@ export async function openCallsWithMockedRows(page: Page, count = 40): Promise<L
       return route.continue();
     }
     if (url.includes("include_low_signal=1")) {
+      const limit = Number(new URL(url).searchParams.get("limit") ?? "50");
+      const cursor = new URL(url).searchParams.get("cursor");
+      const cursorMatch = cursor?.match(/e2e-cursor-(\d+)/);
+      const start = cursorMatch ? Number(cursorMatch[1]) : 0;
+      const slice = calls.slice(start, start + limit);
+      const nextStart = start + limit;
+      const hasMore = nextStart < calls.length;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(calls),
+        body: JSON.stringify({
+          items: slice,
+          total: calls.length,
+          next_cursor: hasMore ? `e2e-cursor-${nextStart}` : null,
+          has_more: hasMore,
+        }),
       });
       return;
     }
     return route.continue();
+  });
+  await page.route("**/api/calls/callers**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(["Caller 1", "Site crew"]),
+    });
   });
   await page.route("**/api/calls/count", async (route) => {
     await route.fulfill({

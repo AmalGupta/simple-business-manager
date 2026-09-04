@@ -68,10 +68,6 @@ const GRID_CSS = `
   font-size: 11px;
   color: var(--color-ink);
 }
-/* AG Grid 36 scroll surface is '.ag-grid-viewport' (older '.ag-body-viewport'
-   / '.ag-center-cols-viewport' no longer exist). Desktop: auto scroll, no
-   reserved gutter. Mobile: forced scroll + contain so overscroll cannot
-   chain to the page. */
 .sbm-calls-grid .ag-grid-viewport {
   overflow-y: auto !important;
   overscroll-behavior: contain;
@@ -293,9 +289,10 @@ function pageNumbers(current, total) {
  * Viewport-filling grid: internal body scroll only, no cell tooltips,
  * mild hover zoom, light-blue header (vs home accent panel).
  */
-export function CallsGrid({ rows, selectedId, onSelect }) {
+export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null }) {
   const gridRef = useRef(null);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const serverMode = Boolean(serverPagination);
+  const [pageSize, setPageSize] = useState(serverMode ? rows?.length || DEFAULT_PAGE_SIZE : DEFAULT_PAGE_SIZE);
   const [pageState, setPageState] = useState({ page: 0, pageCount: 1, rowCount: 0 });
   const [narrow, setNarrow] = useState(
     typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)").matches : false
@@ -332,6 +329,8 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
         cellClass: "sbm-col-sl",
         valueGetter: (p) => {
           if (p.node?.rowIndex == null || !p.api) return "";
+          const base = serverPagination?.offset ?? 0;
+          if (serverMode) return base + p.node.rowIndex + 1;
           return p.api.paginationGetCurrentPage() * p.api.paginationGetPageSize() + p.node.rowIndex + 1;
         },
       },
@@ -380,7 +379,7 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
       });
     }
     return cols;
-  }, [narrow]);
+  }, [narrow, serverMode, serverPagination?.offset]);
 
   const defaultColDef = useMemo(
     () => ({
@@ -425,21 +424,26 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
   useEffect(() => {
     const api = gridRef.current?.api;
     if (!api) return;
-    api.setGridOption("paginationPageSize", pageSize);
-    api.paginationGoToFirstPage();
+    if (serverMode) {
+      api.setGridOption("pagination", false);
+    } else {
+      api.setGridOption("pagination", true);
+      api.setGridOption("paginationPageSize", pageSize);
+      api.paginationGoToFirstPage();
+    }
     syncPageState();
     api.refreshCells({ columns: ["sl"], force: true });
-  }, [pageSize, syncPageState]);
+  }, [pageSize, syncPageState, serverMode]);
 
   useEffect(() => {
     const api = gridRef.current?.api;
     if (!api) return;
-    api.paginationGoToFirstPage();
+    if (!serverMode) api.paginationGoToFirstPage();
     syncPageState();
     api.sizeColumnsToFit();
     api.resetRowHeights();
     if (rows?.length) api.ensureIndexVisible(0, "top");
-  }, [rows, syncPageState]);
+  }, [rows, syncPageState, serverMode]);
 
   useEffect(() => {
     const api = gridRef.current?.api;
@@ -454,8 +458,14 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
   };
 
   const { page, pageCount, rowCount } = pageState;
-  const from = rowCount === 0 ? 0 : page * pageSize + 1;
-  const to = Math.min(rowCount, (page + 1) * pageSize);
+  const serverTotal = serverPagination?.total ?? 0;
+  const serverOffset = serverPagination?.offset ?? 0;
+  const from =
+    serverMode && rowCount > 0 ? serverOffset + 1 : rowCount === 0 ? 0 : page * pageSize + 1;
+  const to = serverMode
+    ? Math.min(serverTotal, serverOffset + rowCount)
+    : Math.min(rowCount, (page + 1) * pageSize);
+  const displayTotal = serverMode ? serverTotal : rowCount;
   const pages = pageNumbers(page, pageCount);
 
   return (
@@ -483,8 +493,8 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
             onRowClicked={onRowClicked}
             onGridReady={onGridReady}
             onGridSizeChanged={onGridSizeChanged}
-            onPaginationChanged={onPaginationChanged}
-            pagination
+            onPaginationChanged={serverMode ? undefined : onPaginationChanged}
+            pagination={!serverMode}
             paginationPageSize={pageSize}
             suppressPaginationPanel
             rowHeight={narrow ? 74 : 64}
@@ -499,58 +509,83 @@ export function CallsGrid({ rows, selectedId, onSelect }) {
 
         <div className="sbm-calls-pager">
           <div className="sbm-calls-pager-meta">
-            {rowCount === 0 ? "0 calls" : `Showing ${from}–${to} of ${rowCount}`}
+            {displayTotal === 0 ? "0 calls" : `Showing ${from}–${to} of ${displayTotal}`}
           </div>
           <div className="sbm-calls-pager-controls">
-            <label>
-              Rows
-              <select
-                aria-label="Calls per page"
-                value={pageSize}
-                onChange={(e) => setPageSize(Number(e.target.value))}
-                style={{ ...TEXT_INPUT_STYLE, minHeight: 32, width: "auto" }}
-              >
-                {PAGE_SIZES.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
+            {!serverMode ? (
+              <label>
+                Rows
+                <select
+                  aria-label="Calls per page"
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  style={{ ...TEXT_INPUT_STYLE, minHeight: 32, width: "auto" }}
+                >
+                  {PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <div className="sbm-calls-pager-btns" role="navigation" aria-label="Pagination">
-              <button type="button" disabled={page <= 0} onClick={() => goTo(page - 1)} aria-label="Previous page">
-                ‹
-              </button>
-              {pages.map((p, i) => {
-                const prev = pages[i - 1];
-                const gap = prev != null && p - prev > 1;
-                return (
-                  <span key={p} style={{ display: "inline-flex", gap: 4 }}>
-                    {gap ? (
-                      <button type="button" disabled style={{ border: "none", background: "transparent" }}>
-                        …
-                      </button>
-                    ) : null}
-                    <button
-                      type="button"
-                      data-active={p === page ? "true" : "false"}
-                      onClick={() => goTo(p)}
-                      aria-label={`Page ${p + 1}`}
-                      aria-current={p === page ? "page" : undefined}
-                    >
-                      {p + 1}
-                    </button>
-                  </span>
-                );
-              })}
-              <button
-                type="button"
-                disabled={page >= pageCount - 1}
-                onClick={() => goTo(page + 1)}
-                aria-label="Next page"
-              >
-                ›
-              </button>
+              {serverMode ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={!serverPagination?.hasPrev}
+                    onClick={() => serverPagination?.onPrev?.()}
+                    aria-label="Previous page"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!serverPagination?.hasNext}
+                    onClick={() => serverPagination?.onNext?.()}
+                    aria-label="Next page"
+                  >
+                    ›
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" disabled={page <= 0} onClick={() => goTo(page - 1)} aria-label="Previous page">
+                    ‹
+                  </button>
+                  {pages.map((p, i) => {
+                    const prev = pages[i - 1];
+                    const gap = prev != null && p - prev > 1;
+                    return (
+                      <span key={p} style={{ display: "inline-flex", gap: 4 }}>
+                        {gap ? (
+                          <button type="button" disabled style={{ border: "none", background: "transparent" }}>
+                            …
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          data-active={p === page ? "true" : "false"}
+                          onClick={() => goTo(p)}
+                          aria-label={`Page ${p + 1}`}
+                          aria-current={p === page ? "page" : undefined}
+                        >
+                          {p + 1}
+                        </button>
+                      </span>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    disabled={page >= pageCount - 1}
+                    onClick={() => goTo(page + 1)}
+                    aria-label="Next page"
+                  >
+                    ›
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

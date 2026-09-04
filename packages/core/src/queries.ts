@@ -815,31 +815,89 @@ function toCallRow(
   };
 }
 
-/**
- * `customer_waiting` lives per-todo in the schema (§4) but the dashboard
- * treats it as a call-level flag (the "customer waiting" badge, and the
- * sort rule). Reconciled here: a call is waiting if any of its still-open
- * todos are marked customer_waiting.
- *
- * By default `low_signal` calls are excluded — see docs/ADDITIONAL_FEATURES_M0.md
- * "call_type = low_signal". Pass `includeLowSignal: true` for the Calls
- * dashboard grid (Important vs Regular filters need both).
- *
- * Soft-deleted spam calls (`deleted_at`) and skipped Family/repeat-Spam
- * rows (`stt_status = 'skipped'`) are always excluded — see migration
- * 0021 — regardless of `includeLowSignal`; they never produced a real
- * dashboard card.
- */
-export async function listCallsWithTodos(
-  db: D1Database,
-  opts: { includeLowSignal?: boolean } = {}
-): Promise<CallRow[]> {
+export type CallEntryTypeFilter = "voice_call" | "voice_note";
+
+export interface CallListFilters {
+  includeLowSignal?: boolean;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  callers?: string[];
+  importantOnly?: boolean;
+  withTodosOnly?: boolean;
+  entryTypes?: CallEntryTypeFilter[];
+}
+
+export const CALLS_PAGE_DEFAULT_LIMIT = 50;
+export const CALLS_PAGE_MAX_LIMIT = 100;
+
+export interface CallListPageResult {
+  items: CallRow[];
+  total: number;
+  next_cursor: string | null;
+  has_more: boolean;
+}
+
+const CALL_LIST_FROM = `
+  FROM calls
+  LEFT JOIN callers ON calls.client_id = callers.id
+  LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
+`;
+
+function buildCallListWhere(filters: CallListFilters): { sql: string; binds: unknown[] } {
   const clauses = ["calls.deleted_at IS NULL", "calls.stt_status != 'skipped'"];
-  if (!opts.includeLowSignal) clauses.push("(calls.call_type IS NULL OR calls.call_type != 'low_signal')");
-  const where = `WHERE ${clauses.join(" AND ")}`;
-  const { results: calls } = await db
-    .prepare(`${CALL_LIST_SELECT} ${where} ORDER BY calls.recorded_at DESC`)
-    .all<RawCallJoinRow>();
+  const binds: unknown[] = [];
+
+  if (!filters.includeLowSignal) {
+    clauses.push("(calls.call_type IS NULL OR calls.call_type != 'low_signal')");
+  }
+  if (filters.importantOnly) {
+    clauses.push("(calls.call_type IS NULL OR calls.call_type != 'low_signal')");
+  }
+  if (filters.dateFrom) {
+    clauses.push("COALESCE(calls.recording_date, substr(calls.recorded_at, 1, 10)) >= ?");
+    binds.push(filters.dateFrom);
+  }
+  if (filters.dateTo) {
+    clauses.push("COALESCE(calls.recording_date, substr(calls.recorded_at, 1, 10)) <= ?");
+    binds.push(filters.dateTo);
+  }
+  if (filters.callers?.length) {
+    const ph = filters.callers.map(() => "?").join(", ");
+    clauses.push(`COALESCE(callers.name, 'Unknown caller') IN (${ph})`);
+    binds.push(...filters.callers);
+  }
+  if (filters.withTodosOnly) {
+    clauses.push("EXISTS (SELECT 1 FROM todos WHERE todos.call_id = calls.id)");
+  }
+  const types = filters.entryTypes?.length ? filters.entryTypes : [];
+  if (types.length === 1) {
+    if (types[0] === "voice_note") clauses.push("calls.recorded_for_site_id IS NOT NULL");
+    else clauses.push("calls.recorded_for_site_id IS NULL");
+  }
+
+  return { sql: `WHERE ${clauses.join(" AND ")}`, binds };
+}
+
+function encodeCallCursor(recordedAt: string, id: string): string {
+  const json = JSON.stringify({ recorded_at: recordedAt, id });
+  return btoa(json).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function decodeCallCursor(cursor: string): { recorded_at: string; id: string } | null {
+  try {
+    const pad = cursor.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = pad + "=".repeat((4 - (pad.length % 4)) % 4);
+    const parsed = JSON.parse(atob(padded)) as { recorded_at?: string; id?: string };
+    if (typeof parsed.recorded_at === "string" && typeof parsed.id === "string") {
+      return { recorded_at: parsed.recorded_at, id: parsed.id };
+    }
+  } catch {
+    /* invalid cursor */
+  }
+  return null;
+}
+
+async function hydrateCallRows(db: D1Database, calls: RawCallJoinRow[]): Promise<CallRow[]> {
   if (calls.length === 0) return [];
 
   const callIds = calls.map((c) => c.id);
@@ -885,6 +943,210 @@ export async function listCallsWithTodos(
       commitmentsByCall.get(c.id) ?? []
     )
   );
+}
+
+async function countCallsMatching(db: D1Database, filters: CallListFilters): Promise<number> {
+  const { sql: where, binds } = buildCallListWhere(filters);
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n ${CALL_LIST_FROM} ${where}`)
+    .bind(...binds)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/** Paginated call list — keyset cursor on (recorded_at DESC, id DESC). */
+export async function listCallsPage(
+  db: D1Database,
+  opts: CallListFilters & { limit?: number; cursor?: string | null }
+): Promise<CallListPageResult> {
+  const limit = Math.min(Math.max(1, opts.limit ?? CALLS_PAGE_DEFAULT_LIMIT), CALLS_PAGE_MAX_LIMIT);
+  const { sql: where, binds: filterBinds } = buildCallListWhere(opts);
+
+  let cursorSql = "";
+  const cursorBinds: unknown[] = [];
+  if (opts.cursor) {
+    const decoded = decodeCallCursor(opts.cursor);
+    if (!decoded) throw new Error("invalid cursor");
+    cursorSql = " AND (calls.recorded_at < ? OR (calls.recorded_at = ? AND calls.id < ?))";
+    cursorBinds.push(decoded.recorded_at, decoded.recorded_at, decoded.id);
+  }
+
+  const [total, { results: rawCalls }] = await Promise.all([
+    countCallsMatching(db, opts),
+    db
+      .prepare(
+        `${CALL_LIST_SELECT} ${where}${cursorSql} ORDER BY calls.recorded_at DESC, calls.id DESC LIMIT ?`
+      )
+      .bind(...filterBinds, ...cursorBinds, limit)
+      .all<RawCallJoinRow>(),
+  ]);
+
+  const calls = rawCalls ?? [];
+  const items = await hydrateCallRows(db, calls);
+  const last = calls[calls.length - 1];
+  const next_cursor =
+    last?.recorded_at && items.length === limit
+      ? encodeCallCursor(last.recorded_at, last.id)
+      : null;
+
+  return { items, total, next_cursor, has_more: next_cursor != null };
+}
+
+/** Distinct caller names for the Calls filter dropdown. */
+export async function listCallCallerOptions(
+  db: D1Database,
+  opts: { includeLowSignal?: boolean } = {}
+): Promise<string[]> {
+  const { sql: where, binds } = buildCallListWhere({ includeLowSignal: opts.includeLowSignal });
+  const { results } = await db
+    .prepare(
+      `SELECT DISTINCT COALESCE(callers.name, 'Unknown caller') AS name
+       ${CALL_LIST_FROM}
+       ${where}
+       ORDER BY name COLLATE NOCASE ASC`
+    )
+    .bind(...binds)
+    .all<{ name: string }>();
+  return (results ?? []).map((r) => r.name);
+}
+
+export interface CallsCalendarResult {
+  days: Record<string, number>;
+  min_year: number;
+}
+
+/** Home calendar — call counts per day (excludes low_signal, same as legacy bulk fetch). */
+export async function getCallsCalendar(db: D1Database, year: number, month: number): Promise<CallsCalendarResult> {
+  const monthIndex = month - 1;
+  if (monthIndex < 0 || monthIndex > 11) throw new Error("invalid month");
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+
+  const baseWhere = buildCallListWhere({ includeLowSignal: false });
+
+  const [{ results: dayRows }, minRow] = await Promise.all([
+    db
+      .prepare(
+        `SELECT substr(calls.recorded_at, 1, 10) AS day, COUNT(*) AS n
+         ${CALL_LIST_FROM}
+         ${baseWhere.sql}
+           AND calls.recorded_at IS NOT NULL
+           AND substr(calls.recorded_at, 1, 10) >= ?
+           AND substr(calls.recorded_at, 1, 10) <= ?
+         GROUP BY day`
+      )
+      .bind(...baseWhere.binds, monthStart, monthEnd)
+      .all<{ day: string; n: number }>(),
+    db
+      .prepare(
+        `SELECT MIN(CAST(substr(calls.recorded_at, 1, 4) AS INTEGER)) AS min_year
+         ${CALL_LIST_FROM}
+         ${baseWhere.sql}
+           AND calls.recorded_at IS NOT NULL`
+      )
+      .bind(...baseWhere.binds)
+      .first<{ min_year: number | null }>(),
+  ]);
+
+  const days: Record<string, number> = {};
+  for (const row of dayRows ?? []) days[row.day] = row.n;
+
+  const currentYear = new Date().getFullYear();
+  const min_year = minRow?.min_year ?? currentYear;
+
+  return { days, min_year };
+}
+
+export interface DayClosureRow {
+  id: string;
+  text: string;
+  owner: string;
+  completed_at: string | null;
+  client_name: string;
+}
+
+export interface CallsDayViewResult {
+  calls: CallRow[];
+  closures: DayClosureRow[];
+}
+
+/** Home day drilldown — calls recorded that day + todos completed that day. */
+export async function getCallsDayView(db: D1Database, date: string): Promise<CallsDayViewResult> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error("invalid date");
+
+  const { sql: where, binds } = buildCallListWhere({ includeLowSignal: false });
+  const { results: rawCalls } = await db
+    .prepare(
+      `${CALL_LIST_SELECT} ${where} AND substr(calls.recorded_at, 1, 10) = ?
+       ORDER BY calls.recorded_at DESC, calls.id DESC`
+    )
+    .bind(...binds, date)
+    .all<RawCallJoinRow>();
+
+  const { results: closureRows } = await db
+    .prepare(
+      `SELECT todos.id AS id, todos.text AS text, todos.owner AS owner, todos.completed_at AS completed_at,
+              COALESCE(callers.name, 'Unknown caller') AS client_name
+       FROM todos
+       JOIN calls ON calls.id = todos.call_id
+       LEFT JOIN callers ON callers.id = calls.client_id
+       WHERE todos.status = 'done'
+         AND substr(todos.completed_at, 1, 10) = ?
+         AND calls.deleted_at IS NULL
+         AND calls.stt_status != 'skipped'`
+    )
+    .bind(date)
+    .all<DayClosureRow>();
+
+  const calls = await hydrateCallRows(db, rawCalls ?? []);
+  return { calls, closures: closureRows ?? [] };
+}
+
+/** Open / parked todo drilldowns — calls that have at least one todo in `status`. */
+export async function listCallsByTodoStatus(
+  db: D1Database,
+  status: "open" | "snoozed"
+): Promise<CallRow[]> {
+  const { sql: where, binds } = buildCallListWhere({ includeLowSignal: false });
+  const { results: rawCalls } = await db
+    .prepare(
+      `${CALL_LIST_SELECT} ${where}
+         AND calls.id IN (SELECT DISTINCT call_id FROM todos WHERE status = ?)
+       ORDER BY calls.recorded_at DESC, calls.id DESC`
+    )
+    .bind(...binds, status)
+    .all<RawCallJoinRow>();
+  return hydrateCallRows(db, rawCalls ?? []);
+}
+
+/**
+ * `customer_waiting` lives per-todo in the schema (§4) but the dashboard
+ * treats it as a call-level flag (the "customer waiting" badge, and the
+ * sort rule). Reconciled here: a call is waiting if any of its still-open
+ * todos are marked customer_waiting.
+ *
+ * By default `low_signal` calls are excluded — see docs/ADDITIONAL_FEATURES_M0.md
+ * "call_type = low_signal". Pass `includeLowSignal: true` for the Calls
+ * dashboard grid (Important vs Regular filters need both).
+ *
+ * Soft-deleted spam calls (`deleted_at`) and skipped Family/repeat-Spam
+ * rows (`stt_status = 'skipped'`) are always excluded — see migration
+ * 0021 — regardless of `includeLowSignal`; they never produced a real
+ * dashboard card.
+ */
+export async function listCallsWithTodos(
+  db: D1Database,
+  opts: { includeLowSignal?: boolean } = {}
+): Promise<CallRow[]> {
+  const all: CallRow[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await listCallsPage(db, { ...opts, limit: CALLS_PAGE_MAX_LIMIT, cursor });
+    all.push(...page.items);
+    cursor = page.next_cursor;
+  } while (cursor);
+  return all;
 }
 
 export async function getCallWithTodos(db: D1Database, id: string): Promise<CallRow | null> {
