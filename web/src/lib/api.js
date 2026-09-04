@@ -366,8 +366,11 @@ export async function postSiteVoiceNote(siteId, blob, fileName) {
   return res.json();
 }
 
-/* Calls Needing Action carousel (migration 0025) — same session-cookie-only
-   auth as site voice notes, not the X-SBM-Key mechanism. */
+/* Calls Needing Action carousel (migration 0025) — GET/PATCH on /api/calls/*
+   use the X-SBM-Key mechanism like the rest of the calls API; the voice-note
+   upload/stream routes below are session-cookie-only, same as site voice
+   notes (a plain multipart POST/`<audio>` GET can't reliably carry the
+   custom header). */
 
 /** Returns { items, voiceNotesByTodoId } — the latter a Map<todoId, TodoVoiceNote>. */
 export async function fetchCallsNeedingAction() {
@@ -378,6 +381,34 @@ export async function fetchCallsNeedingAction() {
     items: data.items ?? [],
     voiceNotesByTodoId: new Map(Object.entries(data.voice_notes_by_todo_id ?? {})),
   };
+}
+
+/* Shared cache for the Calls Needing Action list — warmed on home-page load
+   (see Dashboard.jsx) so opening the carousel tile renders instantly from
+   cache instead of showing a loading state, while a background refresh
+   keeps it current. Module-level singleton: same origin, same session, no
+   need for localStorage — it just needs to survive across view mounts
+   within one page load. */
+let callsNeedingActionCache = null;
+let callsNeedingActionInFlight = null;
+
+export function getCachedCallsNeedingAction() {
+  return callsNeedingActionCache;
+}
+
+/** Fetches fresh data, updates the shared cache, and returns it. Concurrent
+ *  callers share one in-flight request rather than firing duplicate fetches. */
+export function refreshCallsNeedingAction() {
+  if (callsNeedingActionInFlight) return callsNeedingActionInFlight;
+  callsNeedingActionInFlight = fetchCallsNeedingAction()
+    .then((data) => {
+      callsNeedingActionCache = data;
+      return data;
+    })
+    .finally(() => {
+      callsNeedingActionInFlight = null;
+    });
+  return callsNeedingActionInFlight;
 }
 
 export async function resolveCall(callId) {
