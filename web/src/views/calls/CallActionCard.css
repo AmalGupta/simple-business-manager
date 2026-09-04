@@ -42,6 +42,7 @@
   margin: 12px 0 4px;
   font-size: 12px;
   color: var(--color-slate);
+  flex-shrink: 0;
 }
 
 .cna-card__summary {
@@ -50,6 +51,33 @@
   line-height: 1.55;
   color: var(--color-ink);
   flex-shrink: 0;
+  /* Clamped so a long summary can't push the audio/transcript/todos
+     regions out of alignment between cards — the point of a fixed-height
+     carousel is that every card reads the same shape at a glance. */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Fixed frame around the native <audio> element so a broken/loading
+   playback icon (e.g. a dev call with no recording in R2) can't render at
+   an arbitrary size and throw card content out of alignment — every card's
+   audio region occupies exactly the same height whether or not the file
+   actually loads. */
+.cna-card__audio {
+  flex-shrink: 0;
+  height: 44px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-canvas);
+  display: flex;
+  align-items: center;
+}
+
+.cna-card__audio audio {
+  width: 100%;
 }
 
 .cna-card__transcript-toggle {
@@ -61,6 +89,7 @@
   font-size: 12px;
   color: var(--color-slate);
   margin-top: 12px;
+  flex-shrink: 0;
 }
 
 .cna-card__transcript {
@@ -85,6 +114,21 @@
   overflow-y: auto;
   margin-top: 12px;
   border-top: 1px solid var(--color-line);
+  /* Always-visible thin scrollbar rather than the OS-default overlay one,
+     which on macOS/trackpad setups only appears while actively scrolling —
+     without this a card with more todos than fit reads as "cut off", not
+     "scrollable". */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+.cna-card__todos::-webkit-scrollbar {
+  width: 6px;
+}
+
+.cna-card__todos::-webkit-scrollbar-thumb {
+  background: var(--color-line);
+  border-radius: 3px;
 }
 
 .cna-card__todo-row {

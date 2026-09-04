@@ -60,6 +60,7 @@ import {
   postUpdateMyPhone,
   patchComplaint,
   fetchOpenSiteTasks,
+  refreshCallsNeedingAction,
 } from "./lib/api.js";
 
 export default function SimpleBusinessManager() {
@@ -197,6 +198,12 @@ export default function SimpleBusinessManager() {
         applySummary(summary);
       })
       .catch((err) => console.error("[sbm] failed to load dashboard summary", err));
+
+    // Warm the Calls Needing Action cache in the background as soon as the
+    // admin home loads, so opening the tile renders instantly from cache
+    // instead of a loading spinner — see CallsNeedingActionView.jsx and
+    // getCachedCallsNeedingAction/refreshCallsNeedingAction in lib/api.js.
+    refreshCallsNeedingAction().catch((err) => console.error("[sbm] failed to prefetch calls needing action", err));
 
     return () => {
       cancelled = true;

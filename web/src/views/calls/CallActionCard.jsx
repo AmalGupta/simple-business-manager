@@ -39,7 +39,11 @@ export function CallActionCard({ call, staffRoster, onAssignTodo, onResolve, onA
 
       {call.summary && <p className="cna-card__summary">{call.summary}</p>}
 
-      {call.has_transcript && <AudioPlayer src={`/api/calls/${call.id}/recording`} />}
+      {call.has_transcript && (
+        <div className="cna-card__audio">
+          <AudioPlayer src={`/api/calls/${call.id}/recording`} />
+        </div>
+      )}
 
       {call.has_transcript && (
         <>

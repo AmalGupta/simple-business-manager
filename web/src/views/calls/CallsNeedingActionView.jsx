@@ -5,7 +5,7 @@ import { today, isoDate } from "../../lib/dates.js";
 import { BackLink } from "../../components/BackLink.jsx";
 import { StreakWall } from "./StreakWall.jsx";
 import { CallActionCard } from "./CallActionCard.jsx";
-import { fetchCallsNeedingAction, resolveCall, postTodoVoiceNote } from "../../lib/api.js";
+import { getCachedCallsNeedingAction, refreshCallsNeedingAction, resolveCall, postTodoVoiceNote } from "../../lib/api.js";
 
 const CARD_GAP = 16;
 
@@ -45,9 +45,14 @@ function iconButtonStyle(disabled) {
    the plan doc's scope decision #5. The remaining screen is a CSS
    scroll-snap carousel: 4 cards desktop, 3 tablet, 1 mobile. */
 export function CallsNeedingActionView({ staffRoster, onAssignTodo, onResolved, onBack }) {
-  const [items, setItems] = useState(undefined); // undefined = loading, [] = loaded/empty
+  // Render instantly from the cache Dashboard.jsx warmed on home-page load
+  // (getCachedCallsNeedingAction) if it's there — undefined only means
+  // "nothing cached yet and nothing fetched yet", not "still loading" per
+  // se, since a background refresh below keeps it current either way.
+  const cached = getCachedCallsNeedingAction();
+  const [items, setItems] = useState(cached?.items); // undefined = no data yet
   const [error, setError] = useState("");
-  const [voiceNotesByTodoId, setVoiceNotesByTodoId] = useState(new Map());
+  const [voiceNotesByTodoId, setVoiceNotesByTodoId] = useState(cached?.voiceNotesByTodoId ?? new Map());
   const [calMonth, setCalMonth] = useState(() => {
     const d = today();
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -56,17 +61,26 @@ export function CallsNeedingActionView({ staffRoster, onAssignTodo, onResolved, 
   const [scrollIndex, setScrollIndex] = useState(0);
   const carouselRef = useRef(null);
 
+  // Background refresh — updates state when it resolves without ever
+  // blocking the view: if we rendered from cache above, this is invisible
+  // to the user unless the data actually changed (React reuses each card's
+  // DOM node by `key`, so an unchanged list causes no visible re-render and
+  // scroll position is preserved). If there was no cache, this is what
+  // populates the view the first time.
   const load = useCallback(() => {
     setError("");
-    fetchCallsNeedingAction()
+    refreshCallsNeedingAction()
       .then(({ items: data, voiceNotesByTodoId: notes }) => {
         setItems(data);
         setVoiceNotesByTodoId(notes);
       })
       .catch((err) => {
         console.error("[sbm] failed to load calls needing action", err);
-        setItems([]);
         setError("Failed to load — try again.");
+        // Functional update: only fall back to an empty list if nothing
+        // (cached or fetched) has loaded yet — a background refresh
+        // failing shouldn't blank out an already-populated view.
+        setItems((prev) => prev ?? []);
       });
   }, []);
 
@@ -166,10 +180,20 @@ export function CallsNeedingActionView({ staffRoster, onAssignTodo, onResolved, 
     container.scrollBy({ left: direction * visibleCount * step, behavior: "smooth" });
   };
 
+  // Assignment itself is Dashboard.jsx's onAssignTodo (PATCH + its own
+  // global todoRefreshKey bump for other views) — this view isn't
+  // subscribed to that, so without a refresh here a card's "Assigned to…"
+  // label would stay stale until the next background tick.
+  const handleAssignTodo = async (todoId, userIds) => {
+    await onAssignTodo(todoId, userIds);
+    load();
+  };
+
   const handleResolve = async (callId) => {
     await resolveCall(callId);
     setItems((list) => (list ?? []).filter((c) => c.id !== callId));
     onResolved?.();
+    refreshCallsNeedingAction().catch(() => {}); // resync the shared cache for next open
   };
 
   const handleAddVoiceNote = async (todoId, blob, fileName) => {
@@ -179,6 +203,7 @@ export function CallsNeedingActionView({ staffRoster, onAssignTodo, onResolved, 
       next.set(todoId, note);
       return next;
     });
+    refreshCallsNeedingAction().catch(() => {}); // resync the shared cache for next open
   };
 
   const count = items?.length ?? 0;
@@ -260,7 +285,7 @@ export function CallsNeedingActionView({ staffRoster, onAssignTodo, onResolved, 
                 key={call.id}
                 call={call}
                 staffRoster={staffRoster}
-                onAssignTodo={onAssignTodo}
+                onAssignTodo={handleAssignTodo}
                 onResolve={handleResolve}
                 onAddVoiceNote={handleAddVoiceNote}
                 voiceNotesByTodoId={voiceNotesByTodoId}
