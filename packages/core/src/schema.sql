@@ -379,3 +379,12 @@ CREATE UNIQUE INDEX idx_calls_drive_file_id
   ON calls(drive_file_id)
   WHERE drive_file_id IS NOT NULL;
 
+-- migration 0023: the Calls page's filtered/paginated query (queries.ts
+-- listCallsPage/countCallsMatching) was a full table scan on every one of
+-- these columns as call volume grows — the actual scaling limit, independent
+-- of which pagination model the UI uses.
+CREATE INDEX idx_calls_recorded_at ON calls(recorded_at DESC, id DESC);
+CREATE INDEX idx_calls_recording_date ON calls(recording_date);
+CREATE INDEX idx_calls_call_type ON calls(call_type);
+CREATE INDEX idx_todos_call_id ON todos(call_id);
+
