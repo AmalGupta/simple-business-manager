@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { t } from "../../theme.js";
 import { Card } from "../../components/Card.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
@@ -8,12 +8,11 @@ import { EmptyState } from "../../components/EmptyState.jsx";
 import {
   fetchAllCallsPages,
   fetchCallCallers,
-  fetchCallsForDashboard,
   fetchDrivePollSettings,
   patchDrivePollSettings,
   postDrivePoll,
 } from "../../lib/api.js";
-import { withCallMetadata } from "../../lib/callMetadata.js";
+import { withCallMetadata, filterCallsByMeta } from "../../lib/callMetadata.js";
 import { CallsFilterBar } from "./CallsFilterBar.jsx";
 import { CallsGrid } from "./CallsGrid.jsx";
 import { CallDetailModal } from "./CallDetailModal.jsx";
@@ -28,8 +27,6 @@ const EMPTY_FILTERS = {
   entryTypes: [],
 };
 
-const PAGE_SIZE = 50;
-
 function filtersActive(filters) {
   return Boolean(
     filters.dateFrom ||
@@ -41,35 +38,24 @@ function filtersActive(filters) {
   );
 }
 
-function filtersToApi(filters) {
-  return {
-    include_low_signal: true,
-    date_from: filters.dateFrom || undefined,
-    date_to: filters.dateTo || undefined,
-    callers: filters.callers?.length ? filters.callers : undefined,
-    important_only: filters.importantOnly || undefined,
-    with_todos_only: filters.withTodosOnly || undefined,
-    entry_types: filters.entryTypes?.length ? filters.entryTypes : undefined,
-    limit: PAGE_SIZE,
-  };
-}
-
 /**
  * Calls dashboard — fills the viewport (no page scroll). Table body scrolls.
  * Call detail opens in a modal so grid state is preserved on close.
+ *
+ * The full call list is loaded once (and refreshed after a Drive sync or
+ * "Get latest"); every filter toggle then applies instantly in memory via
+ * filterCallsByMeta rather than round-tripping to the server. Pagination
+ * still exists — it's the grid's own client-side pager over the filtered
+ * set — it just isn't the reason a filter click has to wait on the network.
  */
 export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChanged }) {
-  const [rows, setRows] = useState(null);
-  const [total, setTotal] = useState(0);
-  const [pageIndex, setPageIndex] = useState(0);
+  const [allRows, setAllRows] = useState(null);
   const [loadError, setLoadError] = useState("");
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [callerOptions, setCallerOptions] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
-  const [exportBusy, setExportBusy] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const pageCache = useRef([]);
   const loadGen = useRef(0);
   const hasLoadedOnce = useRef(false);
 
@@ -79,55 +65,27 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
   const [pollBusy, setPollBusy] = useState(false);
   const [pollStatus, setPollStatus] = useState("");
 
-  const fetchPage = useCallback(async (index, apiFilters) => {
-    const cached = pageCache.current[index];
-    if (cached) {
-      setRows(cached.items);
-      setTotal(cached.total);
-      setPageIndex(index);
-      return cached.items;
+  const loadAll = useCallback(async () => {
+    const gen = ++loadGen.current;
+    setLoadError("");
+    if (hasLoadedOnce.current) setRefreshing(true);
+    try {
+      const items = await fetchAllCallsPages({ include_low_signal: true });
+      if (gen !== loadGen.current) return;
+      setAllRows(items.map(withCallMetadata));
+      hasLoadedOnce.current = true;
+    } catch (err) {
+      if (gen !== loadGen.current) return;
+      setAllRows([]);
+      setLoadError(err.message || "Failed to load calls");
+      hasLoadedOnce.current = true;
+    } finally {
+      if (gen === loadGen.current) setRefreshing(false);
     }
-
-    const cursor = index === 0 ? null : pageCache.current[index - 1]?.next_cursor ?? null;
-    if (index > 0 && !cursor) return [];
-
-    const data = await fetchCallsForDashboard({ ...apiFilters, cursor: cursor ?? undefined });
-    const decorated = (data.items ?? []).map(withCallMetadata);
-    pageCache.current[index] = {
-      items: decorated,
-      total: data.total ?? 0,
-      next_cursor: data.next_cursor,
-    };
-    setRows(decorated);
-    setTotal(data.total ?? 0);
-    setPageIndex(index);
-    return decorated;
   }, []);
 
-  const resetAndLoad = useCallback(
-    async (nextFilters) => {
-      const gen = ++loadGen.current;
-      setLoadError("");
-      if (hasLoadedOnce.current) setRefreshing(true);
-      pageCache.current = [];
-      setPageIndex(0);
-      const apiFilters = filtersToApi(nextFilters);
-      try {
-        await fetchPage(0, apiFilters);
-        if (gen !== loadGen.current) return;
-        hasLoadedOnce.current = true;
-      } catch (err) {
-        if (gen !== loadGen.current) return;
-        setRows([]);
-        setTotal(0);
-        setLoadError(err.message || "Failed to load calls");
-        hasLoadedOnce.current = true;
-      } finally {
-        if (gen === loadGen.current) setRefreshing(false);
-      }
-    },
-    [fetchPage]
-  );
+  const rows = useMemo(() => (allRows ? filterCallsByMeta(allRows, filters) : null), [allRows, filters]);
+  const total = rows?.length ?? 0;
 
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -262,8 +220,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
   }, []);
 
   useEffect(() => {
-    resetAndLoad(filters);
-  }, [filters, resetAndLoad]);
+    loadAll();
+  }, [loadAll]);
 
   const applyPollSettings = useCallback((s) => {
     setPollEnabled(Boolean(s.enabled));
@@ -295,42 +253,11 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
   useEffect(() => {
     const status = pollProgress?.status;
     if (prevPollStatus.current === "running" && status === "done") {
-      resetAndLoad(filters);
+      loadAll();
       if (typeof onCallsChanged === "function") onCallsChanged();
     }
     prevPollStatus.current = status;
-  }, [pollProgress?.status, filters, resetAndLoad, onCallsChanged]);
-
-  const onServerNext = useCallback(async () => {
-    const cur = pageCache.current[pageIndex];
-    if (!cur?.next_cursor) return;
-    setLoadError("");
-    try {
-      await fetchPage(pageIndex + 1, filtersToApi(filters));
-    } catch (err) {
-      setLoadError(err.message || "Failed to load calls");
-    }
-  }, [fetchPage, pageIndex, filters]);
-
-  const onServerPrev = useCallback(() => {
-    if (pageIndex <= 0) return;
-    const cached = pageCache.current[pageIndex - 1];
-    if (cached) {
-      setRows(cached.items);
-      setTotal(cached.total);
-      setPageIndex(pageIndex - 1);
-    }
-  }, [pageIndex]);
-
-  const onPrepareExport = useCallback(async () => {
-    setExportBusy(true);
-    try {
-      const raw = await fetchAllCallsPages(filtersToApi(filters));
-      return raw.map(withCallMetadata);
-    } finally {
-      setExportBusy(false);
-    }
-  }, [filters]);
+  }, [pollProgress?.status, loadAll, onCallsChanged]);
 
   const onTogglePolling = async () => {
     const next = !pollEnabled;
@@ -354,7 +281,7 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
       await postDrivePoll();
       const s = await fetchDrivePollSettings();
       applyPollSettings(s);
-      await resetAndLoad(filters);
+      await loadAll();
       if (typeof onCallsChanged === "function") await onCallsChanged();
     } catch (err) {
       setPollStatus(`Get latest failed: ${err.message}`);
@@ -363,10 +290,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
     }
   };
 
-  const serverOffset = pageIndex * PAGE_SIZE;
-  const hasServerNext = Boolean(pageCache.current[pageIndex]?.next_cursor);
   const initialLoading = rows === null;
-  const noCallsAtAll = !initialLoading && total === 0 && !filtersActive(filters) && !refreshing;
+  const noCallsAtAll = !initialLoading && (allRows?.length ?? 0) === 0 && !filtersActive(filters) && !refreshing;
 
   return (
     <div
@@ -386,8 +311,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
             Calls
           </h1>
           {total > 0 && (
-            <DownloadButton calls={rows ?? []} label="filtered" onBeforeOpen={onPrepareExport} disabled={exportBusy}>
-              {exportBusy ? "Preparing…" : "Download"}
+            <DownloadButton calls={rows ?? []} label="filtered">
+              Download
             </DownloadButton>
           )}
         </div>
@@ -476,20 +401,7 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
               <span style={{ fontSize: 13, fontWeight: 500, color: t.edge2, marginLeft: 10 }}>Updating…</span>
             ) : null}
           </h2>
-          <CallsGrid
-            rows={rows ?? []}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            dimmed={refreshing}
-            serverPagination={{
-              total,
-              offset: serverOffset,
-              hasPrev: pageIndex > 0,
-              hasNext: hasServerNext,
-              onPrev: onServerPrev,
-              onNext: onServerNext,
-            }}
-          />
+          <CallsGrid rows={rows ?? []} selectedId={selectedId} onSelect={setSelectedId} dimmed={refreshing} />
         </>
       )}
 
