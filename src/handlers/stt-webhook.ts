@@ -156,7 +156,15 @@ export async function handleSarvamWebhook(
       result.diarized_transcript ? JSON.stringify(result.diarized_transcript) : null
     );
 
-    const entries = result.diarized_transcript?.entries ?? [];
+    // Sarvam doesn't always return diarized_transcript despite with_diarization
+    // being requested (see docs/SCAFFOLDING.md §5) — falling straight to []
+    // silently discarded the flat transcript and ran extraction on nothing.
+    // Fall back to the flat transcript as a single untagged entry instead.
+    const entries: DiarizedEntry[] = result.diarized_transcript?.entries?.length
+      ? result.diarized_transcript.entries
+      : result.transcript
+        ? [{ speaker_id: "unknown", transcript: result.transcript }]
+        : [];
     const caller = call.client_id ? await getCallerById(env.DB, call.client_id) : null;
 
     if (caller?.category === "staff") {

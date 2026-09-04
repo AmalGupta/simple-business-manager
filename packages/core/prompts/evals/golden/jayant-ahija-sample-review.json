@@ -1,0 +1,31 @@
+{
+  "name": "jayant-ahija-sample-review",
+  "clientName": "Jayant Ahija, Rindhaan Engineers Saboo",
+  "recordedAt": "2026-09-03T12:00:00+05:30",
+  "notes": "Flat (non-diarized) transcript — models the src/handlers/stt-webhook.ts fallback path where Sarvam returned no diarized_transcript, so the whole call arrives as one untagged block. Owner attribution (business owner = the one who owns the driver and commits to reviewing the sample) is included for reference but is explicitly not scored per the 2026-09-04 session decision that todo existence/text outranks owner accuracy. expected.deadline corrected to \"\" 2026-09-04: the model consistently leaves deadline empty when it duplicates a todo's due_date rather than restating it — the original expected value assumed duplication, which was the golden's error.",
+  "entries": [
+    {
+      "speaker_id": "unknown",
+      "transcript": "Hello हाँ जी Sir. Hello. हाँ जी। कैसे हो? नमस्ते भाई। मैं ठीक हूँ जी नमस्ते जी अपना ये। Fine ये सुधीर भाई आए हुए थे हमारे पास। हाँ इनको इसीलिए भेजा था ना वो आपने मेरे को देना था sample वो दे दो इनको। को देना था sample वो दे दो इनको। तो इन्होंने sample देख के ये कहा है कि exact साबुन में बना भी हुआ है। मतलब पता नहीं इतना experience है कैसे कहा। तो मैं... ये driver है हमारा sir इसको कुछ भी बोलने दो मेरे पास आएगा मैं बताऊंगा। मैंने तीन piece इनको दे दिए। एक आधा आगे भेजने के लिए एक दो आपके पास रखने के लिए। basically एक दो आपके मत रखने मेरे पास आएगा मैं देख के आपको revert कर दूंगा मैं कराऊंगा इसको दूंगा आपको। हाँ। हम कब अब next discuss करेंगे? कल। सर एक बार मेरे पास sample पहुँच जाए कल मैं आपको शायद शाम को थोड़ा update दे दूँगा। बस शाम को बता देना। ये। अब बस शाम को बता देना। मैं आपको बता दूंगा next course of action क्या है। Next. ठीक है भाई ठीक है शुक्रिया भाई okay ले जा भाई। शुक्रिया भाई।"
+    }
+  ],
+  "expected": {
+    "call_type": "client",
+    "todos": [
+      {
+        "text": "Review Jayant Ahija's sample (delivered via driver Sudhir) and share next course of action",
+        "owner": "self",
+        "due_date": "2026-09-04"
+      }
+    ],
+    "commitments": [
+      {
+        "raw_phrase": "कल... शायद शाम को थोड़ा update दे दूँगा",
+        "resolved_datetime": "2026-09-04",
+        "promised_to": "Jayant Ahija"
+      }
+    ],
+    "unresolved": [],
+    "deadline": ""
+  }
+}

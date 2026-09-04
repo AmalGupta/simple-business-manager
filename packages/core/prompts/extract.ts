@@ -14,7 +14,6 @@ import {
   anthropicRequestHeaders,
   cachedSystemPrompt,
 } from "./anthropic";
-
 export interface ExtractInput {
   apiKey: string;
   model: string;
@@ -55,7 +54,7 @@ export async function extractCall(input: ExtractInput): Promise<CallExtraction> 
   const data = (await res.json()) as AnthropicMessageResponse;
   const block = data.content.find((b) => b.type === "tool_use");
   if (!block) throw new Error("no tool_use block returned");
-  return normalizeExtraction(block.input);
+  return normalizeExtraction(block.input, input.entries);
 }
 
 const VALID_CALL_TYPES = new Set(["client", "internal", "low_signal"]);
@@ -69,7 +68,66 @@ const VALID_CALL_TYPES = new Set(["client", "internal", "low_signal"]);
  * fields defensively so one malformed field degrades gracefully instead of
  * losing the whole extraction.
  */
-function normalizeExtraction(input: unknown): CallExtraction {
+function levenshtein(a: string, b: string): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+function normalizeWords(s: string): string[] {
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9ऀ-ॿ\s]/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Guards against a confirmed prompt-instruction-following failure: the model
+ * reads the "Call with X on Y" preamble line (built from clientName, see
+ * ACTIVE.buildUserMessage) and echoes a site name from it into `sites`, even
+ * when that name was never spoken in the transcript body — reproduced live
+ * 2026-09-04 even after the v5 system prompt explicitly forbade it (rule 1,
+ * rule 7). Prompt wording alone wasn't enough, so this is a code-level
+ * backstop, not a replacement for the prompt rule.
+ *
+ * First attempt at this backstop compared the site string against clientName
+ * and trusted anything on SITE_ROSTER unconditionally — wrong, because the
+ * leaked values ("Homeland", "Regalia") are themselves real roster sites
+ * that happen to also appear in this client's name; roster membership can't
+ * disambiguate "genuinely mentioned" from "echoed from metadata" when both
+ * are true of the same string. The only thing that actually distinguishes
+ * them is whether the site was spoken in the transcript itself — so this
+ * checks the entries text directly, not clientName, and does NOT special-case
+ * roster membership.
+ *
+ * Requires only ONE word to match, not all of them — a compound roster name
+ * like "Eco City / Mullanpur" is often spoken as just "Mullanpur", and
+ * requiring "Eco" and "City" too would drop a legitimately-mentioned site.
+ * Short words (<3 chars) are ignored as match candidates to avoid a trivial
+ * word like "hi"/"ok" coincidentally matching. Known limitation: this checks
+ * the model's already-roster-resolved output string against the raw
+ * transcript text, so a site spoken only as a Hindi numeral (सत्तर, एक सौ
+ * छह — see system.ts rule 7) won't textually match its resolved digit form
+ * and could be dropped; no golden case exercises that path yet, so it's
+ * unverified rather than fixed.
+ */
+function isMentionedInTranscript(site: string, entries: DiarizedEntry[]): boolean {
+  const siteWords = normalizeWords(site).filter((w) => w.length >= 3);
+  if (siteWords.length === 0) return true; // nothing substantial to check against — don't false-drop
+  const transcriptWords = normalizeWords(entries.map((e) => e.transcript).join(" "));
+  return siteWords.some((sw) => transcriptWords.some((tw) => sw === tw || levenshtein(sw, tw) <= 1));
+}
+
+function normalizeExtraction(input: unknown, entries: DiarizedEntry[] = []): CallExtraction {
   const raw = (input ?? {}) as Partial<Record<keyof CallExtraction, unknown>>;
   const asArray = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
   const asStringArray = (v: unknown): string[] => asArray<unknown>(v).filter((x): x is string => typeof x === "string");
@@ -103,11 +161,17 @@ function normalizeExtraction(input: unknown): CallExtraction {
       blocked_on: typeof u.blocked_on === "string" ? u.blocked_on : undefined,
     }));
 
+  const sites = asStringArray(raw.sites).filter((site) => {
+    if (isMentionedInTranscript(site, entries)) return true;
+    console.warn(`[extract] dropped site "${site}" — not found in transcript, likely echoed from call metadata`);
+    return false;
+  });
+
   return {
     summary: raw.summary,
     key_takeaways: asStringArray(raw.key_takeaways),
     call_type: callType,
-    sites: asStringArray(raw.sites),
+    sites,
     todos,
     commitments,
     unresolved,

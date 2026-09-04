@@ -1,0 +1,31 @@
+{
+  "name": "vikas-homeland-regalia-team-unreachable",
+  "clientName": "Vikas, Facade Engineer, Homland Regalia",
+  "recordedAt": "2026-09-03T12:00:00+05:30",
+  "notes": "Flat (non-diarized) transcript. Doubles as a regression test for a metadata-leak bug found running v4 live on this call: 'Homeland' never appears in the spoken transcript, only in clientName — v4 pulled it into sites anyway from the 'Call with X on Y' preamble line in render.ts, violating rule 1 (extract only what was said). expected.sites is deliberately [] to catch this regressing. Flagged for a v5 fix clarifying that the preamble line is context, not extractable content — not yet made.",
+  "entries": [
+    {
+      "speaker_id": "unknown",
+      "transcript": "हाँ जी विकास भाई। Good Morning Sir. बोलो बोलो। team कहाँ है sir team ना phone उठा रही है आई आज मेरे को phone भी नहीं किया उन्होंने मैं tower चार पाँच तो घूम लिया। एक minute देना मैं ज़रा उनको कहता हूँ आपसे बात करने को। Actually मैं भी आज office में नहीं था। मैं बाहर चल रहा हूँ। मैं अभी पूछ लेता हूँ। जी। Hello. कर रहे थे बढ़िया ऊपर काम। क्या कह रहे? लेकिन आज Hello भैया क्या कह रहे? Hello. सर एक बार पूछना please। हाँ जी हाँ जी हाँ जी। Sorry आप मेरे को मैं कह रहा हूँ ना travel कर रहा हूँ तो इसलिए आवाज़ कट रही है। मैं अभी अभी उनको कहता हूँ आपसे बात करने को। Okay. अभी उनको कहते हैं। Okay sir okay thank you जी।"
+    }
+  ],
+  "expected": {
+    "call_type": "client",
+    "sites": [],
+    "todos": [
+      {
+        "text": "Get the on-site team to call Vikas back",
+        "owner": "self",
+        "due_date": "2026-09-03"
+      }
+    ],
+    "commitments": [],
+    "unresolved": [
+      {
+        "item": "Why the team didn't answer or call Vikas back, and what work is currently happening at tower 4-5",
+        "blocked_on": "team"
+      }
+    ],
+    "deadline": ""
+  }
+}

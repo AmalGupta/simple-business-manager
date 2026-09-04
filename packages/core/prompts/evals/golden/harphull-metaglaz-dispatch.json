@@ -1,0 +1,30 @@
+{
+  "name": "harphull-metaglaz-dispatch",
+  "clientName": "Harphull, Eternia Metaglaz Building Solutions",
+  "recordedAt": "2026-09-03T12:00:00+05:30",
+  "notes": "Flat (non-diarized) transcript, garbled/run-on — a harder case than the other two. Owner attribution is low-confidence even after manual review (see docs analysis this session); included for reference only, not scored. expected.deadline corrected to \"\" 2026-09-04: the model consistently leaves deadline empty when it's identical to a todo's due_date rather than duplicating it — the original expected value assumed duplication, which was the golden's error, not the model's.",
+  "entries": [
+    {
+      "speaker_id": "unknown",
+      "transcript": "Hello. Sorry sir मैं जल्दबाजी में निकल गया। हाँ जी हाँ जी Sir वो उसका क्या है? किसका? I वाला है ना? अह कि वो जो अपनी थी air vent वाली window का वो भेज दूँ ना दोनों हो जाएँगी ना ready आज जो लड़कों को बोल के करवा दो वो कल ना लड़के भेजने हैं वहाँ पे ना client के पास। जो लड़कों को सर भेजो तो सही आज की date में कहां ready होंगी? चलो करवाता हूं आप भेजो तो। कल करवा देना मैं एक तो होगी होगी ना ready ताकि कल वहां पे लड़के काम कर रहे होंगे तो वो ये पहुंच जाएगा सामान ठीक है। हाँ एक तो होगी। को भेजो अच्छा sir मैं कह रहा sorry मैं जल्दबाजी में निकल गया। हाँ। ये meeting आपके हिसाब से ठीक ही है? Sorry. हाँ। हाँ ठीक है। हाँ ठीक है sir। और इनका तो। और सर sorry जो main चीज थी ये क्या नाम है so called three track लगा हुआ है इसके। हाँ three track लगा हुआ है। ये कहाँ से देगा इतने सस्ते मछली? चलो। हाँ ऐसे लेटा। ये तो नहीं दे पाएगा three track सर इतने सस्ते में। हाँ हाँ ये तो इनका वहाँ पे वैसे ये rate मुझे भी idea था वहाँ पे इन्होंने इसी rate में लगाया। और three लगाया। हाँ free लगा। ठीक है sir okay."
+    }
+  ],
+  "expected": {
+    "call_type": "client",
+    "todos": [
+      {
+        "text": "Get air-vent window unit(s) ready and dispatch to client site along with workers",
+        "owner": "self",
+        "due_date": "2026-09-04"
+      }
+    ],
+    "commitments": [],
+    "unresolved": [
+      {
+        "item": "How the other vendor is offering 'three track' windows at such a low rate given the known market rate",
+        "blocked_on": ""
+      }
+    ],
+    "deadline": ""
+  }
+}
