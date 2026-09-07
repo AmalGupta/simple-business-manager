@@ -179,19 +179,63 @@ const CALLER_SELECT = `
   LEFT JOIN users ON users.id = callers.staff_user_id
 `;
 
-export async function listCallers(
-  db: D1Database,
-  opts?: { category?: CallerCategory }
-): Promise<CallerRow[]> {
+export interface CallerListOpts {
+  category?: CallerCategory;
+  /** Case-insensitive substring match on name or phone. */
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Shared predicate for listCallers / countCallers so the page and its total
+ * can never disagree about what they're counting.
+ *
+ * The directory is a bulk phone-contacts import (~3.3k rows on UAT — see
+ * docs/UAT_RESET_RUNBOOK.md), which is why `q` exists at all: the picker
+ * that consumes this can't load the whole table. LIKE with a leading `%`
+ * can't use an index, but at this row count a scan is well under the D1
+ * budget, and adding FTS for one picker isn't worth the schema surface.
+ */
+function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (string | number)[] } {
+  const where: string[] = [];
+  const binds: (string | number)[] = [];
   if (opts?.category) {
-    const { results } = await db
-      .prepare(`${CALLER_SELECT} WHERE callers.category = ? ORDER BY callers.name ASC`)
-      .bind(opts.category)
-      .all<CallerRow>();
-    return results ?? [];
+    where.push(`callers.category = ?`);
+    binds.push(opts.category);
   }
-  const { results } = await db.prepare(`${CALLER_SELECT} ORDER BY callers.name ASC`).all<CallerRow>();
+  const q = opts?.q?.trim();
+  if (q) {
+    where.push(`(callers.name LIKE ? COLLATE NOCASE OR callers.phone LIKE ?)`);
+    binds.push(`%${q}%`, `%${q}%`);
+  }
+  return { clause: where.length ? `WHERE ${where.join(" AND ")}` : "", binds };
+}
+
+/**
+ * Unpaginated by default — the Callers Directory screen still renders the
+ * whole category at once, and changing that is out of scope here. Pass
+ * `limit` to page (the site-contacts picker does).
+ */
+export async function listCallers(db: D1Database, opts?: CallerListOpts): Promise<CallerRow[]> {
+  const { clause, binds } = callerFilterSql(opts);
+  let sql = `${CALLER_SELECT} ${clause} ORDER BY callers.name ASC`;
+  const allBinds = [...binds];
+  if (opts?.limit !== undefined) {
+    sql += ` LIMIT ? OFFSET ?`;
+    allBinds.push(opts.limit, opts.offset ?? 0);
+  }
+  const stmt = db.prepare(sql);
+  const { results } = await (allBinds.length ? stmt.bind(...allBinds) : stmt).all<CallerRow>();
   return results ?? [];
+}
+
+/** Total matching `opts` ignoring limit/offset — the picker needs it to show "N of M". */
+export async function countCallers(db: D1Database, opts?: CallerListOpts): Promise<number> {
+  const { clause, binds } = callerFilterSql(opts);
+  const stmt = db.prepare(`SELECT COUNT(*) AS n FROM callers ${clause}`);
+  const row = await (binds.length ? stmt.bind(...binds) : stmt).first<{ n: number }>();
+  return row?.n ?? 0;
 }
 
 export async function countCallersByCategory(
@@ -1905,6 +1949,151 @@ export async function addSiteTeamMember(
     .bind(id, siteId, name, contactNumber, addedBy ?? null, memberUserId ?? null)
     .run();
   return { id, name, contact_number: contactNumber, user_id: memberUserId ?? null };
+}
+
+/**
+ * Bulk version of addSiteTeamMember for the multi-select assign modal.
+ *
+ * `site_team_members` has no UNIQUE(site_id, user_id) — the table predates
+ * account linking (migration 0008 was free-text name + phone, 0011 added
+ * user_id), and free-text rows can legitimately repeat a name. So a
+ * duplicate account would silently produce a second roster row rather than
+ * conflicting, which is exactly what a multi-select re-submit does. Filter
+ * against the current roster first instead of adding a constraint that
+ * would break the free-text rows.
+ *
+ * Name and phone are read from the account server-side, never from the
+ * client — same rule handlePostSiteTeamMember already enforces.
+ */
+export async function addSiteTeamMembers(
+  db: D1Database,
+  siteId: string,
+  userIds: string[],
+  addedBy?: string | null
+): Promise<{ added: SiteTeamMemberRow[]; skipped: string[] }> {
+  const wanted = [...new Set(userIds.filter(Boolean))];
+  if (wanted.length === 0) return { added: [], skipped: [] };
+
+  const { results: existing } = await db
+    .prepare(`SELECT user_id FROM site_team_members WHERE site_id = ? AND user_id IS NOT NULL`)
+    .bind(siteId)
+    .all<{ user_id: string }>();
+  const already = new Set((existing ?? []).map((r) => r.user_id));
+
+  const toAdd = wanted.filter((id) => !already.has(id));
+  const skipped = wanted.filter((id) => already.has(id));
+  if (toAdd.length === 0) return { added: [], skipped };
+
+  const users = await Promise.all(toAdd.map((id) => getUserById(db, id)));
+  const rows: SiteTeamMemberRow[] = [];
+  const statements = [];
+  for (const user of users) {
+    if (!user) continue; // unknown id — skip rather than fail the whole batch
+    const id = crypto.randomUUID();
+    // contact_number is NOT NULL; "" stands in for "no phone on file yet",
+    // matching handlePostSiteTeamMember.
+    const contactNumber = user.phone ?? "";
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO site_team_members (id, site_id, name, contact_number, added_by, user_id) VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(id, siteId, user.name, contactNumber, addedBy ?? null, user.id)
+    );
+    rows.push({ id, name: user.name, contact_number: contactNumber, user_id: user.id });
+  }
+  if (statements.length > 0) await db.batch(statements);
+  return { added: rows, skipped };
+}
+
+// ---------------------------------------------------------------------------
+// Site contacts — the caller side of a site, via `caller_sites` (migration
+// 0022, which created the table and left it unpopulated: "linking logic is a
+// later feature"). This is that feature.
+//
+// Deliberately NOT the same axis as site_team_members. A team member is a
+// user account, and being on the roster grants access to the site (see
+// isUserAssignedToSite). A contact is a Callers Directory row — a client or
+// their representative — with no login and no access implication.
+// ---------------------------------------------------------------------------
+
+export interface SiteContactRow {
+  caller_id: string;
+  name: string;
+  phone: string | null;
+  category: CallerCategory;
+}
+
+export async function listSiteContacts(db: D1Database, siteId: string): Promise<SiteContactRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT callers.id AS caller_id, callers.name AS name, callers.phone AS phone, callers.category AS category
+       FROM caller_sites
+       JOIN callers ON callers.id = caller_sites.caller_id
+       WHERE caller_sites.site_id = ?
+       ORDER BY callers.name ASC`
+    )
+    .bind(siteId)
+    .all<SiteContactRow>();
+  return results ?? [];
+}
+
+/**
+ * Idempotent by primary key — `caller_sites` is PRIMARY KEY (caller_id,
+ * site_id), so INSERT OR IGNORE makes re-adding an already-linked contact a
+ * no-op rather than an error. Returns the resulting full list so the caller
+ * doesn't need a second round trip.
+ */
+export async function addSiteContacts(
+  db: D1Database,
+  siteId: string,
+  callerIds: string[]
+): Promise<SiteContactRow[]> {
+  const ids = [...new Set(callerIds.filter(Boolean))];
+  if (ids.length > 0) {
+    await db.batch(
+      ids.map((callerId) =>
+        db
+          .prepare(`INSERT OR IGNORE INTO caller_sites (caller_id, site_id) VALUES (?, ?)`)
+          .bind(callerId, siteId)
+      )
+    );
+  }
+  return listSiteContacts(db, siteId);
+}
+
+export async function removeSiteContact(db: D1Database, siteId: string, callerId: string): Promise<void> {
+  await db
+    .prepare(`DELETE FROM caller_sites WHERE site_id = ? AND caller_id = ?`)
+    .bind(siteId, callerId)
+    .run();
+}
+
+/** Contacts for many sites at once — the sites table renders a column of these. */
+export async function getSiteContactsBySiteIds(
+  db: D1Database,
+  siteIds: string[]
+): Promise<Map<string, SiteContactRow[]>> {
+  const map = new Map<string, SiteContactRow[]>();
+  if (siteIds.length === 0) return map;
+  const placeholders = siteIds.map(() => "?").join(",");
+  const { results } = await db
+    .prepare(
+      `SELECT caller_sites.site_id AS site_id, callers.id AS caller_id, callers.name AS name,
+              callers.phone AS phone, callers.category AS category
+       FROM caller_sites
+       JOIN callers ON callers.id = caller_sites.caller_id
+       WHERE caller_sites.site_id IN (${placeholders})
+       ORDER BY callers.name ASC`
+    )
+    .bind(...siteIds)
+    .all<SiteContactRow & { site_id: string }>();
+  for (const row of results ?? []) {
+    const list = map.get(row.site_id) ?? [];
+    list.push({ caller_id: row.caller_id, name: row.name, phone: row.phone, category: row.category });
+    map.set(row.site_id, list);
+  }
+  return map;
 }
 
 export interface SiteAttentionRow {
