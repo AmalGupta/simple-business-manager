@@ -1,0 +1,12 @@
+---
+description: Bugfixes during release/UAT must land on both release/* and develop.
+alwaysApply: true
+---
+
+# Dual-land bugfixes
+
+While a `release/*` branch is active (e.g. `release/0.0.1`), bugfixes and hotfixes must land on **both** that release branch and `develop`.
+
+- Prefer committing on `release/*`, then run `scripts/dual-land.sh <sha>...` onto `develop` (see skill `dual-land-bugfix`).
+- Do not push either branch unless the user asks.
+- Do not dual-land unrelated feature work.

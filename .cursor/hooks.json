@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "postToolUse": [
+      {
+        "command": ".cursor/hooks/remind-dual-land.sh",
+        "matcher": "Shell",
+        "timeout": 10
+      }
+    ]
+  }
+}
