@@ -136,23 +136,14 @@ export async function fetchSiteTeam(siteId) {
   return fetchJSON(`/api/sites/${siteId}/team`);
 }
 
-/* `userId` set = the "choose from dropdown" path (name/phone come from the
-   account server-side); omitted = legacy free-text entry. */
-export async function postSiteTeamMember(siteId, userId) {
-  const res = await fetch(`/api/sites/${siteId}/team`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
-    body: JSON.stringify({ user_id: userId }),
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `POST /api/sites/${siteId}/team → ${res.status}`);
-  }
-  return res.json();
-}
+/* Multi-select assign, the only path the UI uses now that AddPeopleModal
+   replaced the single-select dropdown. The endpoint still accepts a lone
+   `user_id` and a free-text `{ name, contact_number }`, so the API stays
+   backward compatible — there's just no client helper for them.
 
-/* Multi-select assign. Returns { added, skipped } — `skipped` is accounts
-   already on the roster, so re-submitting a selection is a no-op. */
+   Returns { added, skipped } — `skipped` is accounts already on the
+   roster, so re-submitting a selection is a no-op rather than a
+   duplicate row (site_team_members has no UNIQUE(site_id, user_id)). */
 export async function postSiteTeamMembers(siteId, userIds) {
   const res = await fetch(`/api/sites/${siteId}/team`, {
     method: "POST",
