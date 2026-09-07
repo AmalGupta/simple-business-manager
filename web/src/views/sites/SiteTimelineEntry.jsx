@@ -17,7 +17,7 @@ function timelineEntryIcon(entry) {
   return <FileText size={13} />;
 }
 
-export function SiteTimelineEntry({ entry, onOpenCall, canManage, staffRoster = [], onAssignTodo }) {
+export function SiteTimelineEntry({ entry, onOpenCall, canManage, staffRoster = [], currentUser = null, onAssignTodo }) {
   const content = () => {
     if (entry.type === "call") {
       // A site voice memo's transcript/todos are admin-only (see
@@ -80,7 +80,13 @@ export function SiteTimelineEntry({ entry, onOpenCall, canManage, staffRoster = 
       {content()}
       {entry.type === "call" && entry.ref?.is_voice_memo && <AudioPlayer src={`/api/calls/${entry.ref.call_id}/recording`} />}
       {entry.type === "call" && entry.ref?.is_voice_memo && canManage && (
-        <VoiceMemoDetail entryRef={entry.ref} canManage={canManage} staffRoster={staffRoster} onAssign={onAssignTodo} />
+        <VoiceMemoDetail
+          entryRef={entry.ref}
+          canManage={canManage}
+          staffRoster={staffRoster}
+          currentUser={currentUser}
+          onAssign={onAssignTodo}
+        />
       )}
     </div>
   );

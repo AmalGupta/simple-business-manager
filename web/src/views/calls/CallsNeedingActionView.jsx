@@ -44,7 +44,7 @@ function iconButtonStyle(disabled) {
    month-calendar endpoint), and wired to scroll-to rather than filter — see
    the plan doc's scope decision #5. The remaining screen is a CSS
    scroll-snap carousel: 4 cards desktop, 3 tablet, 1 mobile. */
-export function CallsNeedingActionView({ staffRoster, onAssignTodo, onResolved, onBack }) {
+export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssignTodo, onResolved, onBack }) {
   // Render instantly from the cache Dashboard.jsx warmed on home-page load
   // (getCachedCallsNeedingAction) if it's there — undefined only means
   // "nothing cached yet and nothing fetched yet", not "still loading" per
@@ -285,6 +285,7 @@ export function CallsNeedingActionView({ staffRoster, onAssignTodo, onResolved, 
                 key={call.id}
                 call={call}
                 staffRoster={staffRoster}
+                currentUser={currentUser}
                 onAssignTodo={handleAssignTodo}
                 onResolve={handleResolve}
                 onAddVoiceNote={handleAddVoiceNote}

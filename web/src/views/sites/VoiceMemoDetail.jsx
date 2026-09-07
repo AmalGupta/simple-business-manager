@@ -2,7 +2,7 @@ import { t } from "../../theme.js";
 import { TodoRow } from "../../components/TodoRow.jsx";
 import { TodoAssignControl } from "../calls/TodoAssignControl.jsx";
 
-export function VoiceMemoDetail({ entryRef, canManage = false, staffRoster = [], onAssign }) {
+export function VoiceMemoDetail({ entryRef, canManage = false, staffRoster = [], currentUser = null, onAssign }) {
   if (entryRef.transcript === undefined) return null; // not sent to this session (staff) — nothing to show
   if (entryRef.transcript === null) return null; // still transcribing
   return (
@@ -36,7 +36,12 @@ export function VoiceMemoDetail({ entryRef, canManage = false, staffRoster = [],
               <TodoRow todo={td} readOnly />
               {canManage && onAssign && (
                 <div style={{ padding: "0 10px 8px" }}>
-                  <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} />
+                  <TodoAssignControl
+                    todo={td}
+                    staffRoster={staffRoster}
+                    currentUser={currentUser}
+                    onAssign={onAssign}
+                  />
                 </div>
               )}
             </div>
