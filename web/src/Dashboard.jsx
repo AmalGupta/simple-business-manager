@@ -687,7 +687,11 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "sites-review")
-    return shell(<SitesReviewView sites={allSites} onBack={() => setView(homeView)} onSaved={refreshSites} />);
+    return shell(<SitesReviewView sites={allSites} onBack={() => setView(homeView)} onSaved={refreshSites} />, {
+      // Same 1100px container as the sites directory — this screen is now a
+      // four-column grid too, and it carries more rows than the directory.
+      wide: true,
+    });
 
   if (view.name === "sites-directory")
     return shell(
