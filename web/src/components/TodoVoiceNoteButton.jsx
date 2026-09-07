@@ -17,9 +17,9 @@ export function TodoVoiceNoteButton({ todoId, existingNote, onUpload }) {
   };
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, minWidth: 0, maxWidth: "100%" }}>
       {existingNote && (
-        <div style={{ width: 140 }}>
+        <div style={{ flex: "1 1 120px", minWidth: 0, maxWidth: 160 }}>
           <AudioPlayer src={`/api/todo-voice-notes/${existingNote.id}`} />
         </div>
       )}

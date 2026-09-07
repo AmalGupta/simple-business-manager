@@ -158,14 +158,9 @@
 
 .cna-card__todo-controls {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
-  flex-wrap: wrap;
-}
-
-.cna-card__todo-controls > :first-child {
-  flex: 1;
   min-width: 0;
 }
 
