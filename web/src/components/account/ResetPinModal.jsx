@@ -3,7 +3,7 @@ import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
 
 /* Popup for self-service PIN reset — requires the current PIN (not the
-   admin X-SBM-Key), same modal idiom as AssignTeamModal/VoiceNoteModal. */
+   admin X-SBM-Key), same modal idiom as AddPeopleModal/VoiceNoteModal. */
 export function ResetPinModal({ onClose, onReset }) {
   const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
