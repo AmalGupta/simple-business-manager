@@ -475,7 +475,33 @@ export async function handlePostSitesBackfill(request: Request, env: Env): Promi
   });
 }
 
-const SITE_PATCH_KEYS = ["is_confirmed", "address", "poc_name", "target_closure_date"] as const;
+/**
+ * Everything a site's details form can write. This used to be four keys
+ * while `updateSite`/SITE_PATCH_FIELDS already understood all eleven —
+ * the intake fields from migration 0019 were collected once by
+ * AddSiteScreen and then unreachable, so a typo in a sector or a phone
+ * number could only be fixed by re-creating the site. The allowlist is
+ * the gate, so widening it here is what unlocks editing them.
+ */
+const SITE_PATCH_KEYS = [
+  "is_confirmed",
+  "address",
+  "poc_name",
+  "house_no",
+  "sector",
+  "city",
+  "poc_contact_number",
+  "assigned_by",
+  "referred_by",
+  "site_location",
+  "target_closure_date",
+] as const;
+
+/** The free-text subset — everything above except the two with their own validation. */
+const SITE_TEXT_PATCH_KEYS = SITE_PATCH_KEYS.filter(
+  (k) => k !== "is_confirmed" && k !== "target_closure_date"
+);
+
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function handlePatchSite(request: Request, env: Env, id: string): Promise<Response> {
@@ -498,9 +524,31 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
     return json({ error: "target_closure_date must be an ISO date (YYYY-MM-DD) or null" }, 400);
   }
 
+  /* Typed rather than cast straight through. With four keys a bad value
+     was a narrow problem; across eleven it's worth rejecting a number or
+     object outright instead of letting D1 bind it and storing something
+     no read path expects. */
+  for (const key of SITE_TEXT_PATCH_KEYS) {
+    if (key in record && record[key] !== null && typeof record[key] !== "string") {
+      return json({ error: `${key} must be a string or null` }, 400);
+    }
+  }
+
   const patch: Partial<Record<(typeof SITE_PATCH_KEYS)[number], string | null>> = {};
   for (const key of SITE_PATCH_KEYS) {
-    if (key in record) patch[key] = record[key] as string | null;
+    if (!(key in record)) continue;
+    const value = record[key];
+    /* Blank collapses to NULL so "cleared" and "never filled in" are one
+       state. AddSiteScreen already writes `.trim() || null` on create, so
+       this makes the edit path agree with the create path instead of
+       leaving "" behind, which every read renders via `?.trim() ||
+       fallback` anyway. */
+    if (typeof value === "string" && SITE_TEXT_PATCH_KEYS.includes(key as never)) {
+      const trimmed = value.trim();
+      patch[key] = trimmed === "" ? null : trimmed;
+    } else {
+      patch[key] = value as string | null;
+    }
   }
 
   const updated = await updateSite(env.DB, id, patch, gate.user_id);
