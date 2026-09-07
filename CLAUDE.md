@@ -27,7 +27,7 @@ Follow `docs/BUILD_BRIEF.md` "Build order" task-by-task; each task's verificatio
 
 ## Deploying
 
-Follow `docs/DEPLOY_RUNBOOK.md` exactly, every time, regardless of which agent or session is doing the shipping. The single fact that governs everything in it: there is no separate staging/dev environment — `wrangler deploy` and `wrangler d1 migrations apply --remote` both hit the one live worker and database.
+Follow `docs/DEPLOY_RUNBOOK.md` and `docs/BRANCHING.md`. While `release/*` is active: work on `feature/SBM-<id>-…` / `bugfix/SBM-<id>-…`, dual-MR into `release/*` (UAT) and `develop` (dev). `develop` deploys to `sbm-pipeline`; `release/*` deploys to `sbm-pipeline-uat`. There is no separate production train beyond that yet — treat every remote migrate/deploy as live for that environment.
 
 ## Stack
 

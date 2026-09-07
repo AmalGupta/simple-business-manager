@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# After a successful git commit on release/*, remind the agent to dual-land onto develop.
+# After a successful git commit on a Jira-scoped or release/* branch, remind
+# the agent to open dual MRs (or dual-land) so release and develop both get the fix.
 # postToolUse → additional_context only. Fail open.
 set -euo pipefail
 
@@ -28,24 +29,18 @@ esac
 
 branch=$(git branch --show-current 2>/dev/null || true)
 case "$branch" in
-  release/*) ;;
+  release/*|bugfix/SBM-*|feature/SBM-*|bugfix/sbm-*|feature/sbm-*) ;;
   *) echo '{}'; exit 0 ;;
 esac
-
-tip=$(git rev-parse HEAD 2>/dev/null || true)
-if [[ -n "$tip" ]] && git merge-base --is-ancestor "$tip" develop 2>/dev/null; then
-  echo '{}'
-  exit 0
-fi
 
 python3 -c '
 import json
 msg = (
   "You just committed on '"$branch"'. "
-  "If this is a bugfix/hotfix, dual-land it onto develop with "
-  "`scripts/dual-land.sh $(git rev-parse --short HEAD)` "
-  "(add --push only if the user asked to push). "
-  "See skill dual-land-bugfix."
+  "If this change must reach UAT and dev, open dual MRs "
+  "(base release/* and base develop) per docs/BRANCHING.md / skill dual-land-bugfix. "
+  "Fallback: scripts/dual-land.sh <sha> (add --push only if the user asked). "
+  "Do not push develop/release directly unless asked."
 )
 print(json.dumps({"additional_context": msg}))
 '

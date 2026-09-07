@@ -1,70 +1,69 @@
 ---
 name: dual-land-bugfix
 description: >-
-  Dual-land bugfix/hotfix commits onto both the active release/* branch and
-  develop (fast-forward when linear, else cherry-pick). Use when the user asks
-  to land a fix on release and develop, dual-land commits, backport a hotfix,
-  or after committing a bugfix on release/* that must also reach develop.
+  Land the same Jira-scoped change on both release/* (UAT) and develop (dev)
+  via dual MRs (preferred) or scripts/dual-land.sh cherry-pick/FF (fallback).
+  Use when starting a bugfix/feature, opening PRs to release and develop,
+  dual-landing commits, backporting a hotfix, or after the user asks to dual-land.
 ---
 
-# Dual-land bugfix (release ↔ develop)
+# Dual-land (release ↔ develop) — MR-first
 
-During M0 UAT / release maintenance, bugfixes must land on **both**:
+Canonical process: **`docs/BRANCHING.md`**.
 
-1. the active `release/*` branch (today: `release/0.0.1`)
-2. `develop`
+While a `release/*` branch is active (today: `release/0.0.1`):
 
-Do not leave fixes only on one side.
+| Line | After merge CI deploys |
+|------|-------------------------|
+| `release/<ver>` | **UAT** — `pnpm run deploy uat` → `sbm-pipeline-uat` |
+| `develop` | **dev** — `pnpm run deploy` → `sbm-pipeline` |
 
-## Default workflow
+Bugfixes/hotfixes that belong on UAT **and** must keep `develop` current require **both** lines.
 
-1. **Implement and commit on `release/<ver>`** (checkout that branch first).
-2. **Dual-land onto `develop`** with the helper (preferred) or the manual steps below.
-3. **Push only when the user asks** — never push `develop` / `release/*` unprompted.
-4. Stay on / return to the branch the user was working on.
+## Preferred workflow (dual MRs)
 
-### Helper (preferred)
+1. **Branch from the right base with a Jira id**
+   - UAT-bound fix: `bugfix/SBM-123-slug` from `origin/release/0.0.1`
+   - Dev-only / not for this UAT train: `feature/SBM-123-slug` from `origin/develop`
+2. Implement and commit on that branch (never commit directly on `develop` / `release/*`).
+3. **Open two PRs** when the change must hit UAT and dev:
+   - PR → `release/0.0.1` (UAT)
+   - PR → `develop` (dev) — usually a second head branch with the same commits cherry-picked onto `develop`
+4. Return both PR URLs. Push the feature heads; do **not** push `develop` / `release/*` unless the user asks.
+5. Deploy happens via CI on merge (migrations still manual / `--skip-migrate` in CI). Manual deploy only if the user asks: `pnpm run deploy uat --yes` from release tip, `pnpm run deploy --yes` from develop tip.
+
+### Example commands
 
 ```bash
-# After commits exist on release/* — does not push unless --push
+git fetch origin
+git checkout -b bugfix/SBM-123-short-slug origin/release/0.0.1
+# … commits …
+git push -u origin HEAD
+gh pr create --base release/0.0.1 --head bugfix/SBM-123-short-slug --title "SBM-123: …" --body "…"
+
+git checkout -b bugfix/SBM-123-short-slug-develop origin/develop
+git cherry-pick <oldest>^..<newest>   # adjust range to the ticket commits
+git push -u origin HEAD
+gh pr create --base develop --head bugfix/SBM-123-short-slug-develop --title "SBM-123: … (develop)" --body "Pairs with release PR #N"
+```
+
+## Fallback: `scripts/dual-land.sh`
+
+Use only when the user asks to dual-land **commits** (already on one long-lived branch) without going through a second MR, or to finish a one-sided merge:
+
+```bash
 scripts/dual-land.sh <sha> [<sha>...] [--from release/0.0.1] [--to develop] [--push]
 ```
 
-- `--from` defaults to current branch if it is `release/*`, else newest local `release/*`.
-- `--to` defaults to `develop`.
-- Prefer FF; cherry-picks oldest→newest if histories diverged.
-- Skips commits already on the target.
-
-### Manual equivalent
-
-```bash
-git checkout develop
-git pull --ff-only origin develop   # if tracking exists
-# If develop is a direct ancestor of the newest SHA (linear):
-git merge --ff-only <newest-sha>
-# Else:
-git cherry-pick <oldest-sha> <newer-sha> ...
-# Push only if asked:
-git push origin develop
-```
-
-## Which branch is "active release"?
-
-- If `git branch --show-current` matches `release/*`, that is the source.
-- Else use the newest local `release/*` (`git for-each-ref --sort=-committerdate refs/heads/release`), or ask if more than one is ambiguous.
+- Prefer FF; else cherry-pick oldest→newest. Skips commits already on the target.
+- `--push` only if the user asked to push.
+- Never dual-land unrelated commits.
 
 ## Rules
 
-- Never rewrite published history (`push --force`, `commit --amend` of pushed commits) unless the user explicitly requests it.
-- Never dual-land unrelated feature work — only the SHAs the user named (or the bugfix commits just created).
-- If cherry-pick conflicts: stop, show the conflict, do not invent a merge resolution beyond what the user asked.
-- Tag / UAT deploy anchors (`m0-uat-v*`) stay put; dual-land does not create tags.
-
-## Cursor vs Claude Code
-
-Same skill lives in:
-
-- `.cursor/skills/dual-land-bugfix/SKILL.md` (Cursor)
-- `.claude/skills/dual-land-bugfix/SKILL.md` (Claude Code — also `/dual-land-bugfix`)
-
-Keep the two files identical when editing.
+- Branch names: `feature/SBM-<n>-…` or `bugfix/SBM-<n>-…` (Jira id required).
+- Never rewrite published history unless the user explicitly requests it.
+- Do not invent merge conflict resolutions beyond what the user asked.
+- Keep this file identical at:
+  - `.cursor/skills/dual-land-bugfix/SKILL.md`
+  - `.claude/skills/dual-land-bugfix/SKILL.md`
