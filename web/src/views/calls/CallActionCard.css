@@ -1,15 +1,12 @@
 /* One card in the Calls Needing Action carousel. Flat white surface,
    hairline border, one radius — no shadows/tints, per
-   docs/DESIGN_LANGUAGE.md "Surface" (the same rule Card.jsx enforces via
-   inline styles; this file mirrors it in CSS since the carousel card was
-   asked to be "a separate component, externalized CSS design").
-   Fixed height, internal scroll on the todos region — see plan doc scope
-   decision #1 / the SitesAttentionTile/EscalationsTile pattern. */
+   docs/DESIGN_LANGUAGE.md "Surface".
+
+   Default (customization.inner_scrolls off): card grows with content, no
+   inner vertical scrollbar. Opt-in [data-inner-scrolls="1"] restores the
+   fixed-height + internal todos/transcript scroll pattern. */
 
 .cna-card {
-  --cna-card-height: 560px;
-
-  height: var(--cna-card-height);
   display: flex;
   flex-direction: column;
   background: var(--color-surface);
@@ -18,6 +15,14 @@
   padding: 1rem 1.25rem;
   font-family: var(--font-body);
   color: var(--color-ink);
+  overflow: visible;
+  height: auto;
+  min-height: 0;
+}
+
+[data-inner-scrolls="1"] .cna-card {
+  --cna-card-height: 560px;
+  height: var(--cna-card-height);
   overflow: hidden;
 }
 
@@ -31,6 +36,8 @@
   font-size: 17px;
   font-weight: 500;
   color: var(--color-ink);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .cna-card__meta {
@@ -51,20 +58,17 @@
   line-height: 1.55;
   color: var(--color-ink);
   flex-shrink: 0;
-  /* Clamped so a long summary can't push the audio/transcript/todos
-     regions out of alignment between cards — the point of a fixed-height
-     carousel is that every card reads the same shape at a glance. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+[data-inner-scrolls="1"] .cna-card__summary {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-/* Fixed frame around the native <audio> element so a broken/loading
-   playback icon (e.g. a dev call with no recording in R2) can't render at
-   an arbitrary size and throw card content out of alignment — every card's
-   audio region occupies exactly the same height whether or not the file
-   actually loads. */
 .cna-card__audio {
   flex-shrink: 0;
   height: 44px;
@@ -95,10 +99,11 @@
 .cna-card__transcript {
   margin: 6px 0 0;
   padding: 10px;
-  max-height: 140px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   font-size: 12px;
   line-height: 1.6;
   color: var(--color-ink);
@@ -108,25 +113,31 @@
   flex-shrink: 0;
 }
 
-.cna-card__todos {
-  flex: 1;
-  min-height: 0;
+[data-inner-scrolls="1"] .cna-card__transcript {
+  max-height: 140px;
   overflow-y: auto;
+}
+
+.cna-card__todos {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
   margin-top: 12px;
   border-top: 1px solid var(--color-line);
-  /* Always-visible thin scrollbar rather than the OS-default overlay one,
-     which on macOS/trackpad setups only appears while actively scrolling —
-     without this a card with more todos than fit reads as "cut off", not
-     "scrollable". */
+}
+
+[data-inner-scrolls="1"] .cna-card__todos {
+  flex: 1;
+  overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--color-line) transparent;
 }
 
-.cna-card__todos::-webkit-scrollbar {
+[data-inner-scrolls="1"] .cna-card__todos::-webkit-scrollbar {
   width: 6px;
 }
 
-.cna-card__todos::-webkit-scrollbar-thumb {
+[data-inner-scrolls="1"] .cna-card__todos::-webkit-scrollbar-thumb {
   background: var(--color-line);
   border-radius: 3px;
 }
@@ -141,6 +152,8 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--color-ink);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .cna-card__todo-controls {
@@ -148,6 +161,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .cna-card__todo-controls > :first-child {

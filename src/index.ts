@@ -55,6 +55,7 @@ import {
   handleLogout,
   handleLogoutRedirect,
   handleMe,
+  handlePatchCustomization,
   handleResetPin,
   handleResetStaffPin,
   handleUpdateMyPhone,
@@ -338,6 +339,10 @@ export default {
 
     if (url.pathname === "/api/me" && request.method === "GET") {
       return handleMe(request, env);
+    }
+
+    if (url.pathname === "/api/me/customization" && request.method === "PATCH") {
+      return handlePatchCustomization(request, env);
     }
 
     if (url.pathname === "/api/me/pin" && request.method === "POST") {
