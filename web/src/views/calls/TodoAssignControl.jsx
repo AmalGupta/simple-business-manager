@@ -14,10 +14,24 @@ import { suggestAssignee } from "../../lib/assignment.js";
 
    migration 0025: a todo can be assigned to more than one staff member, so
    this is a checkbox list rather than a single <select> — onAssign(todo.id,
-   userIds: string[]) replaces the full assignee set on Save. */
-export function TodoAssignControl({ todo, staffRoster, onAssign, alwaysEditing = false }) {
-  const assignees = todo.assignees ?? [];
-  const suggested = useMemo(() => suggestAssignee(todo.owner, staffRoster), [todo.owner, staffRoster]);
+   userIds: string[]) replaces the full assignee set on Save.
+
+   `currentUser` enables a one-tap "Assign to me" for the logged-in admin
+   (staff roster alone never includes them). Claiming merges the current
+   user into the existing assignee set. */
+export function TodoAssignControl({ todo, staffRoster, onAssign, currentUser = null, alwaysEditing = false }) {
+  const serverAssignees = todo.assignees ?? [];
+  const [localAssignees, setLocalAssignees] = useState(null);
+  const assignees = localAssignees ?? serverAssignees;
+  const assignablePeople = useMemo(() => {
+    const roster = Array.isArray(staffRoster) ? staffRoster : [];
+    if (!currentUser?.id) return roster;
+    if (roster.some((s) => s.id === currentUser.id)) return roster;
+    return [{ id: currentUser.id, name: currentUser.name || "You" }, ...roster];
+  }, [staffRoster, currentUser]);
+
+  const suggested = useMemo(() => suggestAssignee(todo.owner, assignablePeople), [todo.owner, assignablePeople]);
+  const assignedToMe = Boolean(currentUser?.id && assignees.some((a) => a.id === currentUser.id));
 
   const [editing, setEditing] = useState(alwaysEditing);
   const [checkedIds, setCheckedIds] = useState(() => {
@@ -25,7 +39,13 @@ export function TodoAssignControl({ todo, staffRoster, onAssign, alwaysEditing =
     return suggested ? new Set([suggested.id]) : new Set();
   });
   const [saving, setSaving] = useState(false);
+  const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState("");
+
+  // Prefer server assignees when the parent refreshes; clear optimistic overlay.
+  useEffect(() => {
+    setLocalAssignees(null);
+  }, [todo.id, serverAssignees.map((a) => a.id).join(",")]);
 
   // Keep the checklist in sync if the todo's assignees change out from
   // under us (e.g. a refresh after another admin's edit) while not editing.
@@ -34,6 +54,15 @@ export function TodoAssignControl({ todo, staffRoster, onAssign, alwaysEditing =
     setCheckedIds(assignees.length > 0 ? new Set(assignees.map((a) => a.id)) : suggested ? new Set([suggested.id]) : new Set());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todo.id, assignees.map((a) => a.id).join(",")]);
+
+  const peopleById = useMemo(() => {
+    const map = new Map(assignablePeople.map((p) => [p.id, p]));
+    for (const a of assignees) map.set(a.id, a);
+    return map;
+  }, [assignablePeople, assignees]);
+
+  const resolveAssignees = (userIds) =>
+    userIds.map((id) => peopleById.get(id) ?? { id, name: id === currentUser?.id ? currentUser.name || "You" : id });
 
   const toggle = (id) => {
     setCheckedIds((prev) => {
@@ -48,13 +77,33 @@ export function TodoAssignControl({ todo, staffRoster, onAssign, alwaysEditing =
     setSaving(true);
     setError("");
     try {
-      await onAssign(todo.id, [...checkedIds]);
+      const ids = [...checkedIds];
+      await onAssign(todo.id, ids);
+      setLocalAssignees(resolveAssignees(ids));
       if (!alwaysEditing) setEditing(false);
     } catch (err) {
       console.error("[sbm] failed to assign todo", err);
       setError(err.message || "Failed to save — try again.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const assignToMe = async () => {
+    if (!currentUser?.id || assignedToMe) return;
+    setClaiming(true);
+    setError("");
+    try {
+      const next = new Set(assignees.map((a) => a.id));
+      next.add(currentUser.id);
+      const ids = [...next];
+      await onAssign(todo.id, ids);
+      setLocalAssignees(resolveAssignees(ids));
+    } catch (err) {
+      console.error("[sbm] failed to assign todo to self", err);
+      setError(err.message || "Failed to assign — try again.");
+    } finally {
+      setClaiming(false);
     }
   };
 
@@ -66,29 +115,45 @@ export function TodoAssignControl({ todo, staffRoster, onAssign, alwaysEditing =
           ? `Suggested: ${suggested.name}`
           : "Unassigned";
     return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 4 }}>
-        <span style={{ fontSize: 12, color: t.edge2 }}>
-          {label}
-          {todo.due_date && ` · due ${fmtShort(todo.due_date)}`}
-        </span>
-        <button onClick={() => setEditing(true)} style={SMALL_SECONDARY_BUTTON_STYLE}>
-          {assignees.length > 0 ? "Reassign" : "Assign"}
-        </button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span style={{ fontSize: 12, color: t.edge2 }}>
+            {label}
+            {todo.due_date && ` · due ${fmtShort(todo.due_date)}`}
+          </span>
+          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+            {currentUser?.id && !assignedToMe && (
+              <button
+                type="button"
+                onClick={assignToMe}
+                disabled={claiming}
+                style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12, opacity: claiming ? 0.6 : 1 }}
+              >
+                {claiming ? "Assigning…" : "Assign to me"}
+              </button>
+            )}
+            <button onClick={() => setEditing(true)} style={SMALL_SECONDARY_BUTTON_STYLE}>
+              {assignees.length > 0 ? "Reassign" : "Assign"}
+            </button>
+          </div>
+        </div>
+        {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
       </div>
     );
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-      {staffRoster.length === 0 ? (
+      {assignablePeople.length === 0 ? (
         <p style={{ fontSize: 12, color: t.edge2, margin: 0 }}>No staff yet — add one from the Staff page first.</p>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 140, overflowY: "auto" }}>
-          {staffRoster.map((s) => (
+          {assignablePeople.map((s) => (
             <label key={s.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: t.edge }}>
               <input type="checkbox" checked={checkedIds.has(s.id)} onChange={() => toggle(s.id)} />
               {s.name}
-              {suggested?.id === s.id ? " (suggested)" : ""}
+              {currentUser?.id === s.id ? " (you)" : ""}
+              {suggested?.id === s.id && currentUser?.id !== s.id ? " (suggested)" : ""}
             </label>
           ))}
         </div>
@@ -97,8 +162,8 @@ export function TodoAssignControl({ todo, staffRoster, onAssign, alwaysEditing =
       <div style={{ display: "flex", gap: 6 }}>
         <button
           onClick={submit}
-          disabled={saving || staffRoster.length === 0}
-          style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12, opacity: saving || staffRoster.length === 0 ? 0.6 : 1 }}
+          disabled={saving || assignablePeople.length === 0}
+          style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12, opacity: saving || assignablePeople.length === 0 ? 0.6 : 1 }}
         >
           {saving ? "Saving…" : "Save"}
         </button>

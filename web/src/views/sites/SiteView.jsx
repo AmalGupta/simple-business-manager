@@ -30,6 +30,7 @@ export function SiteView({
   myOpenTasks = [],
   onTasksChanged = () => {},
   staffRoster = [],
+  currentUser = null,
   onAssignTodo,
 }) {
   const [showWorkTimeline, setShowWorkTimeline] = useState(false);
@@ -331,6 +332,7 @@ export function SiteView({
           onOpenCall={onOpen}
           canManage={canManage}
           staffRoster={staffRoster}
+          currentUser={currentUser}
           onAssignTodo={handleAssignTodo}
         />
       </div>

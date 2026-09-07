@@ -3021,7 +3021,7 @@ export interface AssignedTodoRow {
   recorded_at: string | null;
 }
 
-/** Open call todos assigned to a staff user — personal work queue. */
+/** Open call todos assigned to a user — personal work queue (staff or admin). */
 export async function listMyOpenTodos(db: D1Database, userId: string): Promise<AssignedTodoRow[]> {
   const { results } = await db
     .prepare(
@@ -3049,10 +3049,13 @@ export async function listMyOpenTodos(db: D1Database, userId: string): Promise<A
  * Home-page read model — live aggregates + small lists, no call transcripts.
  * `forUserId` set (staff) → only sites + open_site_tasks + my_open_todos scoped to that user;
  * admin fields are zero/empty. Omitted/null → full admin/superadmin payload.
+ * `viewerUserId` (admin path) loads that user's personal open call todos so
+ * an admin who claimed work via "Assign to me" can see them on home.
  */
 export async function getDashboardSummary(
   db: D1Database,
-  forUserId?: string | null
+  forUserId?: string | null,
+  viewerUserId?: string | null
 ): Promise<DashboardSummary> {
   if (forUserId) {
     const [sites, open_site_tasks, my_open_todos] = await Promise.all([
@@ -3091,6 +3094,7 @@ export async function getDashboardSummary(
     staff_roster,
     open_site_tasks,
     callsNeedingActionCount,
+    my_open_todos,
   ] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'open'`).first<{ n: number }>(),
     db
@@ -3106,6 +3110,7 @@ export async function getDashboardSummary(
     listStaffRoster(db),
     listOpenSiteTasks(db),
     countCallsNeedingAction(db),
+    viewerUserId ? listMyOpenTodos(db, viewerUserId) : Promise.resolve([] as AssignedTodoRow[]),
   ]);
 
   return {
@@ -3118,7 +3123,7 @@ export async function getDashboardSummary(
     sites,
     staff_roster,
     open_site_tasks,
-    my_open_todos: [],
+    my_open_todos,
     confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
     unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
     callers_count: callersRow?.n ?? 0,
