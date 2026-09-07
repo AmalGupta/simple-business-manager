@@ -19,7 +19,17 @@ import { suggestAssignee } from "../../lib/assignment.js";
    `currentUser` enables a one-tap "Assign to me" for the logged-in admin
    (staff roster alone never includes them). Claiming merges the current
    user into the existing assignee set. */
-export function TodoAssignControl({ todo, staffRoster, onAssign, currentUser = null, alwaysEditing = false }) {
+export function TodoAssignControl({
+  todo,
+  staffRoster,
+  onAssign,
+  currentUser = null,
+  alwaysEditing = false,
+  /** Optional trailing controls (e.g. voice-note mic) rendered in the
+   *  collapsed action row so they wrap with Assign/Assign-to-me on narrow
+   *  screens instead of colliding in a sibling flex row. */
+  extraActions = null,
+}) {
   const serverAssignees = todo.assignees ?? [];
   const [localAssignees, setLocalAssignees] = useState(null);
   const assignees = localAssignees ?? serverAssignees;
@@ -115,27 +125,26 @@ export function TodoAssignControl({ todo, staffRoster, onAssign, currentUser = n
           ? `Suggested: ${suggested.name}`
           : "Unassigned";
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-          <span style={{ fontSize: 12, color: t.edge2 }}>
-            {label}
-            {todo.due_date && ` · due ${fmtShort(todo.due_date)}`}
-          </span>
-          <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-            {currentUser?.id && !assignedToMe && (
-              <button
-                type="button"
-                onClick={assignToMe}
-                disabled={claiming}
-                style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12, opacity: claiming ? 0.6 : 1 }}
-              >
-                {claiming ? "Assigning…" : "Assign to me"}
-              </button>
-            )}
-            <button onClick={() => setEditing(true)} style={SMALL_SECONDARY_BUTTON_STYLE}>
-              {assignees.length > 0 ? "Reassign" : "Assign"}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4, minWidth: 0, width: "100%" }}>
+        <span style={{ fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>
+          {label}
+          {todo.due_date && ` · due ${fmtShort(todo.due_date)}`}
+        </span>
+        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+          {currentUser?.id && !assignedToMe && (
+            <button
+              type="button"
+              onClick={assignToMe}
+              disabled={claiming}
+              style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12, opacity: claiming ? 0.6 : 1 }}
+            >
+              {claiming ? "Assigning…" : "Assign to me"}
             </button>
-          </div>
+          )}
+          <button type="button" onClick={() => setEditing(true)} style={SMALL_SECONDARY_BUTTON_STYLE}>
+            {assignees.length > 0 ? "Reassign" : "Assign"}
+          </button>
+          {extraActions}
         </div>
         {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
       </div>
@@ -159,7 +168,7 @@ export function TodoAssignControl({ todo, staffRoster, onAssign, currentUser = n
         </div>
       )}
       {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
-      <div style={{ display: "flex", gap: 6 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         <button
           onClick={submit}
           disabled={saving || assignablePeople.length === 0}
@@ -172,6 +181,7 @@ export function TodoAssignControl({ todo, staffRoster, onAssign, currentUser = n
             Cancel
           </button>
         )}
+        {extraActions}
       </div>
     </div>
   );

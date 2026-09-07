@@ -100,7 +100,16 @@ export function OpenTodosView({
                     showDue
                   />
                 </div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, paddingLeft: 28 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "stretch",
+                    gap: 8,
+                    paddingLeft: 28,
+                    minWidth: 0,
+                  }}
+                >
                   <button
                     type="button"
                     onClick={() => onOpen(td.call_id)}
@@ -110,6 +119,7 @@ export function OpenTodosView({
                       fontSize: 13,
                       color: t.accent,
                       fontWeight: 500,
+                      alignSelf: "flex-start",
                     }}
                   >
                     {td.call.client_name}
