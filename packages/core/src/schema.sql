@@ -96,7 +96,13 @@ CREATE TABLE sites (
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   -- migration 0012: admin/superadmin-editable, ISO date. Drives the missed
   -- red highlight on the Sites list and the staff-facing banner.
-  target_closure_date TEXT
+  target_closure_date TEXT,
+  -- migration 0028: the call this site was discovered from, stamped by
+  -- upsertSite on the INSERT branch only so a later scan re-finding the name
+  -- never rewrites it. NULL for the migration 0006 seeds and for sites added
+  -- by hand through createSite. The caller name and date shown on the review
+  -- screen are joined through this, not copied — see SITE_ROW_SELECT.
+  discovered_from_call_id TEXT REFERENCES calls(id)
 );
 
 -- Always-editable roster of people assigned to a site — see

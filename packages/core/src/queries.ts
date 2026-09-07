@@ -491,16 +491,24 @@ export async function setCallTranscribed(
  * via ON CONFLICT rather than erroring. The ON CONFLICT branch only touches
  * `name` (a no-op — it's the conflict key), so an existing site's
  * is_confirmed is never reset by a later scan finding it again.
+ *
+ * `discoveredFromCallId` (migration 0028) is written on the INSERT branch
+ * only, for the same reason: it records the call that first produced the
+ * name, so the tenth call to mention a site must not overwrite it.
  */
-export async function upsertSite(db: D1Database, name: string): Promise<string> {
+export async function upsertSite(
+  db: D1Database,
+  name: string,
+  discoveredFromCallId?: string | null
+): Promise<string> {
   const trimmed = name.trim();
   const row = await db
     .prepare(
-      `INSERT INTO sites (id, name) VALUES (?, ?)
+      `INSERT INTO sites (id, name, discovered_from_call_id) VALUES (?, ?, ?)
        ON CONFLICT(name) DO UPDATE SET name = excluded.name
        RETURNING id`
     )
-    .bind(crypto.randomUUID(), trimmed)
+    .bind(crypto.randomUUID(), trimmed, discoveredFromCallId ?? null)
     .first<{ id: string }>();
   return row!.id;
 }
@@ -514,7 +522,7 @@ export async function upsertSite(db: D1Database, name: string): Promise<string> 
 export async function linkCallToSites(db: D1Database, callId: string, siteNames: string[]): Promise<void> {
   const names = [...new Set(siteNames.map((s) => s.trim()).filter(Boolean))];
   if (names.length === 0) return;
-  const siteIds = await Promise.all(names.map((name) => upsertSite(db, name)));
+  const siteIds = await Promise.all(names.map((name) => upsertSite(db, name, callId)));
   await db.batch(
     siteIds.map((siteId) =>
       db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId)
@@ -551,7 +559,7 @@ export async function saveExtraction(
   promptVersion: string
 ): Promise<void> {
   const siteNames = [...new Set(extraction.sites.map((s) => s.trim()).filter(Boolean))];
-  const siteIds = await Promise.all(siteNames.map((name) => upsertSite(db, name)));
+  const siteIds = await Promise.all(siteNames.map((name) => upsertSite(db, name, callId)));
   const staff = await listStaffRoster(db);
 
   const statements = [
@@ -1499,6 +1507,11 @@ export interface SiteRow {
   referred_by: string | null;
   site_location: string | null;
   target_closure_date: string | null;
+  /** migration 0028 — the call this name came from, NULL for seeds and manual adds. */
+  discovered_from_call_id: string | null;
+  /** Joined through discovered_from_call_id, never stored on the site row. */
+  discovered_from_caller_name: string | null;
+  discovered_from_call_date: string | null;
 }
 
 export interface SiteIntakeDetails {
@@ -1514,9 +1527,29 @@ export interface SiteIntakeDetails {
   site_location?: string | null;
 }
 
-const SITE_ROW_SELECT = `SELECT id, name, is_confirmed, address, poc_name,
-  house_no, sector, city, poc_contact_number, assigned_by, referred_by, site_location,
-  target_closure_date FROM sites`;
+/**
+ * Every column is qualified because of the two provenance joins (migration
+ * 0028) — `calls` and `sites` both have an `id`, so an unqualified
+ * `WHERE id = ?` would be ambiguous. Callers must qualify their own
+ * predicates too.
+ *
+ * The caller name and call date are resolved here rather than stored on the
+ * site: renaming a caller in the directory should change what the review
+ * screen says. `discovered_from_call_date` is the app's usual "effective
+ * date" — the recorder's own timestamp when we have it, upload time
+ * otherwise — but truncated to a day, because `recording_date` is not
+ * uniformly day-granular in practice (UAT rows carry full ISO timestamps).
+ * Truncating here rather than in the client keeps a Z-suffixed timestamp
+ * from being re-read in local time and landing on the wrong day.
+ */
+const SITE_ROW_SELECT = `SELECT sites.id, sites.name, sites.is_confirmed, sites.address, sites.poc_name,
+  sites.house_no, sites.sector, sites.city, sites.poc_contact_number, sites.assigned_by, sites.referred_by,
+  sites.site_location, sites.target_closure_date, sites.discovered_from_call_id,
+  callers.name AS discovered_from_caller_name,
+  substr(COALESCE(calls.recording_date, calls.recorded_at), 1, 10) AS discovered_from_call_date
+  FROM sites
+  LEFT JOIN calls ON calls.id = sites.discovered_from_call_id
+  LEFT JOIN callers ON callers.id = calls.client_id`;
 
 /** Display name for a new site — explicit name wins, else H.No + sector + city. */
 export function resolveSiteName(details: SiteIntakeDetails): string {
@@ -1563,13 +1596,15 @@ export async function listSites(db: D1Database, forUserId?: string | null): Prom
   // otherwise a staff member with a workflow assignment but no team-roster
   // row could open the site via a workflow tile yet not find it listed here.
   const scoped = forUserId
-    ? `AND id IN (
+    ? `AND sites.id IN (
          SELECT site_id FROM site_team_members WHERE user_id = ?
          UNION
          SELECT site_id FROM site_tasks WHERE assigned_to_user_id = ?
        )`
     : "";
-  const stmt = db.prepare(`${SITE_ROW_SELECT} WHERE 1=1 ${scoped} ORDER BY (is_confirmed IS NOT NULL), name ASC`);
+  const stmt = db.prepare(
+    `${SITE_ROW_SELECT} WHERE 1=1 ${scoped} ORDER BY (sites.is_confirmed IS NOT NULL), sites.name ASC`
+  );
   const { results } = await (forUserId ? stmt.bind(forUserId, forUserId) : stmt).all<SiteRow>();
   return results;
 }
@@ -1656,7 +1691,7 @@ export async function updateSite(
     }
     await db.batch(statements);
   }
-  const row = await db.prepare(`${SITE_ROW_SELECT} WHERE id = ?`).bind(id).first<SiteRow>();
+  const row = await db.prepare(`${SITE_ROW_SELECT} WHERE sites.id = ?`).bind(id).first<SiteRow>();
   return row ?? null;
 }
 
@@ -1681,7 +1716,7 @@ export async function createSite(
   assignCreatorUserId?: string | null
 ): Promise<SiteRow> {
   const intake = normalizeIntake(details);
-  const existing = await db.prepare(`${SITE_ROW_SELECT} WHERE name = ?`).bind(intake.name).first<SiteRow>();
+  const existing = await db.prepare(`${SITE_ROW_SELECT} WHERE sites.name = ?`).bind(intake.name).first<SiteRow>();
   let site: SiteRow;
   if (existing) {
     const updated = await updateSite(
@@ -1729,7 +1764,7 @@ export async function createSite(
         .bind(crypto.randomUUID(), id, actorUserId ?? null),
     ]);
     await seedSiteTasks(db, id);
-    const row = await db.prepare(`${SITE_ROW_SELECT} WHERE id = ?`).bind(id).first<SiteRow>();
+    const row = await db.prepare(`${SITE_ROW_SELECT} WHERE sites.id = ?`).bind(id).first<SiteRow>();
     site = row!;
   }
 
