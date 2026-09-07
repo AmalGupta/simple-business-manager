@@ -9,7 +9,17 @@ import { AccountMenu } from "./account/AccountMenu.jsx";
    StreakWall). Consolidated from three near-identical inline blocks in
    Dashboard.jsx's view router that had drifted apart only by accident,
    not by design. */
-export function AppHeader({ me, onLogout, onResetPin, onUpdatePhone, right, children, hideAccount = false }) {
+export function AppHeader({
+  me,
+  onLogout,
+  onResetPin,
+  onUpdatePhone,
+  customization,
+  onCustomizationChange,
+  right,
+  children,
+  hideAccount = false,
+}) {
   return (
     <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
       <header
@@ -26,7 +36,14 @@ export function AppHeader({ me, onLogout, onResetPin, onUpdatePhone, right, chil
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {right}
           {!hideAccount && me && (
-            <AccountMenu me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
+            <AccountMenu
+              me={me}
+              onLogout={onLogout}
+              onResetPin={onResetPin}
+              onUpdatePhone={onUpdatePhone}
+              customization={customization}
+              onCustomizationChange={onCustomizationChange}
+            />
           )}
         </div>
       </header>

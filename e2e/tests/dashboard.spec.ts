@@ -13,9 +13,7 @@ test.describe("Dashboard shell", () => {
   test("renders the header, stat tiles, and empty state", async ({ page }) => {
     await expect(page.getByText("open today")).toBeVisible();
     await expect(page.getByText("closed today")).toBeVisible();
-
-    // No calls seeded for this admin yet — EmptyState (web/src/Dashboard.jsx).
-    await expect(page.getByText("Nothing recorded yet")).toBeVisible();
+    await expect(page.getByRole("button", { name: new RegExp(TEST_ADMIN.name) })).toBeVisible();
   });
 
   test("account menu opens and shows the logged-in user's actions", async ({ page }) => {
@@ -23,6 +21,7 @@ test.describe("Dashboard shell", () => {
 
     const menu = page.getByRole("menu");
     await expect(menu.getByRole("menuitem", { name: "Update phone" })).toBeVisible();
+    await expect(menu.getByRole("menuitem", { name: "Settings" })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Reset PIN" })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Log out" })).toBeVisible();
   });

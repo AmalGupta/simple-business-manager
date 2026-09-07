@@ -31,7 +31,13 @@ export function fakeCalls(count = 40) {
   });
 }
 
-export async function openCallsWithMockedRows(page: Page, count = 40): Promise<Locator> {
+export async function openCallsWithMockedRows(
+  page: Page,
+  countOrOpts: number | { count?: number; innerScrolls?: boolean } = 40
+): Promise<Locator> {
+  const opts = typeof countOrOpts === "number" ? { count: countOrOpts } : countOrOpts;
+  const count = opts.count ?? 40;
+  const innerScrolls = opts.innerScrolls ?? false;
   const calls = fakeCalls(count);
   await page.route(/\/api\/calls(\?|$)/, async (route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -77,6 +83,13 @@ export async function openCallsWithMockedRows(page: Page, count = 40): Promise<L
   });
 
   await loginAsAdmin(page);
+  if (innerScrolls) {
+    await page.request.patch("/api/me/customization", {
+      data: { inner_scrolls: true, horizontal_scrolls: false },
+    });
+    await page.reload();
+    await expect(page.getByText("Simple Business Manager")).toBeVisible();
+  }
   await page.getByRole("button", { name: /Calls logged/i }).click();
   await expect(page.getByRole("heading", { name: "Calls", exact: true })).toBeVisible();
   await expect(page.getByText("Call / Voice Note Logs")).toBeVisible({ timeout: 15_000 });

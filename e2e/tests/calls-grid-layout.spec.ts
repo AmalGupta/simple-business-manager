@@ -4,7 +4,7 @@ import { openCallsWithMockedRows } from "../fixtures/calls-grid";
 test.describe("Calls grid desktop vs mobile layout", () => {
   test("desktop: summary column, full-height grid, no fixed-body lock", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    const viewport = await openCallsWithMockedRows(page);
+    const viewport = await openCallsWithMockedRows(page, { innerScrolls: true });
 
     await expect(page.locator(".ag-header-cell").filter({ hasText: "Summary" })).toBeVisible();
     await expect(page.locator(".ag-header-cell").filter({ hasText: "Type" })).toBeVisible();
@@ -47,7 +47,7 @@ test.describe("Calls grid desktop vs mobile layout", () => {
 
   test("mobile: no summary column, document locked, table scrolls", async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    const viewport = await openCallsWithMockedRows(page);
+    const viewport = await openCallsWithMockedRows(page, { innerScrolls: true });
 
     await expect(page.locator(".ag-header-cell").filter({ hasText: "Summary" })).toHaveCount(0);
     await expect(page.locator(".ag-header-cell").filter({ hasText: "Type" })).toBeVisible();
