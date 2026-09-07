@@ -70,9 +70,45 @@
   // Drive Calls-folder poller — only ingests when app_settings.drive_poll_enabled is on.
   "triggers": {
     "crons": ["*/5 * * * *"]
-  }
+  },
 
   // Subrequest budget for batch size is DRIVE_POLL_SUBREQUEST_BUDGET (default ~4 files
   // on Workers Free). Paid plans can raise it in vars and optionally add limits here.
   // out of scope — see the "Not in this milestone" list in docs/BUILD_BRIEF.md.
+
+  // UAT — separate Worker/D1/R2; see docs/UAT_ENVIRONMENT_PLAN.md.
+  // Shared Drive folder IDs with sbm-dev: only one of the two pollers may be on at a time.
+  "env": {
+    "uat": {
+      "name": "sbm-pipeline-uat",
+      "vars": {
+        "ENVIRONMENT": "uat",
+        "SARVAM_STT_MODE": "codemix",
+        "SARVAM_LANGUAGE_CODE": "unknown",
+        "ANTHROPIC_MODEL": "claude-sonnet-5",
+        "ANTHROPIC_HAIKU_MODEL": "claude-haiku-4-5-20251001",
+        "GOOGLE_DRIVE_CALLS_FOLDER_ID": "1BVvqN0a_e8mb4S50yMb9X-XwKEfxO5RR",
+        "GOOGLE_DRIVE_ARCHIVE_FOLDER_ID": "12v7xURXHMtL20fjOVLEzmMmXdmcCYhXg",
+        "GOOGLE_DRIVE_SPAM_FOLDER_ID": "130Xhaxx3Z0G5FgjxFOBIQ5e5FBaoute8",
+        "PUBLIC_BASE_URL": "https://sbm-pipeline-uat.gupta-amal01.workers.dev",
+        // 10 files/min: cron every minute × batch 10 (budget must allow ~10×8 subrequests).
+        "DRIVE_POLL_BATCH_SIZE": "10",
+        "DRIVE_POLL_SUBREQUEST_BUDGET": "100"
+      },
+      "triggers": {
+        "crons": ["* * * * *"]
+      },
+      "r2_buckets": [
+        { "binding": "RECORDINGS", "bucket_name": "sbm-recordings-uat" },
+        { "binding": "VOICE_NOTES", "bucket_name": "sbm-voice-notes-uat" }
+      ],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "sbm-uat",
+          "database_id": "be917c5a-f99a-4e9a-961e-54c54b63c5ce"
+        }
+      ]
+    }
+  }
 }

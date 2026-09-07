@@ -47,6 +47,16 @@ export function drivePollBatchCap(env: Env, requested: number): number {
 
 export const DRIVE_POLL_BATCH_SIZE = 20;
 
+function requestedBatchSize(env: Env, override?: number): number {
+  if (override !== undefined) return override;
+  const raw = env.DRIVE_POLL_BATCH_SIZE?.trim();
+  if (raw) {
+    const n = Number.parseInt(raw, 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return DRIVE_POLL_BATCH_SIZE;
+}
+
 export interface DrivePollIngested {
   callId: string;
   driveFileId: string;
@@ -288,7 +298,7 @@ export async function pollDriveCalls(
   _ctx: ExecutionContext,
   options: { limit?: number; callbackOrigin?: string } = {}
 ): Promise<DrivePollResult> {
-  const requested = options.limit ?? DRIVE_POLL_BATCH_SIZE;
+  const requested = requestedBatchSize(env, options.limit);
   const limit = drivePollBatchCap(env, requested);
   const startedAt = new Date().toISOString();
   const progress: DrivePollProgress = {

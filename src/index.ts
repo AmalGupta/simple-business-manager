@@ -120,6 +120,8 @@ export interface Env {
   PUBLIC_BASE_URL?: string;
   /** Subrequest budget for one Drive poll invocation (default 45 ≈ free tier). */
   DRIVE_POLL_SUBREQUEST_BUDGET?: string;
+  /** Max files per poll invocation before the subrequest budget cap (default 20). */
+  DRIVE_POLL_BATCH_SIZE?: string;
 }
 
 function timingSafeEqual(a: string, b: string): boolean {

@@ -257,9 +257,13 @@ if [[ -n "$CONTACTS_SQL" ]]; then
     log "[dry-run] skipping contacts-import verification."
   else
     ACTUAL_CONTACTS=$(npx wrangler d1 execute "$DB_NAME" "${WRANGLER_ENV_ARGS[@]}" --remote --command "SELECT COUNT(*) AS n FROM callers" --json 2>/dev/null | jq -r '.[0].results[0].n')
-    log "Post-import: callers=$ACTUAL_CONTACTS (expected $EXPECTED_CONTACTS)"
-    if [[ "$ACTUAL_CONTACTS" != "$EXPECTED_CONTACTS" ]]; then
-      die "contacts master did not land correctly — expected $EXPECTED_CONTACTS rows in callers, found $ACTUAL_CONTACTS. Not proceeding to admin creation (if requested) until this is fixed."
+    log "Post-import: callers=$ACTUAL_CONTACTS (expected at least $EXPECTED_CONTACTS)"
+    if [[ "$ACTUAL_CONTACTS" -lt "$EXPECTED_CONTACTS" ]]; then
+      die "contacts master did not land correctly — expected at least $EXPECTED_CONTACTS rows in callers, found $ACTUAL_CONTACTS. Not proceeding to admin creation (if requested) until this is fixed."
+    fi
+    if [[ "$ACTUAL_CONTACTS" -gt "$EXPECTED_CONTACTS" ]]; then
+      EXTRA=$((ACTUAL_CONTACTS - EXPECTED_CONTACTS))
+      log "Callers has $EXTRA row(s) beyond the master file (manual adds / prior rows) — OK."
     fi
     log "Contacts master verified in the database."
   fi
