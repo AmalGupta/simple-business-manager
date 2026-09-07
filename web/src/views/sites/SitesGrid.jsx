@@ -6,160 +6,25 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 import { t } from "../../theme.js";
 import { fmtShort, fmtAgo, daysUntil } from "../../lib/dates.js";
 import { Card } from "../../components/Card.jsx";
-import { TEXT_INPUT_STYLE } from "../../styles.js";
+import {
+  SITES_GRID_CSS,
+  DateWindowFilter,
+  FilterCount,
+  TextFilter,
+  daysAgo,
+  windowFor,
+} from "./sitesGridChrome.jsx";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 /* ------------------------------------------------------------------
-   Sites table. Replaces the card list, which had no sort, no search
-   and no way to see a site's contacts or how long it had been quiet.
+   Sites table — the confirmed-sites directory. Replaces the card list,
+   which had no sort, no search and no way to see a site's contacts or
+   how long it had been quiet.
 
-   Conventions copied from CallsGrid: AllCommunityModule registered at
-   module scope, the legacy quartz CSS themes rather than the v33+
-   Theming API, and one scoped <style> literal mapping AG Grid's --ag-*
-   variables onto the app's --color-* tokens. Selectors are
-   .sbm-sites-grid so nothing collides with .sbm-calls-grid.
+   The look, the date-window vocabulary and the filter controls are
+   shared with the review grid via sitesGridChrome.jsx.
    ------------------------------------------------------------------ */
-
-const GRID_CSS = `
-.sbm-sites-grid.ag-theme-quartz {
-  --ag-font-family: var(--font-body), system-ui, sans-serif;
-  --ag-font-size: 13px;
-  --ag-background-color: var(--color-surface);
-  /* Same light blue as the calls grid — softer than the AppHeader accent. */
-  --ag-header-background-color: #DCE6FF;
-  --ag-odd-row-background-color: var(--color-surface);
-  --ag-even-row-background-color: color-mix(in srgb, #DCE6FF 35%, white);
-  --ag-row-hover-color: transparent;
-  --ag-selected-row-background-color: color-mix(in srgb, var(--color-accent) 14%, white);
-  --ag-border-color: var(--color-line);
-  --ag-row-border-color: var(--color-line-soft);
-  --ag-header-foreground-color: var(--color-ink);
-  --ag-foreground-color: var(--color-ink);
-  --ag-secondary-foreground-color: var(--color-slate);
-  --ag-border-radius: 0;
-  --ag-wrapper-border-radius: 0;
-  --ag-cell-horizontal-padding: 14px;
-  --ag-header-height: 46px;
-  --ag-row-height: 56px;
-  --ag-icon-size: 14px;
-  width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-}
-.sbm-sites-grid .ag-header-cell-text {
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.sbm-sites-grid-wrap {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-/* inner_scrolls off (default): no inner scrollbar, the page scrolls. */
-[data-inner-scrolls="0"] .sbm-sites-grid .ag-body-viewport {
-  overflow-y: visible !important;
-}
-[data-inner-scrolls="0"] .sbm-sites-grid-wrap {
-  overflow: visible;
-  flex: 0 0 auto;
-}
-[data-inner-scrolls="0"] .sbm-sites-grid.ag-theme-quartz {
-  height: auto !important;
-  min-height: 160px;
-}
-/* horizontal_scrolls off (default): wrap instead of scrolling sideways. */
-[data-horizontal-scrolls="0"] .sbm-sites-grid .ag-body-viewport {
-  overflow-x: hidden !important;
-}
-[data-horizontal-scrolls="0"] .sbm-sites-grid .sbm-scol-contacts {
-  white-space: normal !important;
-  overflow-wrap: anywhere;
-}
-.sbm-sites-grid .ag-row {
-  cursor: pointer;
-  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 160ms ease, background-color 120ms ease;
-  transform-origin: center center;
-}
-@media (hover: hover) {
-  .sbm-sites-grid .ag-row:hover {
-    transform: scale(1.012);
-    z-index: 3;
-    background-color: color-mix(in srgb, var(--color-accent) 8%, white) !important;
-    box-shadow: 0 2px 10px rgba(46, 90, 247, 0.12);
-  }
-}
-.sbm-sites-grid .sbm-scol-name {
-  color: var(--color-ink-emphasis);
-  font-weight: 700;
-}
-.sbm-sites-grid .sbm-scol-open,
-.sbm-sites-grid .sbm-scol-activity,
-.sbm-sites-grid .sbm-scol-discovered,
-.sbm-sites-grid .sbm-scol-target {
-  font-variant-numeric: tabular-nums;
-  color: var(--color-slate);
-}
-.sbm-sites-grid .sbm-scol-contacts {
-  color: var(--color-slate);
-}
-/* The one place red is allowed here: a target closure date already past.
-   Never decorative — see CLAUDE.md. */
-.sbm-sites-grid .sbm-scol-target.sbm-missed {
-  color: var(--color-danger);
-  font-weight: 700;
-}
-.sbm-sites-grid .ag-cell {
-  display: flex;
-  align-items: center;
-}
-/* Kill transparent / distracting tooltips, same as the calls grid. */
-.sbm-sites-grid .ag-tooltip,
-.sbm-sites-grid .ag-popup .ag-tooltip {
-  display: none !important;
-}
-.sbm-sites-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.sbm-sites-filters label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--color-slate);
-}
-`;
-
-/* Shared by both date filters. `max` is inclusive days-ago; null means
-   "no upper bound", which is how "Over 30 days" and "Never" are
-   expressed without a second field. */
-const DATE_WINDOWS = [
-  { id: "any", label: "Any time", test: () => true },
-  { id: "7", label: "Last 7 days", test: (days) => days !== null && days <= 7 },
-  { id: "30", label: "Last 30 days", test: (days) => days !== null && days <= 30 },
-  { id: "over30", label: "Over 30 days", test: (days) => days !== null && days > 30 },
-  { id: "none", label: "Nothing recorded", test: (days) => days === null },
-];
-
-/** Whole days between an ISO date/timestamp and today, or null if absent. */
-function daysAgo(iso) {
-  if (!iso) return null;
-  const ms = new Date(iso).getTime();
-  if (Number.isNaN(ms)) return null;
-  return -daysUntil(String(iso).slice(0, 10));
-}
 
 function contactsLabel(site) {
   const list = site.contacts ?? [];
@@ -178,47 +43,16 @@ function FilterBar({ filters, setFilters, shown, total }) {
   const set = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
   return (
     <div className="sbm-sites-filters">
-      <label>
-        Site
-        <input
-          value={filters.name}
-          onChange={(e) => set("name", e.target.value)}
-          placeholder="Search name…"
-          style={{ ...TEXT_INPUT_STYLE, minWidth: 150 }}
-        />
-      </label>
-      <label>
-        Contact
-        <input
-          value={filters.contact}
-          onChange={(e) => set("contact", e.target.value)}
-          placeholder="Search contact…"
-          style={{ ...TEXT_INPUT_STYLE, minWidth: 150 }}
-        />
-      </label>
-      <label>
-        Last activity
-        <select value={filters.activity} onChange={(e) => set("activity", e.target.value)} style={TEXT_INPUT_STYLE}>
-          {DATE_WINDOWS.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        Discovered
-        <select value={filters.discovered} onChange={(e) => set("discovered", e.target.value)} style={TEXT_INPUT_STYLE}>
-          {DATE_WINDOWS.map((w) => (
-            <option key={w.id} value={w.id}>
-              {w.label}
-            </option>
-          ))}
-        </select>
-      </label>
-      <span style={{ alignSelf: "flex-end", fontSize: 12, color: t.edge2, paddingBottom: 12 }}>
-        {shown === total ? `${total} site${total === 1 ? "" : "s"}` : `${shown} of ${total}`}
-      </span>
+      <TextFilter label="Site" value={filters.name} onChange={(v) => set("name", v)} placeholder="Search name…" />
+      <TextFilter
+        label="Contact"
+        value={filters.contact}
+        onChange={(v) => set("contact", v)}
+        placeholder="Search contact…"
+      />
+      <DateWindowFilter label="Last activity" value={filters.activity} onChange={(v) => set("activity", v)} />
+      <DateWindowFilter label="Discovered" value={filters.discovered} onChange={(v) => set("discovered", v)} />
+      <FilterCount shown={shown} total={total} />
     </div>
   );
 }
@@ -249,8 +83,8 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
     if (!rows) return null;
     const name = filters.name.trim().toLowerCase();
     const contact = filters.contact.trim().toLowerCase();
-    const activityWindow = DATE_WINDOWS.find((w) => w.id === filters.activity) ?? DATE_WINDOWS[0];
-    const discoveredWindow = DATE_WINDOWS.find((w) => w.id === filters.discovered) ?? DATE_WINDOWS[0];
+    const activityWindow = windowFor(filters.activity);
+    const discoveredWindow = windowFor(filters.discovered);
 
     return rows.filter((s) => {
       if (name && !s.name.toLowerCase().includes(name)) return false;
@@ -275,9 +109,9 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
         minWidth: 130,
         cellClass: "sbm-scol-name",
         valueGetter: (p) => p.data?.name ?? "",
-        /* The only cell renderer in the app. The unread badge can't be a
-           valueFormatter because it's a styled pill, and it's documented
-           as never-decorative — it means "new since you last posted". */
+        /* The unread badge can't be a valueFormatter because it's a styled
+           pill, and it's documented as never-decorative — it means "new
+           since you last posted". */
         cellRenderer: (p) => {
           const count = p.data?.unread_count ?? 0;
           if (count <= 0) return p.value;
@@ -411,7 +245,7 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
 
   return (
     <>
-      <style>{GRID_CSS}</style>
+      <style>{SITES_GRID_CSS}</style>
       <FilterBar filters={filters} setFilters={setFilters} shown={filtered?.length ?? 0} total={rows?.length ?? 0} />
       <Card
         style={{
@@ -425,7 +259,7 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
         }}
       >
         <div className="sbm-sites-grid-wrap">
-          <div className="sbm-sites-grid ag-theme-quartz">
+          <div className="sbm-sites-grid ag-theme-quartz" data-clickable-rows="1">
             <AgGridReact
               ref={gridRef}
               rowData={filtered}
