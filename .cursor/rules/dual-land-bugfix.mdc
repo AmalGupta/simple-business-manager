@@ -1,0 +1,16 @@
+---
+description: Jira-scoped branches; dual MRs into release (UAT) and develop (dev).
+alwaysApply: true
+---
+
+# Dual-land / branching
+
+Canonical doc: `docs/BRANCHING.md`. Skill: `dual-land-bugfix`.
+
+While a `release/*` branch is active (e.g. `release/0.0.1`):
+
+- Work on `feature/SBM-<id>-…` or `bugfix/SBM-<id>-…` — never commit directly on `develop` or `release/*`.
+- Changes that belong on UAT and dev need **two MRs**: into `release/*` (→ UAT) and into `develop` (→ dev).
+- Prefer opening those PRs over cherry-picking onto long-lived branches. Use `scripts/dual-land.sh` only as a fallback when the user asks.
+- Do not push `develop` / `release/*` unless the user asks.
+- Do not dual-land unrelated feature work onto the release train.
