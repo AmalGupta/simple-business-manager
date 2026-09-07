@@ -1,27 +1,22 @@
 import { useState } from "react";
 import { t } from "../../theme.js";
 import { postSitesBackfill, patchSite } from "../../lib/api.js";
-import { fmtShort } from "../../lib/dates.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
-
-/* Where the name came from, so "Valid / Not valid" is a judgement on
-   evidence rather than on a bare string. Populated for sites the pipeline
-   discovered (migration 0028); the original seeded roster and hand-added
-   sites have no originating call and say so. */
-function provenanceLabel(site) {
-  if (!site.discovered_from_call_id) return "No originating call";
-  const caller = site.discovered_from_caller_name || "Unknown caller";
-  const date = fmtShort(site.discovered_from_call_date);
-  return date ? `${caller} · ${date}` : caller;
-}
+import { SitesReviewGrid } from "./SitesReviewGrid.jsx";
 
 /* ------------------------------------------------------------------
    Site review — reached via "Show unconfirmed sites" below Tile 3.
    Every site (discovered by the main extraction or the Haiku site scan),
-   with a Valid / Not valid toggle. Changes are local until "Update
-   confirmed sites" — deliberately batched rather than saving per-toggle,
-   so reviewing a dozen sites is a dozen taps, not a dozen round trips.
+   with a Valid / Not valid decision per row. Changes are local until
+   "Update confirmed sites" — deliberately batched rather than saving
+   per-toggle, so reviewing a dozen sites is a dozen taps, not a dozen
+   round trips.
+
+   The rows themselves are a sortable, filterable grid (SitesReviewGrid);
+   this view owns the pending decisions, the batched save and the scan,
+   and shows each site's originating caller and call date so the decision
+   is a judgement on evidence rather than on a bare string.
    ------------------------------------------------------------------ */
 export function SitesReviewView({ sites, onBack, onSaved }) {
   const [pending, setPending] = useState(() => Object.fromEntries(sites.map((s) => [s.id, s.is_confirmed])));
@@ -49,7 +44,8 @@ export function SitesReviewView({ sites, onBack, onSaved }) {
     }
   };
 
-  const dirty = sites.some((s) => pending[s.id] !== s.is_confirmed);
+  const changed = sites.filter((s) => pending[s.id] !== s.is_confirmed);
+  const dirty = changed.length > 0;
 
   const setChoice = (id, value) => {
     setSaved(false);
@@ -59,7 +55,6 @@ export function SitesReviewView({ sites, onBack, onSaved }) {
   const update = async () => {
     setSaving(true);
     try {
-      const changed = sites.filter((s) => pending[s.id] !== s.is_confirmed);
       await Promise.all(changed.map((s) => patchSite(s.id, { is_confirmed: pending[s.id] })));
       await onSaved();
       setSaved(true);
@@ -69,18 +64,6 @@ export function SitesReviewView({ sites, onBack, onSaved }) {
       setSaving(false);
     }
   };
-
-  const choiceButtonStyle = (active, kind) => ({
-    flex: 1,
-    padding: "8px 0",
-    border: `1px solid ${active ? (kind === "Y" ? t.accent : t.putty) : t.frost}`,
-    borderRadius: t.radiusButton,
-    background: active ? (kind === "Y" ? t.accent : t.puttyBg) : t.white,
-    color: active ? (kind === "Y" ? t.white : t.putty) : t.edge2,
-    fontSize: 13,
-    fontWeight: 600,
-    cursor: "pointer",
-  });
 
   return (
     <div>
@@ -114,36 +97,25 @@ export function SitesReviewView({ sites, onBack, onSaved }) {
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No sites yet.</p>
         </Card>
       ) : (
-        <Card style={{ marginBottom: 12 }}>
-          {sites.map((s) => (
-            <div
-              key={s.id}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 12,
-                padding: "10px 0",
-                borderTop: `1px solid ${t.frost}`,
-              }}
-            >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 14, color: t.edge }}>{s.name}</div>
-                <div style={{ fontSize: 12, color: t.edge2, marginTop: 2 }}>{provenanceLabel(s)}</div>
-              </div>
-              <div style={{ display: "flex", gap: 6, width: 160 }}>
-                <button onClick={() => setChoice(s.id, "Y")} style={choiceButtonStyle(pending[s.id] === "Y", "Y")}>
-                  Valid
-                </button>
-                <button onClick={() => setChoice(s.id, "N")} style={choiceButtonStyle(pending[s.id] === "N", "N")}>
-                  Not valid
-                </button>
-              </div>
-            </div>
-          ))}
-        </Card>
+        <SitesReviewGrid sites={sites} pending={pending} onChoose={setChoice} />
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      {/* Sticky, because the whole point of batching is to decide many rows
+          before saving — and with the backlog this screen carries, a button
+          at the bottom of the page would be hundreds of rows below the one
+          you just marked. */}
+      <div
+        style={{
+          position: "sticky",
+          bottom: 0,
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "12px 0",
+          background: t.pane,
+          borderTop: dirty ? `1px solid ${t.frost}` : "1px solid transparent",
+        }}
+      >
         <button
           onClick={update}
           disabled={!dirty || saving}
@@ -159,7 +131,11 @@ export function SitesReviewView({ sites, onBack, onSaved }) {
             opacity: !dirty || saving ? 0.5 : 1,
           }}
         >
-          {saving ? "Updating…" : "Update confirmed sites"}
+          {saving
+            ? "Updating…"
+            : dirty
+              ? `Update ${changed.length} site${changed.length === 1 ? "" : "s"}`
+              : "Update confirmed sites"}
         </button>
         {saved && !dirty && <span style={{ fontSize: 13, color: t.edge2 }}>Updated.</span>}
       </div>
