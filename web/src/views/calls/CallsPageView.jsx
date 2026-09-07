@@ -85,7 +85,15 @@ function filterKey(filters) {
  * design — its key space is the number of filter states a person actually
  * visits in a session (small, self-bounding), not the number of calls.
  */
-export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChanged }) {
+export function CallsPageView({
+  onBack,
+  onToggle,
+  onPark,
+  busyIds,
+  onCallsChanged,
+  innerScrolls = false,
+  horizontalScrolls = false,
+}) {
   const [rows, setRows] = useState(null);
   const [total, setTotal] = useState(0);
   const [pageIndex, setPageIndex] = useState(0);
@@ -175,6 +183,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
   }, [rows]);
 
   useEffect(() => {
+    if (!innerScrolls) return undefined;
+
     const html = document.documentElement;
     const body = document.body;
     const mq = window.matchMedia("(max-width: 640px)");
@@ -280,7 +290,7 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
       restore();
       if (locked) window.scrollTo(0, scrollY);
     };
-  }, []);
+  }, [innerScrolls]);
 
   useEffect(() => {
     fetchCallCallers(true)
@@ -399,10 +409,10 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
       style={{
         display: "flex",
         flexDirection: "column",
-        height: "100%",
+        height: innerScrolls ? "100%" : undefined,
         minHeight: 0,
         gap: 10,
-        overflow: "hidden",
+        overflow: innerScrolls ? "hidden" : "visible",
       }}
     >
       <div style={{ flexShrink: 0, position: "sticky", top: 0, zIndex: 2, background: t.pane }}>
@@ -506,6 +516,8 @@ export function CallsPageView({ onBack, onToggle, onPark, busyIds, onCallsChange
             rows={rows ?? []}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            innerScrolls={innerScrolls}
+            horizontalScrolls={horizontalScrolls}
             serverPagination={{
               total,
               offset: serverOffset,

@@ -74,6 +74,34 @@ const GRID_CSS = `
   scrollbar-width: thin;
   scrollbar-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-line)) transparent;
 }
+/* customization.inner_scrolls off (default): no inner vertical scrollbar — page scrolls */
+[data-inner-scrolls="0"] .sbm-calls-grid .ag-grid-viewport {
+  overflow-y: visible !important;
+  overflow-x: hidden !important;
+}
+[data-inner-scrolls="0"] .sbm-calls-grid-wrap {
+  overflow: visible;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+[data-inner-scrolls="0"] .sbm-calls-grid.ag-theme-quartz {
+  height: auto !important;
+  min-height: 200px;
+}
+/* customization.horizontal_scrolls off (default): wrap wide cells, no sideways scroll */
+[data-horizontal-scrolls="0"] .sbm-calls-grid .ag-grid-viewport {
+  overflow-x: hidden !important;
+}
+[data-horizontal-scrolls="0"] .sbm-calls-grid .sbm-col-date,
+[data-horizontal-scrolls="0"] .sbm-calls-grid .sbm-col-type,
+[data-horizontal-scrolls="0"] .sbm-calls-grid .sbm-col-caller {
+  white-space: normal !important;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+[data-horizontal-scrolls="0"] .sbm-calls-grid .ag-cell {
+  align-items: flex-start;
+}
 .sbm-calls-grid .ag-grid-viewport::-webkit-scrollbar {
   width: 8px;
 }
@@ -104,6 +132,13 @@ const GRID_CSS = `
     scrollbar-gutter: stable;
     scrollbar-width: thin !important;
     -ms-overflow-style: auto !important;
+  }
+  [data-inner-scrolls="0"] .sbm-calls-grid .ag-grid-viewport {
+    overflow-y: visible !important;
+    -webkit-overflow-scrolling: auto;
+    overscroll-behavior-y: auto;
+    touch-action: auto;
+    scrollbar-gutter: auto;
   }
   .sbm-calls-grid .ag-grid-viewport::-webkit-scrollbar {
     display: block !important;
@@ -289,7 +324,15 @@ function pageNumbers(current, total) {
  * Viewport-filling grid: internal body scroll only, no cell tooltips,
  * mild hover zoom, light-blue header (vs home accent panel).
  */
-export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null, dimmed = false }) {
+export function CallsGrid({
+  rows,
+  selectedId,
+  onSelect,
+  serverPagination = null,
+  dimmed = false,
+  innerScrolls = false,
+  horizontalScrolls = false,
+}) {
   const gridRef = useRef(null);
   const serverMode = Boolean(serverPagination);
   const [pageSize, setPageSize] = useState(serverMode ? rows?.length || DEFAULT_PAGE_SIZE : DEFAULT_PAGE_SIZE);
@@ -353,6 +396,8 @@ export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null,
         minWidth: narrow ? 100 : 140,
         cellClass: "sbm-col-caller",
         valueGetter: (p) => p.data?.meta?.caller ?? "Unknown caller",
+        wrapText: !horizontalScrolls,
+        autoHeight: !horizontalScrolls,
       },
       {
         headerName: "Type",
@@ -363,6 +408,8 @@ export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null,
         cellClass: "sbm-col-type",
         valueGetter: (p) => p.data?.meta?.entryTypeLabel ?? "Voice Call",
         comparator: (a, b) => (a || "").localeCompare(b || ""),
+        wrapText: !horizontalScrolls,
+        autoHeight: !horizontalScrolls,
       },
     ];
     if (!narrow) {
@@ -379,7 +426,7 @@ export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null,
       });
     }
     return cols;
-  }, [narrow, serverMode, serverPagination?.offset]);
+  }, [narrow, serverMode, serverPagination?.offset, horizontalScrolls]);
 
   const defaultColDef = useMemo(
     () => ({
@@ -472,9 +519,9 @@ export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null,
     <Card
       style={{
         padding: 0,
-        overflow: "hidden",
+        overflow: innerScrolls ? "hidden" : "visible",
         marginBottom: 0,
-        flex: "1 1 auto",
+        flex: innerScrolls ? "1 1 auto" : "0 0 auto",
         minHeight: 0,
         display: "flex",
         flexDirection: "column",
@@ -500,7 +547,9 @@ export function CallsGrid({ rows, selectedId, onSelect, serverPagination = null,
             paginationPageSize={pageSize}
             suppressPaginationPanel
             rowHeight={narrow ? 74 : 64}
-            alwaysShowVerticalScroll={narrow}
+            alwaysShowVerticalScroll={innerScrolls && narrow}
+            suppressHorizontalScroll={!horizontalScrolls}
+            domLayout={innerScrolls ? "normal" : "autoHeight"}
             animateRows={false}
             suppressCellFocus
             enableBrowserTooltips={false}
