@@ -14,7 +14,7 @@ Local D1 (`--local`, under `.wrangler/state/`) is a completely separate SQLite f
 
 1. `git status` — confirm you know what's already uncommitted and whether it's yours.
 2. If the change is nontrivial, tag the current tip first: `git tag -a pre-<short-description> -m "..."` and `git push origin <tag>` — a cheap rollback anchor. (Example from this repo: `pre-workflow-management`.)
-3. Cut a branch for the work: `git checkout -b feature/<name>`. Don't build directly on `develop`.
+3. Cut a Jira-scoped branch — see `docs/BRANCHING.md` (`feature/SBM-<id>-…` or `bugfix/SBM-<id>-…`). Don't build directly on `develop` or `release/*`. While `release/*` is active, open dual MRs into `release/*` (UAT) and `develop` (dev).
 
 ## Local verification loop
 
@@ -69,12 +69,18 @@ wrangler d1 migrations apply sbm-dev --remote
 Then deploy:
 
 ```bash
-pnpm run deploy
+# From develop tip → sbm-pipeline (dev)
+pnpm run deploy --yes
+
+# From release/* tip → sbm-pipeline-uat (UAT)
+pnpm run deploy uat --yes
 ```
+
+CI mirrors that mapping on push (see `docs/BRANCHING.md`). Still use `pnpm run deploy`, not `pnpm deploy`.
 
 **Not `pnpm deploy`.** `pnpm` has its own built-in `deploy` subcommand (for publishing a package to a directory) that shadows the `"deploy"` script in `package.json` and fails with `ERR_PNPM_NOTHING_TO_DEPLOY`. Always `pnpm run deploy` (equivalently `npx pnpm run deploy` if `pnpm` isn't on PATH).
 
-`pnpm run deploy` itself runs `pnpm build && wrangler deploy` — see `package.json`.
+`pnpm run deploy` itself runs typecheck, build, optional migrate, and `wrangler deploy` — see `scripts/deploy.sh` / `package.json`.
 
 ## Verify after deploying
 

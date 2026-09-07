@@ -25,6 +25,9 @@ usage() {
   cat <<'EOF'
 Land commit(s) from a release/* branch onto develop (FF or cherry-pick).
 
+  Prefer dual MRs (docs/BRANCHING.md) for normal work. This script is the
+  cherry-pick/FF fallback when the user asks to dual-land commits.
+
   scripts/dual-land.sh <commit>... [--from release/0.0.1] [--to develop] [--push]
 
 Defaults: --from = current release/* (else newest local release/*); --to = develop.

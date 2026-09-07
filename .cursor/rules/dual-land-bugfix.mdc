@@ -1,12 +1,16 @@
 ---
-description: Bugfixes during release/UAT must land on both release/* and develop.
+description: Jira-scoped branches; dual MRs into release (UAT) and develop (dev).
 alwaysApply: true
 ---
 
-# Dual-land bugfixes
+# Dual-land / branching
 
-While a `release/*` branch is active (e.g. `release/0.0.1`), bugfixes and hotfixes must land on **both** that release branch and `develop`.
+Canonical doc: `docs/BRANCHING.md`. Skill: `dual-land-bugfix`.
 
-- Prefer committing on `release/*`, then run `scripts/dual-land.sh <sha>...` onto `develop` (see skill `dual-land-bugfix`).
-- Do not push either branch unless the user asks.
-- Do not dual-land unrelated feature work.
+While a `release/*` branch is active (e.g. `release/0.0.1`):
+
+- Work on `feature/SBM-<id>-…` or `bugfix/SBM-<id>-…` — never commit directly on `develop` or `release/*`.
+- Changes that belong on UAT and dev need **two MRs**: into `release/*` (→ UAT) and into `develop` (→ dev).
+- Prefer opening those PRs over cherry-picking onto long-lived branches. Use `scripts/dual-land.sh` only as a fallback when the user asks.
+- Do not push `develop` / `release/*` unless the user asks.
+- Do not dual-land unrelated feature work onto the release train.
