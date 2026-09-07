@@ -3,7 +3,9 @@
 
 import {
   deleteCallById,
+  deleteCallCascadeById,
   findOrCreateCaller,
+  getCallByDriveFileId,
   insertCall,
   insertSkippedCall,
   setAppSetting,
@@ -26,6 +28,13 @@ import { submitRecording } from "./sarvam";
 const SUBREQUESTS_PER_FILE_EST = 8;
 /** Workers Free allows 50 subrequests/invocation; leave headroom for listing + setup. */
 const DEFAULT_SUBREQUEST_BUDGET = 45;
+
+/**
+ * TEMP: when false, files already in D1 (same drive_file_id) are re-ingested
+ * and overwrite prior call rows instead of being skipped. Turn back on once
+ * the reprocess pass is done.
+ */
+const SKIP_EXISTING_DRIVE_FILES = false;
 
 function subrequestBudget(env: Env): number {
   const raw = env.DRIVE_POLL_SUBREQUEST_BUDGET?.trim();
@@ -65,6 +74,7 @@ export interface DrivePollIngested {
   clientName: string;
   archived: boolean;
   skipped: boolean;
+  overwritten: boolean;
 }
 
 export interface DrivePollResult {
@@ -117,14 +127,14 @@ async function loadKnownDriveFileIds(db: D1Database): Promise<Set<string>> {
   return new Set((results ?? []).map((r) => r.id));
 }
 
-/** Page Drive (modifiedTime desc) until we have `limit` not-yet-ingested files. */
-async function pickNewFiles(
+/** Page Drive (modifiedTime desc) until we have `limit` candidate files. */
+async function pickCandidateFiles(
   env: Env,
   folderIdValue: string,
   known: Set<string>,
   limit: number
 ): Promise<{ candidates: DriveFileListItem[]; scanned: number; skippedExisting: number }> {
-  const fresh: DriveFileListItem[] = [];
+  const collected: DriveFileListItem[] = [];
   let scanned = 0;
   let skippedExisting = 0;
   let pageToken: string | undefined;
@@ -137,23 +147,23 @@ async function pickNewFiles(
       orderBy: "modifiedTime desc",
       fields: "nextPageToken,files(id,name,mimeType,modifiedTime,size)",
     });
-    let pageUnknowns = 0;
+    let pageKept = 0;
     for (const file of page.files) {
       scanned += 1;
-      if (known.has(file.id)) {
+      if (SKIP_EXISTING_DRIVE_FILES && known.has(file.id)) {
         skippedExisting += 1;
         continue;
       }
-      pageUnknowns += 1;
-      fresh.push(file);
+      pageKept += 1;
+      collected.push(file);
     }
-    // Newest-first: an all-known tip page means we're caught up.
-    if (pageUnknowns === 0 && fresh.length === 0) break;
+    // When dedup is on: an all-known tip page means we're caught up.
+    if (SKIP_EXISTING_DRIVE_FILES && pageKept === 0 && collected.length === 0) break;
     pageToken = page.nextPageToken;
-  } while (pageToken && fresh.length < limit);
+  } while (pageToken && collected.length < limit);
 
-  fresh.sort((a, b) => fileSortKeyMs(b) - fileSortKeyMs(a));
-  return { candidates: fresh.slice(0, limit), scanned, skippedExisting };
+  collected.sort((a, b) => fileSortKeyMs(b) - fileSortKeyMs(a));
+  return { candidates: collected.slice(0, limit), scanned, skippedExisting };
 }
 
 async function reportProgress(env: Env, progress: DrivePollProgress): Promise<void> {
@@ -179,6 +189,21 @@ async function rollbackPreSubmitIngest(env: Env, callId: string, r2Key: string |
   }
 }
 
+/** Drop prior D1+R2 rows for this Drive file so re-ingest can overwrite. */
+async function overwriteExistingDriveCall(env: Env, driveFileId: string): Promise<boolean> {
+  const existing = await getCallByDriveFileId(env.DB, driveFileId);
+  if (!existing) return false;
+  const deleted = await deleteCallCascadeById(env.DB, existing.id);
+  if (deleted?.r2_key) {
+    try {
+      await env.VOICE_NOTES.delete(deleted.r2_key);
+    } catch (err) {
+      console.error(`[drive-poll] overwrite R2 delete ${deleted.r2_key}:`, String(err));
+    }
+  }
+  return true;
+}
+
 async function ingestOne(
   env: Env,
   file: DriveFileListItem,
@@ -194,6 +219,7 @@ async function ingestOne(
     phone: parsed.phone,
   });
 
+  const overwritten = await overwriteExistingDriveCall(env, file.id);
   const callId = crypto.randomUUID();
   const callTime = parsed.recordedAt ?? new Date().toISOString();
 
@@ -236,6 +262,7 @@ async function ingestOne(
       clientName: caller.name,
       archived: true,
       skipped: true,
+      overwritten,
     };
   }
 
@@ -285,14 +312,15 @@ async function ingestOne(
     clientName: caller.name,
     archived: true,
     skipped: false,
+    overwritten,
   };
 }
 
 /**
- * Scan the Drive Calls folder (newest first), skip already-ingested
- * drive_file_id rows, transfer up to `limit` files into R2 + STT, then
- * move each successful file into the Archive folder (or the Spam folder
- * for a known-Spam caller / Family caller — see ingestOne).
+ * Scan the Drive Calls folder (newest first). When SKIP_EXISTING_DRIVE_FILES
+ * is false (current), already-ingested drive_file_id rows are re-read and
+ * overwrite D1. Otherwise known ids are skipped. Successful files move to
+ * Archive (or Spam for known-spam / Family — see ingestOne).
  */
 export async function pollDriveCalls(
   env: Env,
@@ -322,8 +350,8 @@ export async function pollDriveCalls(
     const callsId = callsFolderId(env);
     const archiveId = archiveFolderId(env);
     const spamId = spamFolderId(env); // null until GOOGLE_DRIVE_SPAM_FOLDER_ID is set — see spamFolderId
-    const known = await loadKnownDriveFileIds(env.DB);
-    const { candidates, scanned, skippedExisting } = await pickNewFiles(env, callsId, known, limit);
+    const known = SKIP_EXISTING_DRIVE_FILES ? await loadKnownDriveFileIds(env.DB) : new Set<string>();
+    const { candidates, scanned, skippedExisting } = await pickCandidateFiles(env, callsId, known, limit);
 
     progress.scanned = scanned;
     progress.skippedExisting = skippedExisting;
@@ -331,8 +359,8 @@ export async function pollDriveCalls(
     progress.current = null;
     progress.message =
       candidates.length === 0
-        ? "No new recordings in this cycle."
-        : `Ingesting ${candidates.length} of up to ${limit}…`;
+        ? "No recordings in this cycle."
+        : `Ingesting ${candidates.length} of up to ${limit}${SKIP_EXISTING_DRIVE_FILES ? "" : " (re-read overwrites D1)"}…`;
     await reportProgress(env, progress);
 
     const result: DrivePollResult = {
@@ -374,10 +402,11 @@ export async function pollDriveCalls(
     }
 
     const archived = result.ingested.filter((r) => r.archived).length;
+    const overwritten = result.ingested.filter((r) => r.overwritten).length;
     const summary =
       limit < requested
-        ? `ingested ${result.ingested.length}/${limit} (cap ${requested} — subrequest budget); archived ${archived}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`
-        : `ingested ${result.ingested.length}/${limit}; archived ${archived}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`;
+        ? `ingested ${result.ingested.length}/${limit} (cap ${requested} — subrequest budget); archived ${archived}; overwritten ${overwritten}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`
+        : `ingested ${result.ingested.length}/${limit}; archived ${archived}; overwritten ${overwritten}; scanned ${scanned}; skipped ${skippedExisting}; errors ${result.errors.length}`;
     progress.status = "done";
     progress.phase = "done";
     progress.current = null;
