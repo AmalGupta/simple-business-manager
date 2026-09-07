@@ -446,6 +446,11 @@ export async function deleteCallCascadeById(db: D1Database, callId: string): Pro
   const todoIds = (todoRows ?? []).map((r) => r.id);
 
   const stmts = [];
+  // Clear FKs on other rows that point at this call before deleting it.
+  stmts.push(db.prepare(`UPDATE todos SET closed_by_call_id = NULL WHERE closed_by_call_id = ?`).bind(callId));
+  stmts.push(
+    db.prepare(`UPDATE installation_updates SET voice_note_call_id = NULL WHERE voice_note_call_id = ?`).bind(callId)
+  );
   for (const todoId of todoIds) {
     stmts.push(db.prepare(`DELETE FROM missed_deadlines WHERE todo_id = ?`).bind(todoId));
     stmts.push(db.prepare(`DELETE FROM todo_voice_notes WHERE todo_id = ?`).bind(todoId));
@@ -455,10 +460,6 @@ export async function deleteCallCascadeById(db: D1Database, callId: string): Pro
   stmts.push(db.prepare(`DELETE FROM commitments WHERE call_id = ?`).bind(callId));
   stmts.push(db.prepare(`DELETE FROM call_sites WHERE call_id = ?`).bind(callId));
   stmts.push(db.prepare(`DELETE FROM transcripts WHERE r2_key = ?`).bind(call.r2_key));
-  stmts.push(db.prepare(`UPDATE escalations SET closed_by_call_id = NULL WHERE closed_by_call_id = ?`).bind(callId));
-  stmts.push(
-    db.prepare(`UPDATE installation_updates SET voice_note_call_id = NULL WHERE voice_note_call_id = ?`).bind(callId)
-  );
   stmts.push(db.prepare(`DELETE FROM calls WHERE id = ?`).bind(callId));
   await db.batch(stmts);
   return call;
