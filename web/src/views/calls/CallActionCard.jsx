@@ -79,11 +79,13 @@ export function CallActionCard({
                   staffRoster={staffRoster}
                   currentUser={currentUser}
                   onAssign={onAssignTodo}
-                />
-                <TodoVoiceNoteButton
-                  todoId={todo.id}
-                  existingNote={voiceNotesByTodoId?.get(todo.id)}
-                  onUpload={onAddVoiceNote}
+                  extraActions={
+                    <TodoVoiceNoteButton
+                      todoId={todo.id}
+                      existingNote={voiceNotesByTodoId?.get(todo.id)}
+                      onUpload={onAddVoiceNote}
+                    />
+                  }
                 />
               </div>
             </div>
