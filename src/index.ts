@@ -28,6 +28,9 @@ import {
   handleGetConfirmedSites,
   handleGetSitesAttention,
   handleGetSiteTeam,
+  handleGetSiteContacts,
+  handlePostSiteContacts,
+  handleDeleteSiteContact,
   handlePatchSite,
   handlePatchTodo,
   handlePostEscalation,
@@ -269,6 +272,25 @@ export default {
     if (siteMatch && request.method === "PATCH") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handlePatchSite(request, env, siteMatch[1]);
+    }
+
+    // Site contacts (caller_sites, migration 0022) — must come before the
+    // /api/sites/:id PATCH match above would ever see them; distinct path
+    // segment, so ordering here only matters relative to /team below.
+    const siteContactsMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/contacts$/);
+    if (siteContactsMatch && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetSiteContacts(request, env, siteContactsMatch[1]);
+    }
+    if (siteContactsMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostSiteContacts(request, env, siteContactsMatch[1]);
+    }
+
+    const siteContactMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/contacts\/([^/]+)$/);
+    if (siteContactMatch && request.method === "DELETE") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleDeleteSiteContact(request, env, siteContactMatch[1], siteContactMatch[2]);
     }
 
     const siteTeamMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/team$/);
