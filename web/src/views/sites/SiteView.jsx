@@ -2,14 +2,23 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { t } from "../../theme.js";
 import { fmtDate, daysUntil } from "../../lib/dates.js";
 import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
-import { fetchSiteTeam, fetchSiteTimeline, patchSite, postSiteTeamMember, postSiteVoiceNote } from "../../lib/api.js";
+import {
+  fetchSiteTeam,
+  fetchSiteTimeline,
+  fetchSiteContacts,
+  patchSite,
+  postSiteTeamMembers,
+  postSiteContacts,
+  deleteSiteContact,
+  postSiteVoiceNote,
+} from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
 import { SiteMediaUploadRow } from "./SiteMediaUploadRow.jsx";
 import { MyTaskBanner } from "./MyTaskBanner.jsx";
 import { SiteTimeline } from "./SiteTimeline.jsx";
-import { AssignTeamModal } from "./AssignTeamModal.jsx";
+import { AddPeopleModal } from "./AddPeopleModal.jsx";
 import { WorkTimelinePopup } from "./WorkTimelinePopup.jsx";
 
 /* ------------------------------------------------------------------
@@ -58,6 +67,7 @@ export function SiteView({
   const [editingDetails, setEditingDetails] = useState(autoEditDetails && !hasDetails);
 
   const [team, setTeam] = useState(null);
+  const [contacts, setContacts] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [timeline, setTimeline] = useState(null);
 
@@ -80,6 +90,28 @@ export function SiteView({
       .catch((err) => {
         console.error("[sbm] failed to load site team", err);
         if (!cancelled) setTeam([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [siteRecord?.id]);
+
+  /* Contacts are admin-only to manage, but the read endpoint is scoped
+     the same way the team roster is, so staff viewing their own site
+     see them too. */
+  useEffect(() => {
+    if (!siteRecord?.id) {
+      setContacts([]);
+      return undefined;
+    }
+    let cancelled = false;
+    fetchSiteContacts(siteRecord.id)
+      .then((data) => {
+        if (!cancelled) setContacts(data);
+      })
+      .catch((err) => {
+        console.error("[sbm] failed to load site contacts", err);
+        if (!cancelled) setContacts([]);
       });
     return () => {
       cancelled = true;
@@ -119,9 +151,21 @@ export function SiteView({
     }
   };
 
-  const addTeamMember = async (userId) => {
-    const member = await postSiteTeamMember(siteRecord.id, userId);
-    setTeam((current) => [...(current ?? []), member]);
+  /* Both take arrays — the modal is multi-select. The staff response
+     splits into added/skipped (skipped = already on the roster, which
+     the modal also greys out), so only the new rows get appended. */
+  const addStaff = async (userIds) => {
+    const { added } = await postSiteTeamMembers(siteRecord.id, userIds);
+    setTeam((current) => [...(current ?? []), ...added]);
+  };
+
+  // Contacts endpoints return the full resulting list, so no merge needed.
+  const addContacts = async (callerIds) => {
+    setContacts(await postSiteContacts(siteRecord.id, callerIds));
+  };
+
+  const removeContact = async (callerId) => {
+    setContacts(await deleteSiteContact(siteRecord.id, callerId));
   };
 
   const handleAssignTodo = async (todoId, staffId) => {
@@ -291,7 +335,7 @@ export function SiteView({
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {team && team.length > 0 ? "Add more members" : "Assign team"}
+                  {team && team.length > 0 ? "Add more people" : "Add people"}
                 </button>
               ) : undefined
             }
@@ -309,6 +353,44 @@ export function SiteView({
                 <span style={{ fontSize: 13, color: t.edge2 }}>{m.contact_number || "no phone on file"}</span>
               </div>
             ))
+          )}
+
+          {/* Contacts sit inside the same card as the team, under their
+              own label: they answer "who is this site for", where the
+              roster above answers "who is working on it". Only rendered
+              once something is linked — an empty second list on every
+              site would be noise. */}
+          {contacts && contacts.length > 0 && (
+            <div style={{ marginTop: 14 }}>
+              <TileLabel>Contacts</TileLabel>
+              {contacts.map((c) => (
+                <div
+                  key={c.caller_id}
+                  style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, ...TILE_ROW_STYLE }}
+                >
+                  <span style={{ fontSize: 14, color: t.edge, minWidth: 0 }}>{c.name}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                    <span style={{ fontSize: 13, color: t.edge2 }}>{c.phone || "no phone"}</span>
+                    {canManage && (
+                      <button
+                        onClick={() => removeContact(c.caller_id)}
+                        aria-label={`Remove ${c.name}`}
+                        style={{
+                          border: "none",
+                          background: "none",
+                          padding: 2,
+                          color: t.edge2,
+                          fontSize: 12,
+                          cursor: "pointer",
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </Card>
       )}
@@ -337,7 +419,15 @@ export function SiteView({
         />
       </div>
 
-      {showAssignModal && <AssignTeamModal onClose={() => setShowAssignModal(false)} onAdd={addTeamMember} />}
+      {showAssignModal && (
+        <AddPeopleModal
+          onClose={() => setShowAssignModal(false)}
+          onAddStaff={addStaff}
+          onAddContacts={addContacts}
+          existingStaffUserIds={(team ?? []).map((m) => m.user_id).filter(Boolean)}
+          existingContactIds={(contacts ?? []).map((c) => c.caller_id)}
+        />
+      )}
       {showWorkTimeline && (
         <WorkTimelinePopup site={siteRecord} onClose={() => setShowWorkTimeline(false)} onAssigned={onTasksChanged} />
       )}
