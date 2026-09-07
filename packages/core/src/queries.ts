@@ -2203,8 +2203,15 @@ export interface ConfirmedSiteRow {
   name: string;
   open_count: number;
   target_closure_date: string | null;
+  /** Most recent entry of any kind on this site — see the activity CTE below. NULL for a site nothing has happened on yet. */
+  last_activity_at: string | null;
+  /** Who the site was first heard from, joined through sites.discovered_from_call_id (migration 0028). */
+  discovered_from_caller_name: string | null;
+  discovered_from_call_date: string | null;
   /** Count of the other role's timeline entries since the viewer's own last one on this site — see getUnreadActivityCounts. Merged in by the handler, not this query. */
   unread_count?: number;
+  /** Linked Callers Directory rows (caller_sites). Merged in by the handler via getSiteContactsBySiteIds. */
+  contacts?: SiteContactRow[];
 }
 
 /**
@@ -2235,14 +2242,47 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
          SELECT site_id FROM site_tasks WHERE assigned_to_user_id = ?
        )`
     : "";
+  /* `activity` is the same four sources getSiteTimeline composes and
+     getUnreadActivityCounts unions — calls linked via call_sites,
+     site_media, site_team_members, site_edits. Two deliberate differences
+     from the unread version:
+
+     - No `uploaded_by_user_id IS NOT NULL` filter on the calls branch.
+       That predicate is there because an unread count has to attribute an
+       entry to an actor; "when did anything last happen here" doesn't, and
+       keeping it would make a Drive-ingested call with no uploader invisible
+       to this column.
+     - Soft-deleted calls are excluded. A spam call is hidden everywhere else
+       in the app, so it must not be what makes a site look recently active. */
   const stmt = db.prepare(
-    `SELECT sites.id AS id, sites.name AS name, sites.target_closure_date AS target_closure_date,
-            COALESCE(SUM(CASE WHEN todos.status = 'open' THEN 1 ELSE 0 END), 0) AS open_count
+    `WITH activity AS (
+       SELECT call_sites.site_id AS site_id, calls.recorded_at AS created_at
+       FROM call_sites JOIN calls ON calls.id = call_sites.call_id
+       WHERE calls.deleted_at IS NULL
+       UNION ALL
+       SELECT site_id, created_at FROM site_media
+       UNION ALL
+       SELECT site_id, created_at FROM site_team_members
+       UNION ALL
+       SELECT site_id, created_at FROM site_edits
+     ),
+     last_activity AS (
+       SELECT site_id, MAX(created_at) AS last_at FROM activity GROUP BY site_id
+     )
+     SELECT sites.id AS id, sites.name AS name, sites.target_closure_date AS target_closure_date,
+            COALESCE(SUM(CASE WHEN todos.status = 'open' THEN 1 ELSE 0 END), 0) AS open_count,
+            last_activity.last_at AS last_activity_at,
+            callers.name AS discovered_from_caller_name,
+            substr(COALESCE(disc.recording_date, disc.recorded_at), 1, 10) AS discovered_from_call_date
      FROM sites
      LEFT JOIN call_sites ON call_sites.site_id = sites.id
      LEFT JOIN todos ON todos.call_id = call_sites.call_id
+     LEFT JOIN last_activity ON last_activity.site_id = sites.id
+     LEFT JOIN calls disc ON disc.id = sites.discovered_from_call_id
+     LEFT JOIN callers ON callers.id = disc.client_id
      WHERE ${confirmedClause} ${scoped}
-     GROUP BY sites.id, sites.name, sites.target_closure_date
+     GROUP BY sites.id, sites.name, sites.target_closure_date, last_activity.last_at,
+              callers.name, substr(COALESCE(disc.recording_date, disc.recorded_at), 1, 10)
      ORDER BY sites.name ASC`
   );
   const { results } = await (forUserId ? stmt.bind(forUserId, forUserId) : stmt).all<ConfirmedSiteRow>();
