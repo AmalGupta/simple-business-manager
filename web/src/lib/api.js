@@ -210,6 +210,17 @@ export async function fetchMe() {
   return res.json();
 }
 
+export async function patchMyCustomization(patch) {
+  const res = await sessionFetch("/api/me/customization", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `PATCH /api/me/customization → ${res.status}`);
+  return body;
+}
+
 export async function postLogin(name, pin) {
   /* Browser login uses a real form POST (LoginScreen) so Set-Cookie is
      applied reliably. Keep this for programmatic callers (e2e/api). */

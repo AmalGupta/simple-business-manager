@@ -434,3 +434,12 @@ CREATE INDEX idx_calls_effective_date
   ON calls(COALESCE(recording_date, substr(recorded_at, 1, 10)));
 CREATE INDEX idx_calls_deleted_status ON calls(deleted_at, stt_status);
 
+-- migration 0026: per-user product customization (UI prefs)
+CREATE TABLE user_settings (
+  user_id    TEXT NOT NULL REFERENCES users(id),
+  key        TEXT NOT NULL,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, key)
+);
+

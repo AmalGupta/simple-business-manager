@@ -18,13 +18,21 @@ import {
   incrementFailedLogin,
   listStaffAndSelf,
   listStaffRoster,
+  listUserSettings,
   resetFailedLogin,
+  resolveCustomization,
+  canSetCustomizationKey,
+  encodeCustomizationBool,
+  CUSTOMIZATION_PREFS,
   revokeAllSessionsForUser,
   revokeSession,
+  setUserSetting,
   updateUserPhone,
   updateUserPin,
   type SessionWithUser,
   type User,
+  type UserCustomization,
+  type CustomizationKey,
 } from "@sbm/core";
 import {
   clearSessionCookieHeader,
@@ -167,7 +175,58 @@ export async function handleLogoutRedirect(request: Request, env: Env): Promise<
 export async function handleMe(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  return json({ id: session.user_id, name: session.user_name, role: session.user_role, phone: session.user_phone });
+  const rows = await listUserSettings(env.DB, session.user_id);
+  const customization = resolveCustomization(rows);
+  return json({
+    id: session.user_id,
+    name: session.user_name,
+    role: session.user_role,
+    phone: session.user_phone,
+    customization,
+  });
+}
+
+/**
+ * PATCH /api/me/customization — partial update of known preference keys.
+ * Each key is role-gated via CUSTOMIZATION_PREFS; unknown keys → 400.
+ */
+export async function handlePatchCustomization(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return json({ error: "object body required" }, 400);
+  }
+  const record = body as Record<string, unknown>;
+  const keys = Object.keys(record);
+  if (keys.length === 0) return json({ error: "no preferences provided" }, 400);
+
+  const known = new Set(CUSTOMIZATION_PREFS.map((p) => p.key));
+  for (const key of keys) {
+    if (!known.has(key as CustomizationKey)) {
+      return json({ error: `unknown preference: ${key}` }, 400);
+    }
+    if (!canSetCustomizationKey(session.user_role, key)) {
+      return json({ error: "forbidden" }, 403);
+    }
+    if (typeof record[key] !== "boolean") {
+      return json({ error: `${key} must be a boolean` }, 400);
+    }
+  }
+
+  for (const key of keys) {
+    await setUserSetting(env.DB, session.user_id, key, encodeCustomizationBool(record[key] as boolean));
+  }
+
+  const rows = await listUserSettings(env.DB, session.user_id);
+  const customization: UserCustomization = resolveCustomization(rows);
+  return json({ customization });
 }
 
 /**

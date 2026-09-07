@@ -276,6 +276,35 @@ export async function setAppSetting(db: D1Database, key: string, value: string):
     .run();
 }
 
+export async function listUserSettings(
+  db: D1Database,
+  userId: string
+): Promise<{ key: string; value: string }[]> {
+  const { results } = await db
+    .prepare(`SELECT key, value FROM user_settings WHERE user_id = ?`)
+    .bind(userId)
+    .all<{ key: string; value: string }>();
+  return results ?? [];
+}
+
+export async function getUserSetting(db: D1Database, userId: string, key: string): Promise<string | null> {
+  const row = await db
+    .prepare(`SELECT value FROM user_settings WHERE user_id = ? AND key = ?`)
+    .bind(userId, key)
+    .first<{ value: string }>();
+  return row?.value ?? null;
+}
+
+export async function setUserSetting(db: D1Database, userId: string, key: string, value: string): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO user_settings (user_id, key, value, updated_at) VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+    )
+    .bind(userId, key, value)
+    .run();
+}
+
 export function parseDrivePollProgress(raw: string | null): DrivePollProgress | null {
   if (!raw) return null;
   try {
