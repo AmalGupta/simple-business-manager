@@ -322,8 +322,9 @@ export async function postResetStaffPin(id) {
 
 /* Callers Directory (migration 0021) — session-cookie only, admin/superadmin
    gated server-side, same pattern as /api/staff* above. */
-export async function fetchCallers() {
-  const res = await fetch("/api/callers");
+export async function fetchCallers({ category } = {}) {
+  const qs = category ? `?category=${encodeURIComponent(category)}` : "";
+  const res = await fetch(`/api/callers${qs}`);
   if (!res.ok) throw new Error(`GET /api/callers → ${res.status}`);
   return res.json();
 }

@@ -10,6 +10,7 @@ import {
   setCallDriveFileId,
   setCallSubmitted,
   setDrivePollProgress,
+  shouldSkipDriveIngest,
   DRIVE_POLL_LAST_AT_KEY,
   DRIVE_POLL_LAST_RESULT_KEY,
   type DrivePollProgress,
@@ -196,10 +197,10 @@ async function ingestOne(
   const callId = crypto.randomUUID();
   const callTime = parsed.recordedAt ?? new Date().toISOString();
 
-  // Family: never touch R2/Sarvam. Known-Spam: same treatment — the LLM
-  // spam-check (see stt-webhook.ts) only ever runs once per new/unknown
-  // number; a number already tagged spam is pre-filtered here from then on.
-  if (caller.category === "family" || caller.category === "spam") {
+  // Family / known-spam: never touch R2/Sarvam. Client and staff always
+  // process — shouldSkipDriveIngest is the single gate (reclassifying spam →
+  // client/staff must resume normal ingest on the next poll).
+  if (shouldSkipDriveIngest(caller.category)) {
     onStep("skip", caller.name);
     const destinationFolderId = caller.category === "family" ? archiveId : spamId;
     if (!destinationFolderId) {

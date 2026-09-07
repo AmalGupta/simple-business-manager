@@ -1,0 +1,116 @@
+/* Callers Directory table — scroll behavior follows shell data-inner-scrolls /
+   data-horizontal-scrolls (account menu Site customization). Default off:
+   page scrolls; cells wrap. Opt-in: fixed viewport with inner scroll. */
+
+.sbm-callers-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+[data-inner-scrolls="1"] .sbm-callers-page {
+  height: 100%;
+  overflow: hidden;
+}
+
+.sbm-callers-table-wrap {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+[data-inner-scrolls="1"] .sbm-callers-table-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+[data-inner-scrolls="0"] .sbm-callers-table-wrap {
+  overflow: visible;
+}
+
+[data-horizontal-scrolls="1"] .sbm-callers-table-wrap {
+  overflow-x: auto;
+}
+
+[data-horizontal-scrolls="0"] .sbm-callers-table-wrap {
+  overflow-x: hidden;
+}
+
+.sbm-callers-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-body);
+  font-size: 14px;
+  color: var(--color-ink);
+}
+
+.sbm-callers-table th {
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink);
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-line);
+  background: var(--color-surface);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.sbm-callers-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-line);
+  vertical-align: middle;
+}
+
+.sbm-callers-table tr:last-child td {
+  border-bottom: none;
+}
+
+.sbm-callers-table .sbm-callers-col-name {
+  font-weight: 600;
+  color: var(--color-ink-emphasis);
+  min-width: 120px;
+}
+
+.sbm-callers-table .sbm-callers-col-phone {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 110px;
+}
+
+.sbm-callers-table .sbm-callers-col-category {
+  width: 120px;
+}
+
+.sbm-callers-table .sbm-callers-col-link {
+  font-size: 13px;
+  color: var(--color-slate);
+  min-width: 100px;
+}
+
+[data-horizontal-scrolls="0"] .sbm-callers-table .sbm-callers-col-name,
+[data-horizontal-scrolls="0"] .sbm-callers-table .sbm-callers-col-phone,
+[data-horizontal-scrolls="0"] .sbm-callers-table .sbm-callers-col-link {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+@media (max-width: 640px) {
+  .sbm-callers-table th,
+  .sbm-callers-table td {
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .sbm-callers-table .sbm-callers-col-category {
+    width: 108px;
+  }
+}
