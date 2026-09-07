@@ -2,7 +2,7 @@ import { t } from "../../theme.js";
 import { Card } from "../../components/Card.jsx";
 import { SiteTimelineEntry } from "./SiteTimelineEntry.jsx";
 
-export function SiteTimeline({ entries, onOpenCall, canManage, staffRoster = [], onAssignTodo }) {
+export function SiteTimeline({ entries, onOpenCall, canManage, staffRoster = [], currentUser = null, onAssignTodo }) {
   if (entries === null) return <p style={{ fontSize: 13, color: t.edge2 }}>Loading…</p>;
   if (entries.length === 0) {
     return (
@@ -20,6 +20,7 @@ export function SiteTimeline({ entries, onOpenCall, canManage, staffRoster = [],
           onOpenCall={onOpenCall}
           canManage={canManage}
           staffRoster={staffRoster}
+          currentUser={currentUser}
           onAssignTodo={onAssignTodo}
         />
       ))}

@@ -13,6 +13,7 @@ import { TodoAssignControl } from "./TodoAssignControl.jsx";
    unpark or complete; open list keeps assign-first layout. */
 export function OpenTodosView({
   staffRoster,
+  currentUser = null,
   onBack,
   onOpen,
   onAssign,
@@ -115,7 +116,12 @@ export function OpenTodosView({
                     {td.call.recorded_at ? ` · ${fmtShort(td.call.recorded_at)}` : ""}
                   </button>
                   {status === "open" && onAssign ? (
-                    <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} />
+                    <TodoAssignControl
+                      todo={td}
+                      staffRoster={staffRoster}
+                      currentUser={currentUser}
+                      onAssign={onAssign}
+                    />
                   ) : null}
                 </div>
               </div>

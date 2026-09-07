@@ -213,7 +213,8 @@ export async function handleGetDashboardSummary(request: Request, env: Env): Pro
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
   const forUserId = session.user_role === "staff" ? session.user_id : null;
-  return json(await getDashboardSummary(env.DB, forUserId));
+  const viewerUserId = session.user_role === "staff" ? null : session.user_id;
+  return json(await getDashboardSummary(env.DB, forUserId, viewerUserId));
 }
 
 /**

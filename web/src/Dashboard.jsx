@@ -361,11 +361,23 @@ export default function SimpleBusinessManager() {
 
     setBusyIds((s) => new Set(s).add(todo.id));
     applyCountDelta(true);
+    setMyOpenTodos((list) => {
+      if (!list.some((t) => t.id === todo.id)) return list;
+      if (patch.status === "done" || patch.status === "snoozed") {
+        return list.filter((t) => t.id !== todo.id);
+      }
+      return list.map((t) => (t.id === todo.id ? { ...t, ...patch } : t));
+    });
     try {
       await patchTodo(todo.id, patch);
       setTodoRefreshKey((k) => k + 1);
     } catch {
       applyCountDelta(false);
+      // Restore personal-queue row when the todo came from that list
+      // (AssignedTodoRow carries client_name; CallDetail rows do not).
+      if (todo.client_name != null && (patch.status === "done" || patch.status === "snoozed")) {
+        setMyOpenTodos((list) => (list.some((t) => t.id === todo.id) ? list : [...list, todo]));
+      }
     } finally {
       setBusyIds((s) => {
         const n = new Set(s);
@@ -393,11 +405,19 @@ export default function SimpleBusinessManager() {
 
   /* Not optimistic — assignment (migration 0025: a todo can go to more than
      one staff member now) refreshes via key bump rather than a client-side
-     merge, since the server response carries the full assignees[] list. */
+     merge, since the server response carries the full assignees[] list.
+     Also refresh my_open_todos so an admin "Assign to me" shows up on the
+     personal queue tile without a full page reload. */
   const onAssignTodo = useCallback(async (todoId, userIds) => {
     try {
       await patchTodo(todoId, { assigned_to_user_ids: userIds });
       setTodoRefreshKey((k) => k + 1);
+      try {
+        const summary = await fetchDashboardSummary();
+        setMyOpenTodos(summary.my_open_todos ?? []);
+      } catch (err) {
+        console.error("[sbm] failed to refresh my open todos after assign", err);
+      }
     } catch (err) {
       throw err;
     }
@@ -559,6 +579,7 @@ export default function SimpleBusinessManager() {
         busyIds={busyIds}
         canManage={me.role !== "staff"}
         staffRoster={staffRoster}
+        currentUser={me}
         onAssign={onAssignTodo}
       />
     );
@@ -598,6 +619,7 @@ export default function SimpleBusinessManager() {
         myOpenTasks={openSiteTasks.filter((tk) => tk.site_name === view.site)}
         onTasksChanged={refreshOpenSiteTasks}
         staffRoster={staffRoster}
+        currentUser={me}
         onAssignTodo={onAssignTodo}
       />
     );
@@ -639,6 +661,7 @@ export default function SimpleBusinessManager() {
     return shell(
       <OpenTodosView
         staffRoster={staffRoster}
+        currentUser={me}
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "open-todos" } })}
         onAssign={onAssignTodo}
@@ -651,6 +674,7 @@ export default function SimpleBusinessManager() {
     return shell(
       <OpenTodosView
         staffRoster={staffRoster}
+        currentUser={me}
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "parked-todos" } })}
         onAssign={onAssignTodo}
@@ -717,6 +741,7 @@ export default function SimpleBusinessManager() {
     return shell(
       <CallsNeedingActionView
         staffRoster={staffRoster}
+        currentUser={me}
         onAssignTodo={onAssignTodo}
         onResolved={() => setCallsNeedingActionCount((n) => Math.max(0, n - 1))}
         onBack={() => setView(view.from ?? homeView)}
@@ -1003,6 +1028,20 @@ export default function SimpleBusinessManager() {
             count={callsNeedingActionCount}
             onOpen={() => setView({ name: "calls-needing-action", from: { name: "home" } })}
           />
+        )}
+        {myOpenTodos.length > 0 && (
+          <button
+            onClick={() => setView({ name: "my-open-todos", from: { name: "home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label={`My call tasks — ${myOpenTodos.length} open`}
+          >
+            <Card tile>
+              <TileLabel>My call tasks</TileLabel>
+              <div style={TILE_VALUE_ROW_STYLE}>
+                <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length}</span>
+              </div>
+            </Card>
+          </button>
         )}
         <ComplaintsTile
           refreshKey={complaintsRefreshKey}

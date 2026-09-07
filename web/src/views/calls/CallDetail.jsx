@@ -22,7 +22,17 @@ import { TodoAssignControl } from "./TodoAssignControl.jsx";
    stays single-column stacked (left column content, then todos) via
    .sbm-call-grid in Dashboard.jsx's shell() — side-by-side only from
    768px up. */
-export function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage = true, staffRoster = [], onAssign }) {
+export function CallDetail({
+  call,
+  onBack,
+  onToggle,
+  onPark,
+  busyIds,
+  canManage = true,
+  staffRoster = [],
+  currentUser = null,
+  onAssign,
+}) {
   const openTodos = call.todos.filter((td) => td.status !== "done");
   const doneTodos = call.todos.filter((td) => td.status === "done");
   const [openTranscript, setOpenTranscript] = useState(false);
@@ -214,7 +224,14 @@ export function CallDetail({ call, onBack, onToggle, onPark, busyIds, canManage 
                     busy={busyIds.has(td.id)}
                     readOnly={!canManage}
                   />
-                  {canManage && <TodoAssignControl todo={td} staffRoster={staffRoster} onAssign={onAssign} />}
+                  {canManage && (
+                    <TodoAssignControl
+                      todo={td}
+                      staffRoster={staffRoster}
+                      currentUser={currentUser}
+                      onAssign={onAssign}
+                    />
+                  )}
                 </div>
               ))}
             </Card>

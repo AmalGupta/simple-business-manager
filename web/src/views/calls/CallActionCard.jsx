@@ -14,7 +14,15 @@ import "./CallActionCard.css";
    collapsible transcript and per-todo assign + voice-note controls instead
    of a toggle/park control (this card isn't where an individual todo gets
    marked done). */
-export function CallActionCard({ call, staffRoster, onAssignTodo, onResolve, onAddVoiceNote, voiceNotesByTodoId }) {
+export function CallActionCard({
+  call,
+  staffRoster,
+  currentUser = null,
+  onAssignTodo,
+  onResolve,
+  onAddVoiceNote,
+  voiceNotesByTodoId,
+}) {
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [resolving, setResolving] = useState(false);
 
@@ -66,7 +74,12 @@ export function CallActionCard({ call, staffRoster, onAssignTodo, onResolve, onA
             <div key={todo.id} className="cna-card__todo-row">
               <p className="cna-card__todo-text">{todo.text}</p>
               <div className="cna-card__todo-controls">
-                <TodoAssignControl todo={todo} staffRoster={staffRoster} onAssign={onAssignTodo} />
+                <TodoAssignControl
+                  todo={todo}
+                  staffRoster={staffRoster}
+                  currentUser={currentUser}
+                  onAssign={onAssignTodo}
+                />
                 <TodoVoiceNoteButton
                   todoId={todo.id}
                   existingNote={voiceNotesByTodoId?.get(todo.id)}
