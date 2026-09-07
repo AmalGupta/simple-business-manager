@@ -91,12 +91,9 @@
         "GOOGLE_DRIVE_ARCHIVE_FOLDER_ID": "12v7xURXHMtL20fjOVLEzmMmXdmcCYhXg",
         "GOOGLE_DRIVE_SPAM_FOLDER_ID": "130Xhaxx3Z0G5FgjxFOBIQ5e5FBaoute8",
         "PUBLIC_BASE_URL": "https://sbm-pipeline-uat.gupta-amal01.workers.dev",
-        // 10 files/min: cron every minute × batch 10 (budget must allow ~10×8 subrequests).
+        // Batch size for UAT backfill; cron schedule inherits top-level */5 (same as dest/dev).
         "DRIVE_POLL_BATCH_SIZE": "10",
         "DRIVE_POLL_SUBREQUEST_BUDGET": "100"
-      },
-      "triggers": {
-        "crons": ["* * * * *"]
       },
       "r2_buckets": [
         { "binding": "RECORDINGS", "bucket_name": "sbm-recordings-uat" },
