@@ -1,8 +1,20 @@
 import { useState } from "react";
 import { t } from "../../theme.js";
 import { postSitesBackfill, patchSite } from "../../lib/api.js";
+import { fmtShort } from "../../lib/dates.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
+
+/* Where the name came from, so "Valid / Not valid" is a judgement on
+   evidence rather than on a bare string. Populated for sites the pipeline
+   discovered (migration 0028); the original seeded roster and hand-added
+   sites have no originating call and say so. */
+function provenanceLabel(site) {
+  if (!site.discovered_from_call_id) return "No originating call";
+  const caller = site.discovered_from_caller_name || "Unknown caller";
+  const date = fmtShort(site.discovered_from_call_date);
+  return date ? `${caller} · ${date}` : caller;
+}
 
 /* ------------------------------------------------------------------
    Site review — reached via "Show unconfirmed sites" below Tile 3.
@@ -114,7 +126,10 @@ export function SitesReviewView({ sites, onBack, onSaved }) {
                 borderTop: `1px solid ${t.frost}`,
               }}
             >
-              <span style={{ flex: 1, fontSize: 14, color: t.edge }}>{s.name}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, color: t.edge }}>{s.name}</div>
+                <div style={{ fontSize: 12, color: t.edge2, marginTop: 2 }}>{provenanceLabel(s)}</div>
+              </div>
               <div style={{ display: "flex", gap: 6, width: 160 }}>
                 <button onClick={() => setChoice(s.id, "Y")} style={choiceButtonStyle(pending[s.id] === "Y", "Y")}>
                   Valid
