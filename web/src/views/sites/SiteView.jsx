@@ -63,6 +63,7 @@ export function SiteView({
   // whole point of that flow was to keep filling this site in.
   const [editingDetails, setEditingDetails] = useState(autoEditDetails && !hasDetails);
 
+  const [voiceNoteNotice, setVoiceNoteNotice] = useState("");
   const [team, setTeam] = useState(null);
   const [contacts, setContacts] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
@@ -205,10 +206,24 @@ export function SiteView({
           siteId={siteRecord.id}
           onUploaded={loadTimeline}
           onVoiceNote={async (blob, fileName) => {
-            await postSiteVoiceNote(siteRecord.id, blob, fileName);
+            const result = await postSiteVoiceNote(siteRecord.id, blob, fileName);
             await loadTimeline();
+            /* The recording shows up on the timeline on its own, but the
+               task it fans out to the site's staff is invisible from here
+               — so say how many people got it, or that nobody is assigned
+               yet, rather than letting the upload look like it only filed
+               an audio clip. */
+            const count = result?.assignedTo?.length ?? 0;
+            setVoiceNoteNotice(
+              count > 0
+                ? `Voice note saved and assigned to ${count} ${count === 1 ? "person" : "people"}.`
+                : "Voice note saved. No one is assigned to this site yet, so it wasn't given to anyone."
+            );
           }}
         />
+      )}
+      {voiceNoteNotice && (
+        <p style={{ fontSize: 12, color: t.edge2, margin: "0 0 12px" }}>{voiceNoteNotice}</p>
       )}
 
       {siteRecord?.id && (
