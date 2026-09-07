@@ -3,7 +3,7 @@
 // gated exactly like GET/POST /api/staff and PATCH /api/staff/:id (see
 // src/handlers/auth.ts) — not the X-SBM-Key pattern used by /api/sites*.
 
-import { createCaller, listCallers, updateCaller, type CallerCategory } from "@sbm/core";
+import { createCaller, listCallers, countCallersByCategory, updateCaller, CALLER_CATEGORIES, type CallerCategory } from "@sbm/core";
 import { requireAdmin } from "./auth";
 import type { Env } from "../index";
 
@@ -14,7 +14,7 @@ function json(data: unknown, status = 200): Response {
   });
 }
 
-const VALID_CATEGORIES = new Set<CallerCategory>(["family", "staff", "client", "spam"]);
+const VALID_CATEGORIES = new Set<CallerCategory>(CALLER_CATEGORIES);
 
 function parseCategory(value: unknown): CallerCategory | undefined | null {
   if (value === undefined) return undefined;
@@ -22,12 +22,27 @@ function parseCategory(value: unknown): CallerCategory | undefined | null {
   return null; // present but invalid
 }
 
-/** GET /api/callers — the Callers Directory list, newest-name-sorted, staff-roster name joined in. */
+/** GET /api/callers — Callers Directory list (+ optional ?category= filter) and category counts. */
 export async function handleListCallers(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
 
-  return json(await listCallers(env.DB));
+  const url = new URL(request.url);
+  const categoryParam = url.searchParams.get("category");
+  let category: CallerCategory | undefined;
+  if (categoryParam) {
+    const parsed = parseCategory(categoryParam);
+    if (parsed === null || parsed === undefined) {
+      return json({ error: "category must be one of spam, client, family, staff" }, 400);
+    }
+    category = parsed;
+  }
+
+  const [items, counts] = await Promise.all([
+    listCallers(env.DB, category ? { category } : undefined),
+    countCallersByCategory(env.DB),
+  ]);
+  return json({ items, counts });
 }
 
 /** POST /api/callers — admin adds a caller directly (e.g. seeding a Family/Spam number). */

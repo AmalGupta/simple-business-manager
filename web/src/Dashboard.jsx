@@ -708,7 +708,10 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "staff-directory") return shell(<StaffDirectoryView onBack={() => setView(homeView)} />);
 
-  if (view.name === "callers-directory") return shell(<CallersDirectoryView onBack={() => setView(homeView)} />);
+  if (view.name === "callers-directory")
+    return shell(<CallersDirectoryView onBack={() => setView(homeView)} innerScrolls={innerScrolls} />, {
+      fillViewport: innerScrolls,
+    });
 
   if (view.name === "calls-needing-action")
     return shell(

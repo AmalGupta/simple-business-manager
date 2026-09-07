@@ -1,6 +1,7 @@
 // All D1 access lives here — see docs/SCAFFOLDING.md §1 ("no SQL outside queries.ts").
 
 import { matchStaffByOwner } from "./assignment";
+import { normalizeCallerPhone } from "./caller-category";
 import type {
   Call,
   Caller,
@@ -124,13 +125,15 @@ export interface FoundOrCreatedCaller {
  * uniqueness). Returns the resolved category too, so the Drive poller can
  * branch (family/spam -> skip) without a second round trip. A brand-new
  * caller always lands as 'client' — see Callers Directory design notes.
+ * Phones are normalized the same way as Drive filenames so a contact marked
+ * client/staff is found on the next poll and processed (not skipped).
  */
 export async function findOrCreateCaller(
   db: D1Database,
   opts: { name: string; phone: string | null }
 ): Promise<FoundOrCreatedCaller> {
   const name = opts.name.trim() || "Unknown Caller";
-  const phone = opts.phone?.trim() || null;
+  const phone = normalizeCallerPhone(opts.phone);
 
   if (phone) {
     const byPhone = await db
@@ -176,9 +179,34 @@ const CALLER_SELECT = `
   LEFT JOIN users ON users.id = callers.staff_user_id
 `;
 
-export async function listCallers(db: D1Database): Promise<CallerRow[]> {
+export async function listCallers(
+  db: D1Database,
+  opts?: { category?: CallerCategory }
+): Promise<CallerRow[]> {
+  if (opts?.category) {
+    const { results } = await db
+      .prepare(`${CALLER_SELECT} WHERE callers.category = ? ORDER BY callers.name ASC`)
+      .bind(opts.category)
+      .all<CallerRow>();
+    return results ?? [];
+  }
   const { results } = await db.prepare(`${CALLER_SELECT} ORDER BY callers.name ASC`).all<CallerRow>();
   return results ?? [];
+}
+
+export async function countCallersByCategory(
+  db: D1Database
+): Promise<Record<CallerCategory, number>> {
+  const { results } = await db
+    .prepare(`SELECT category, COUNT(*) AS n FROM callers GROUP BY category`)
+    .all<{ category: string; n: number }>();
+  const counts: Record<CallerCategory, number> = { client: 0, staff: 0, family: 0, spam: 0 };
+  for (const row of results ?? []) {
+    if (row.category === "client" || row.category === "staff" || row.category === "family" || row.category === "spam") {
+      counts[row.category] = row.n;
+    }
+  }
+  return counts;
 }
 
 export async function createCaller(
@@ -186,9 +214,10 @@ export async function createCaller(
   input: { name: string; phone: string | null; category: CallerCategory; staffUserId?: string | null }
 ): Promise<CallerRow> {
   const id = crypto.randomUUID();
+  const phone = normalizeCallerPhone(input.phone);
   await db
     .prepare(`INSERT INTO callers (id, name, phone, category, staff_user_id) VALUES (?, ?, ?, ?, ?)`)
-    .bind(id, input.name, input.phone, input.category, input.staffUserId ?? null)
+    .bind(id, input.name, phone, input.category, input.staffUserId ?? null)
     .run();
   const row = await db.prepare(`${CALLER_SELECT} WHERE callers.id = ?`).bind(id).first<CallerRow>();
   return row!;
@@ -204,7 +233,7 @@ export async function updateCaller(
   for (const [key, value] of Object.entries(patch)) {
     if (value === undefined) continue;
     fields.push(`${key} = ?`);
-    binds.push(value);
+    binds.push(key === "phone" ? normalizeCallerPhone(value as string | null) : value);
   }
   if (fields.length === 0) return getCallerRow(db, id);
   binds.push(id);
