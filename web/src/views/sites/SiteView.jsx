@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { t } from "../../theme.js";
 import { fmtDate, daysUntil } from "../../lib/dates.js";
-import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
+import { TILE_ROW_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import {
   fetchSiteTeam,
   fetchSiteTimeline,
@@ -19,6 +19,7 @@ import { SiteMediaUploadRow } from "./SiteMediaUploadRow.jsx";
 import { MyTaskBanner } from "./MyTaskBanner.jsx";
 import { SiteTimeline } from "./SiteTimeline.jsx";
 import { AddPeopleModal } from "./AddPeopleModal.jsx";
+import { SiteDetailsModal } from "./SiteDetailsModal.jsx";
 import { WorkTimelinePopup } from "./WorkTimelinePopup.jsx";
 
 /* ------------------------------------------------------------------
@@ -56,10 +57,6 @@ export function SiteView({
   const daysMissed = siteRecord?.target_closure_date ? -daysUntil(siteRecord.target_closure_date) : 0;
   const targetMissed = daysMissed > 0;
 
-  const [address, setAddress] = useState(siteRecord?.address ?? "");
-  const [pocName, setPocName] = useState(siteRecord?.poc_name ?? "");
-  const [targetDate, setTargetDate] = useState(siteRecord?.target_closure_date ?? "");
-  const [savingDetails, setSavingDetails] = useState(false);
   const [detailsSaved, setDetailsSaved] = useState(false);
   // Landing here straight from "Add new site" (see onSiteCreated) opens the
   // details form immediately rather than requiring an extra tap, since the
@@ -135,20 +132,17 @@ export function SiteView({
     loadTimeline();
   }, [loadTimeline]);
 
-  const saveDetails = async () => {
+  /* `patch` arrives pre-diffed by the modal — only fields the admin
+     actually changed — so this stays a straight pass-through and the
+     site_edits audit trail doesn't record untouched fields. Errors
+     propagate so the dialog can show them and keep the form open with
+     the entered values intact. */
+  const saveDetails = async (patch) => {
     if (!siteRecord?.id) return;
-    setSavingDetails(true);
     setDetailsSaved(false);
-    try {
-      await patchSite(siteRecord.id, { address, poc_name: pocName, target_closure_date: targetDate || null });
-      await onSiteUpdated?.();
-      setDetailsSaved(true);
-      setEditingDetails(false);
-    } catch (err) {
-      console.error("[sbm] failed to save site details", err);
-    } finally {
-      setSavingDetails(false);
-    }
+    await patchSite(siteRecord.id, patch);
+    await onSiteUpdated?.();
+    setDetailsSaved(true);
   };
 
   /* Both take arrays — the modal is multi-select. The staff response
@@ -227,7 +221,7 @@ export function SiteView({
                   <button
                     onClick={() => {
                       setDetailsSaved(false);
-                      setEditingDetails((v) => !v);
+                      setEditingDetails(true);
                     }}
                     style={{
                       padding: "6px 12px",
@@ -241,7 +235,7 @@ export function SiteView({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {editingDetails ? "Cancel" : isBlankSite ? "Assign new site" : "Add more site details"}
+                    {isBlankSite ? "Assign new site" : "Add more site details"}
                   </button>
                 </div>
               ) : undefined
@@ -250,44 +244,14 @@ export function SiteView({
             Site details
           </TileLabel>
 
-          {canManage && editingDetails ? (
-            <>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
-                <input
-                  placeholder="Address"
-                  value={address}
-                  onChange={(e) => setAddress(e.target.value)}
-                  style={TEXT_INPUT_STYLE}
-                />
-                <input
-                  placeholder="Point of contact name"
-                  value={pocName}
-                  onChange={(e) => setPocName(e.target.value)}
-                  style={TEXT_INPUT_STYLE}
-                />
-                <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: t.edge2 }}>
-                  Target closure date
-                  <input
-                    type="date"
-                    value={targetDate}
-                    onChange={(e) => setTargetDate(e.target.value)}
-                    style={TEXT_INPUT_STYLE}
-                  />
-                </label>
-              </div>
-              <div style={{ marginTop: 10 }}>
-                <button onClick={saveDetails} disabled={savingDetails} style={{ ...PRIMARY_BUTTON_STYLE, opacity: savingDetails ? 0.6 : 1 }}>
-                  {savingDetails ? "Saving…" : "Save details"}
-                </button>
-              </div>
-            </>
-          ) : (
+          {
             // Read-only summary of whatever's currently saved — shown for
-            // everyone, not just staff, and not only while the edit form
-            // happens to be open. Previously an admin had no way to see a
-            // site's saved address/point-of-contact without re-opening the
-            // edit form every visit, which read as "the details I added
-            // aren't there when I come back."
+            // everyone, not just staff. Previously an admin had no way to
+            // see a site's saved address/point-of-contact without
+            // re-opening the edit form every visit, which read as "the
+            // details I added aren't there when I come back." Editing now
+            // happens in SiteDetailsModal, so the summary no longer has to
+            // yield the space to a form.
             <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontSize: 14, color: t.edge }}>{siteRecord?.address?.trim() || "No address on file."}</span>
               {siteRecord?.poc_name?.trim() && (
@@ -303,6 +267,15 @@ export function SiteView({
                     .join(" · ")}
                 </span>
               )}
+              {/* H.No/sector/city are separate columns from `address` and
+                  are what AddSiteScreen requires at least one of, so they
+                  belong in the summary now that they're editable — a field
+                  you can change but never see reads as not having saved. */}
+              {(siteRecord?.house_no?.trim() || siteRecord?.sector?.trim() || siteRecord?.city?.trim()) && (
+                <span style={{ fontSize: 13, color: t.edge2 }}>
+                  {[siteRecord.house_no, siteRecord.sector, siteRecord.city].filter((v) => v?.trim()).join(", ")}
+                </span>
+              )}
               {siteRecord?.site_location?.trim() && (
                 <span style={{ fontSize: 13, color: t.edge2 }}>Location: {siteRecord.site_location}</span>
               )}
@@ -312,7 +285,7 @@ export function SiteView({
                   : "No target closure date set."}
               </span>
             </div>
-          )}
+          }
         </Card>
       )}
 
@@ -419,6 +392,13 @@ export function SiteView({
         />
       </div>
 
+      {canManage && editingDetails && (
+        <SiteDetailsModal
+          site={siteRecord}
+          onClose={() => setEditingDetails(false)}
+          onSave={saveDetails}
+        />
+      )}
       {showAssignModal && (
         <AddPeopleModal
           onClose={() => setShowAssignModal(false)}
