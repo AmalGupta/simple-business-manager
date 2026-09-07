@@ -151,6 +151,53 @@ export async function postSiteTeamMember(siteId, userId) {
   return res.json();
 }
 
+/* Multi-select assign. Returns { added, skipped } — `skipped` is accounts
+   already on the roster, so re-submitting a selection is a no-op. */
+export async function postSiteTeamMembers(siteId, userIds) {
+  const res = await fetch(`/api/sites/${siteId}/team`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ user_ids: userIds }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/sites/${siteId}/team → ${res.status}`);
+  }
+  return res.json();
+}
+
+/* Site contacts — the caller axis (caller_sites, migration 0022). Distinct
+   from the team roster above: a contact has no login and no site access. */
+export async function fetchSiteContacts(siteId) {
+  return fetchJSON(`/api/sites/${siteId}/contacts`);
+}
+
+/** Idempotent — re-adding an already-linked contact is a no-op. Returns the full list. */
+export async function postSiteContacts(siteId, callerIds) {
+  const res = await fetch(`/api/sites/${siteId}/contacts`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ caller_ids: callerIds }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/sites/${siteId}/contacts → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteSiteContact(siteId, callerId) {
+  const res = await fetch(`/api/sites/${siteId}/contacts/${callerId}`, {
+    method: "DELETE",
+    headers: { "X-SBM-Key": SBM_KEY },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `DELETE /api/sites/${siteId}/contacts/${callerId} → ${res.status}`);
+  }
+  return res.json();
+}
+
 /* Backfill — scans calls that already have a transcript but predate the
    automatic per-call site scan. Manual only; see src/handlers/api.ts. */
 export async function postSitesBackfill() {
@@ -322,9 +369,18 @@ export async function postResetStaffPin(id) {
 
 /* Callers Directory (migration 0021) — session-cookie only, admin/superadmin
    gated server-side, same pattern as /api/staff* above. */
-export async function fetchCallers({ category } = {}) {
-  const qs = category ? `?category=${encodeURIComponent(category)}` : "";
-  const res = await fetch(`/api/callers${qs}`);
+/* `q` / `limit` / `offset` are for the site-contacts picker — the directory
+   is a ~3.3k-row phone-contacts import, too big to load whole. Omitting them
+   keeps the original full-category behaviour the Callers Directory relies on.
+   Response is { items, total, counts }, where `total` ignores the page window. */
+export async function fetchCallers({ category, q, limit, offset } = {}) {
+  const params = new URLSearchParams();
+  if (category) params.set("category", category);
+  if (q) params.set("q", q);
+  if (limit !== undefined) params.set("limit", String(limit));
+  if (offset !== undefined) params.set("offset", String(offset));
+  const qs = params.toString();
+  const res = await fetch(`/api/callers${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(`GET /api/callers → ${res.status}`);
   return res.json();
 }

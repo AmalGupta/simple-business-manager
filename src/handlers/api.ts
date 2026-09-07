@@ -31,6 +31,10 @@ import {
   isTodoAssignee,
   isUserAssignedToSite,
   linkCallToSites,
+  addSiteTeamMembers,
+  listSiteContacts,
+  addSiteContacts,
+  removeSiteContact,
   listCallCallerOptions,
   listCallTranscripts,
   listCallsByTodoStatus,
@@ -520,10 +524,17 @@ export async function handleGetSiteTeam(request: Request, env: Env, siteId: stri
 }
 
 /**
- * Admin-only. `user_id`, when present, is the "choose from dropdown" path
- * (migration 0011) — the member's name/phone come from their own account
- * server-side, never from client-sent fields, so a spoofed name/number in
- * the request body can't override the real profile.
+ * Admin-only. Three shapes, all on the same route:
+ *
+ * - `{ user_ids: [...] }` — the multi-select assign modal. Returns
+ *   `{ added, skipped }`; `skipped` lists accounts already on the roster,
+ *   so re-submitting a selection is a no-op rather than a duplicate row.
+ * - `{ user_id }` — the original single "choose from dropdown" path.
+ * - `{ name, contact_number }` — a free-text member with no account.
+ *
+ * For both account paths the member's name/phone come from their own
+ * account server-side, never from client-sent fields, so a spoofed
+ * name/number in the request body can't override the real profile.
  */
 export async function handlePostSiteTeamMember(request: Request, env: Env, siteId: string): Promise<Response> {
   const gate = await requireAdmin(request, env);
@@ -536,6 +547,15 @@ export async function handlePostSiteTeamMember(request: Request, env: Env, siteI
     return json({ error: "invalid JSON body" }, 400);
   }
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+
+  if ("user_ids" in record) {
+    if (!Array.isArray(record.user_ids) || record.user_ids.some((v) => typeof v !== "string")) {
+      return json({ error: "user_ids must be an array of strings" }, 400);
+    }
+    const result = await addSiteTeamMembers(env.DB, siteId, record.user_ids as string[], gate.user_id);
+    return json(result, 201);
+  }
+
   const userId = typeof record.user_id === "string" && record.user_id ? record.user_id : null;
 
   let name: string;
@@ -556,6 +576,53 @@ export async function handlePostSiteTeamMember(request: Request, env: Env, siteI
 
   const member = await addSiteTeamMember(env.DB, siteId, name, contactNumber, gate.user_id, userId);
   return json(member, 201);
+}
+
+// --- Site contacts (caller_sites, migration 0022) ----------------------------
+// The caller axis of a site, distinct from the team roster above: a contact
+// is a Callers Directory row with no login, so linking one grants no access.
+// Reads follow handleGetSiteTeam's scoping (a staff session only sees sites
+// it's assigned to); writes are admin-only, like the roster.
+
+export async function handleGetSiteContacts(request: Request, env: Env, siteId: string): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  if (session.user_role === "staff" && !(await isUserAssignedToSite(env.DB, session.user_id, siteId))) {
+    return json({ error: "forbidden" }, 403);
+  }
+  return json(await listSiteContacts(env.DB, siteId));
+}
+
+/** `{ caller_ids: [...] }` from the picker. Idempotent — see addSiteContacts. */
+export async function handlePostSiteContacts(request: Request, env: Env, siteId: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  if (!Array.isArray(record.caller_ids) || record.caller_ids.some((v) => typeof v !== "string")) {
+    return json({ error: "caller_ids must be an array of strings" }, 400);
+  }
+
+  const contacts = await addSiteContacts(env.DB, siteId, record.caller_ids as string[]);
+  return json(contacts, 201);
+}
+
+export async function handleDeleteSiteContact(
+  request: Request,
+  env: Env,
+  siteId: string,
+  callerId: string
+): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  await removeSiteContact(env.DB, siteId, callerId);
+  return json(await listSiteContacts(env.DB, siteId));
 }
 
 export async function handleGetEscalations(request: Request, env: Env): Promise<Response> {

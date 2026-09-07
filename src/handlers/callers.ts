@@ -3,7 +3,15 @@
 // gated exactly like GET/POST /api/staff and PATCH /api/staff/:id (see
 // src/handlers/auth.ts) — not the X-SBM-Key pattern used by /api/sites*.
 
-import { createCaller, listCallers, countCallersByCategory, updateCaller, CALLER_CATEGORIES, type CallerCategory } from "@sbm/core";
+import {
+  createCaller,
+  listCallers,
+  countCallers,
+  countCallersByCategory,
+  updateCaller,
+  CALLER_CATEGORIES,
+  type CallerCategory,
+} from "@sbm/core";
 import { requireAdmin } from "./auth";
 import type { Env } from "../index";
 
@@ -22,7 +30,26 @@ function parseCategory(value: unknown): CallerCategory | undefined | null {
   return null; // present but invalid
 }
 
-/** GET /api/callers — Callers Directory list (+ optional ?category= filter) and category counts. */
+/** Cap on one page of callers — the directory is a ~3.3k-row phone-contacts import. */
+const CALLERS_MAX_LIMIT = 200;
+
+function parsePositiveInt(value: string | null, max: number): number | null | undefined {
+  if (value === null) return undefined;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0 || n > max) return null; // present but invalid
+  return n;
+}
+
+/**
+ * GET /api/callers — Callers Directory list and category counts.
+ *
+ * `?category=` filters as before. `?q=` (substring on name or phone) and
+ * `?limit=`/`?offset=` were added for the site-contacts picker, which can't
+ * load the whole directory. Both are optional and omitted by the existing
+ * Callers Directory screen, which still gets the full category unpaginated —
+ * `total` is always the count matching category+q ignoring the page window,
+ * so a paginated caller can render "showing N of M".
+ */
 export async function handleListCallers(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
@@ -38,11 +65,20 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
     category = parsed;
   }
 
-  const [items, counts] = await Promise.all([
-    listCallers(env.DB, category ? { category } : undefined),
+  const q = url.searchParams.get("q")?.trim() || undefined;
+
+  const limit = parsePositiveInt(url.searchParams.get("limit"), CALLERS_MAX_LIMIT);
+  if (limit === null) return json({ error: `limit must be an integer between 0 and ${CALLERS_MAX_LIMIT}` }, 400);
+  const offset = parsePositiveInt(url.searchParams.get("offset"), Number.MAX_SAFE_INTEGER);
+  if (offset === null) return json({ error: "offset must be a non-negative integer" }, 400);
+
+  const opts = { category, q, limit, offset };
+  const [items, total, counts] = await Promise.all([
+    listCallers(env.DB, opts),
+    countCallers(env.DB, opts),
     countCallersByCategory(env.DB),
   ]);
-  return json({ items, counts });
+  return json({ items, total, counts });
 }
 
 /** POST /api/callers — admin adds a caller directly (e.g. seeding a Family/Spam number). */
