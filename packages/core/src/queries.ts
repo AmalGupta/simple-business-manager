@@ -430,6 +430,40 @@ export async function deleteCallById(db: D1Database, callId: string): Promise<vo
   await db.prepare(`DELETE FROM calls WHERE id = ?`).bind(callId).run();
 }
 
+/**
+ * Full wipe of a call and its dependents (todos, transcript, sites links, etc.)
+ * so a Drive file can be re-ingested and overwrite prior D1 state. Returns the
+ * deleted call (for R2 cleanup) or null if missing.
+ */
+export async function deleteCallCascadeById(db: D1Database, callId: string): Promise<Call | null> {
+  const call = await getCallById(db, callId);
+  if (!call) return null;
+
+  const { results: todoRows } = await db
+    .prepare(`SELECT id FROM todos WHERE call_id = ?`)
+    .bind(callId)
+    .all<{ id: string }>();
+  const todoIds = (todoRows ?? []).map((r) => r.id);
+
+  const stmts = [];
+  for (const todoId of todoIds) {
+    stmts.push(db.prepare(`DELETE FROM missed_deadlines WHERE todo_id = ?`).bind(todoId));
+    stmts.push(db.prepare(`DELETE FROM todo_voice_notes WHERE todo_id = ?`).bind(todoId));
+    stmts.push(db.prepare(`DELETE FROM todo_assignees WHERE todo_id = ?`).bind(todoId));
+  }
+  stmts.push(db.prepare(`DELETE FROM todos WHERE call_id = ?`).bind(callId));
+  stmts.push(db.prepare(`DELETE FROM commitments WHERE call_id = ?`).bind(callId));
+  stmts.push(db.prepare(`DELETE FROM call_sites WHERE call_id = ?`).bind(callId));
+  stmts.push(db.prepare(`DELETE FROM transcripts WHERE r2_key = ?`).bind(call.r2_key));
+  stmts.push(db.prepare(`UPDATE escalations SET closed_by_call_id = NULL WHERE closed_by_call_id = ?`).bind(callId));
+  stmts.push(
+    db.prepare(`UPDATE installation_updates SET voice_note_call_id = NULL WHERE voice_note_call_id = ?`).bind(callId)
+  );
+  stmts.push(db.prepare(`DELETE FROM calls WHERE id = ?`).bind(callId));
+  await db.batch(stmts);
+  return call;
+}
+
 /** Task 4 — transcript landed. Written the moment fetchResult returns, so it's viewable immediately. */
 export async function setCallTranscribed(
   db: D1Database,
