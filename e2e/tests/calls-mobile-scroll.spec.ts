@@ -48,7 +48,7 @@ async function touchDrag(page, locator, { fromY, toY, steps = 12 }) {
 
 test.describe("Calls page mobile scroll (Android Chrome)", () => {
   test("table scrolls; document stays locked after hitting the last row", async ({ page }) => {
-    const viewport = await openCallsWithMockedRows(page);
+    const viewport = await openCallsWithMockedRows(page, { innerScrolls: true });
 
     const docScrollBefore = await page.evaluate(() => ({
       x: window.scrollX,

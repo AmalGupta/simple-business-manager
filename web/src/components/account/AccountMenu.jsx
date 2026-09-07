@@ -1,21 +1,41 @@
 import { useState, useEffect, useRef } from "react";
-import { User, ChevronDown } from "lucide-react";
+import { User, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react";
 import { t } from "../../theme.js";
 import { ResetPinModal } from "./ResetPinModal.jsx";
 import { UpdatePhoneModal } from "./UpdatePhoneModal.jsx";
+import { patchMyCustomization } from "../../lib/api.js";
 
-/* Account menu — standard top-right "my account" pattern, in the blue
-   header. Tap the name to open a small dropdown (Update phone, Reset PIN,
-   Log out); click-outside or Escape closes it. Reset PIN opens the same
-   ResetPinModal used before, just triggered from here now. */
-export function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone }) {
+/* Account menu — top-right "my account" in the blue header.
+   Update phone, then (admin/superadmin) Settings → Site customization
+   with Vertical / Horizontal scroll toggles, then Reset PIN / Log out. */
+export function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone, customization, onCustomizationChange }) {
   const [open, setOpen] = useState(false);
+  const [panel, setPanel] = useState("root"); // root | settings | site-customization
   const [showResetModal, setShowResetModal] = useState(false);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
+  const [values, setValues] = useState(() => ({
+    inner_scrolls: customization?.inner_scrolls ?? false,
+    horizontal_scrolls: customization?.horizontal_scrolls ?? false,
+  }));
+  const [busyKey, setBusyKey] = useState(null);
+  const [error, setError] = useState("");
   const containerRef = useRef(null);
 
+  const canCustomize = me?.role === "admin" || me?.role === "superadmin";
+
   useEffect(() => {
-    if (!open) return;
+    setValues({
+      inner_scrolls: customization?.inner_scrolls ?? false,
+      horizontal_scrolls: customization?.horizontal_scrolls ?? false,
+    });
+  }, [customization?.inner_scrolls, customization?.horizontal_scrolls]);
+
+  useEffect(() => {
+    if (!open) {
+      setPanel("root");
+      setError("");
+      return;
+    }
     const onDocPointerDown = (e) => {
       if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
     };
@@ -33,6 +53,8 @@ export function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone }) {
   const menuItemStyle = {
     display: "flex",
     alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
     width: "100%",
     padding: "10px 14px",
     border: "none",
@@ -45,6 +67,131 @@ export function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone }) {
     cursor: "pointer",
     whiteSpace: "nowrap",
   };
+
+  const togglePref = async (key) => {
+    if (!canCustomize) return;
+    const next = !values[key];
+    setBusyKey(key);
+    setError("");
+    setValues((v) => ({ ...v, [key]: next }));
+    try {
+      const data = await patchMyCustomization({ [key]: next });
+      const resolved = data.customization ?? { ...values, [key]: next };
+      setValues({
+        inner_scrolls: resolved.inner_scrolls ?? false,
+        horizontal_scrolls: resolved.horizontal_scrolls ?? false,
+      });
+      onCustomizationChange?.(resolved);
+    } catch (err) {
+      console.error("[sbm] failed to save customization", err);
+      setValues((v) => ({ ...v, [key]: !next }));
+      setError("Failed to save — try again.");
+    } finally {
+      setBusyKey(null);
+    }
+  };
+
+  const renderRoot = () => (
+    <>
+      <button
+        role="menuitem"
+        onClick={() => {
+          setOpen(false);
+          setShowPhoneModal(true);
+        }}
+        style={menuItemStyle}
+      >
+        Update phone
+      </button>
+      {canCustomize && (
+        <button
+          role="menuitem"
+          onClick={() => setPanel("settings")}
+          style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+        >
+          <span>Settings</span>
+          <ChevronRight size={14} color={t.edge2} />
+        </button>
+      )}
+      <button
+        role="menuitem"
+        onClick={() => {
+          setOpen(false);
+          setShowResetModal(true);
+        }}
+        style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+      >
+        Reset PIN
+      </button>
+      <button
+        role="menuitem"
+        onClick={() => {
+          setOpen(false);
+          onLogout();
+        }}
+        style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+      >
+        Log out
+      </button>
+    </>
+  );
+
+  const renderSettings = () => (
+    <>
+      <button role="menuitem" onClick={() => setPanel("root")} style={menuItemStyle}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ChevronLeft size={14} color={t.edge2} />
+          Settings
+        </span>
+      </button>
+      <button
+        role="menuitem"
+        onClick={() => setPanel("site-customization")}
+        style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+      >
+        <span>Site customization</span>
+        <ChevronRight size={14} color={t.edge2} />
+      </button>
+    </>
+  );
+
+  const scrollToggle = (key, label) => (
+    <label
+      key={key}
+      style={{
+        ...menuItemStyle,
+        borderTop: `1px solid ${t.frost}`,
+        cursor: busyKey === key ? "wait" : "pointer",
+        fontWeight: 500,
+      }}
+    >
+      <span>{label}</span>
+      <input
+        type="checkbox"
+        checked={Boolean(values[key])}
+        disabled={busyKey === key}
+        onChange={() => togglePref(key)}
+        aria-label={label}
+        style={{ width: 16, height: 16, accentColor: "var(--color-accent)", flexShrink: 0 }}
+      />
+    </label>
+  );
+
+  const renderSiteCustomization = () => (
+    <>
+      <button role="menuitem" onClick={() => setPanel("settings")} style={menuItemStyle}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ChevronLeft size={14} color={t.edge2} />
+          Site customization
+        </span>
+      </button>
+      {error ? (
+        <p style={{ margin: 0, padding: "6px 14px", fontSize: 12, color: t.signal }}>{error}</p>
+      ) : null}
+      {scrollToggle("inner_scrolls", "Vertical scroll")}
+      {scrollToggle("horizontal_scrolls", "Horizontal scroll")}
+    </>
+  );
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
@@ -76,11 +223,12 @@ export function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone }) {
       {open && (
         <div
           role="menu"
+          aria-label={panel === "root" ? "Account" : panel === "settings" ? "Settings" : "Site customization"}
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
             right: 0,
-            minWidth: 170,
+            minWidth: panel === "site-customization" ? 220 : 180,
             background: t.white,
             border: `1px solid ${t.frost}`,
             borderRadius: t.radiusButton,
@@ -89,36 +237,9 @@ export function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone }) {
             zIndex: 50,
           }}
         >
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              setShowPhoneModal(true);
-            }}
-            style={menuItemStyle}
-          >
-            Update phone
-          </button>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              setShowResetModal(true);
-            }}
-            style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
-          >
-            Reset PIN
-          </button>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              onLogout();
-            }}
-            style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
-          >
-            Log out
-          </button>
+          {panel === "root" && renderRoot()}
+          {panel === "settings" && renderSettings()}
+          {panel === "site-customization" && renderSiteCustomization()}
         </div>
       )}
 
