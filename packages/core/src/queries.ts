@@ -1886,6 +1886,12 @@ export interface SiteAttentionRow {
  * items don't carry their own due date. Sorted oldest-first, capped.
  */
 export async function getSitesNeedingAttention(db: D1Database, limit = 4): Promise<SiteAttentionRow[]> {
+  // Only calls that could actually make a site "qualify" below (an open
+  // todo, or a non-empty unresolved list) are worth joining in at all — a
+  // call with neither contributes nothing to the aggregation. Filtering
+  // here instead of after the fact bounds this to "currently open work",
+  // not "every call ever linked to a site" (previously an unbounded scan
+  // that grew with total call history, not with what's actually open).
   const { results: siteCalls } = await db
     .prepare(
       `SELECT sites.id AS site_id, sites.name AS site_name, calls.id AS call_id,
@@ -1893,7 +1899,11 @@ export async function getSitesNeedingAttention(db: D1Database, limit = 4): Promi
        FROM sites
        JOIN call_sites ON call_sites.site_id = sites.id
        JOIN calls ON calls.id = call_sites.call_id
-       WHERE sites.is_confirmed IS NOT 'N'`
+       WHERE sites.is_confirmed IS NOT 'N'
+         AND (
+           EXISTS (SELECT 1 FROM todos WHERE todos.call_id = calls.id AND todos.status = 'open')
+           OR (calls.unresolved IS NOT NULL AND calls.unresolved != '' AND calls.unresolved != '[]')
+         )`
     )
     .all<{ site_id: string; site_name: string; call_id: string; recorded_at: string | null; unresolved: string | null }>();
   if (siteCalls.length === 0) return [];

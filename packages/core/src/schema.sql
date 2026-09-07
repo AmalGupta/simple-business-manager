@@ -247,8 +247,7 @@ CREATE INDEX idx_call_sites_site ON call_sites(site_id);
 CREATE INDEX idx_caller_sites_site ON caller_sites(site_id);
 CREATE INDEX idx_commitments_call ON commitments(call_id);
 
--- migration 0025
-CREATE INDEX idx_calls_resolved_at ON calls(resolved_at);
+-- migration 0025 (idx_calls_resolved_at superseded by idx_calls_needing_action, migration 0027)
 CREATE INDEX idx_todo_assignees_user ON todo_assignees(user_id);
 CREATE INDEX idx_todo_voice_notes_todo ON todo_voice_notes(todo_id, created_at DESC);
 CREATE INDEX idx_escalations_status ON escalations(status, created_at DESC);
@@ -442,4 +441,15 @@ CREATE TABLE user_settings (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (user_id, key)
 );
+
+-- migration 0027: Calls Needing Action's ORDER BY had no supporting index,
+-- so it scanned+sorted ~all unresolved calls (99% of the table, since the
+-- manual Resolve ack is rarely used) on every load instead of just the
+-- oldest LIMIT. closed_today's substr(completed_at,...) filter has the
+-- same index-defeating shape migration 0024 already fixed once for
+-- calls.recording_date.
+CREATE INDEX idx_calls_needing_action
+  ON calls(resolved_at, deleted_at, (COALESCE(recording_date, substr(recorded_at, 1, 10))), recorded_at);
+CREATE INDEX idx_todos_status_completed_date
+  ON todos(status, (substr(completed_at, 1, 10)));
 
