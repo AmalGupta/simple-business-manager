@@ -35,6 +35,7 @@ import {
   listSiteContacts,
   addSiteContacts,
   removeSiteContact,
+  getSiteContactsBySiteIds,
   listCallCallerOptions,
   listCallTranscripts,
   listCallsByTodoStatus,
@@ -429,7 +430,22 @@ export async function handleGetConfirmedSites(request: Request, env: Env): Promi
     getConfirmedSitesSummary(env.DB, forUserId),
     getUnreadActivityCounts(env.DB, session.user_id, session.user_role),
   ]);
-  return json(rows.map((row) => ({ ...row, unread_count: unreadCounts.get(row.id) ?? 0 })));
+  /* Contacts are merged here rather than aggregated in the summary query:
+     a site has many, and GROUP_CONCAT would flatten name and phone into a
+     string the grid would have to re-split. One batched lookup keyed by
+     site id keeps them structured. Depends on `rows`, so it can't join the
+     Promise.all above. */
+  const contactsBySite = await getSiteContactsBySiteIds(
+    env.DB,
+    rows.map((row) => row.id)
+  );
+  return json(
+    rows.map((row) => ({
+      ...row,
+      unread_count: unreadCounts.get(row.id) ?? 0,
+      contacts: contactsBySite.get(row.id) ?? [],
+    }))
+  );
 }
 
 /**

@@ -30,6 +30,22 @@ export const fmtLong = (iso) =>
       })
     : "";
 
+/* Age of a past timestamp, for "last activity" style columns. Accepts a
+   full timestamp as well as a bare date, since the four activity sources
+   store both (calls.recorded_at is an ISO timestamp, site_edits.created_at
+   is `datetime('now')`). Falls back to an absolute date past a month —
+   "63d ago" is harder to read than "6 Jul". */
+export const fmtAgo = (iso) => {
+  if (!iso) return "";
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "";
+  const days = Math.floor((today() - new Date(then).setHours(0, 0, 0, 0)) / DAY);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days}d ago`;
+  return fmtShort(iso);
+};
+
 /* Urgency is the ONLY thing allowed to produce colour. */
 export const isUrgent = (todo) => {
   if (todo.status !== "open" || !todo.due_date) return false;

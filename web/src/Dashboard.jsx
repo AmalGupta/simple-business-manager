@@ -707,8 +707,13 @@ export default function SimpleBusinessManager() {
           onOpenSite={(site) => setView({ name: "site", site, from: view })}
           onAddSite={() => setView({ name: "add-site", from: view, afterCreate: { name: "site" } })}
           isHome={me.role === "staff" && (!view.from || view.from.name === "staff-home")}
+          innerScrolls={innerScrolls}
+          horizontalScrolls={horizontalScrolls}
         />
-      </>
+      </>,
+      // Six columns need the 1100px container, not the default 720 — same
+      // reasoning as the calls page and the callers directory.
+      { wide: true, fillViewport: innerScrolls }
     );
 
   if (view.name === "add-site")
