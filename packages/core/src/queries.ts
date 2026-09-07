@@ -1880,6 +1880,82 @@ export async function isUserAssignedToSite(db: D1Database, userId: string, siteI
   return row !== null;
 }
 
+/**
+ * The user ids isUserAssignedToSite would answer `true` for, as a list.
+ * Same two sources and same UNION (which dedupes), so "who is assigned to
+ * this site" can't drift between the access check and the fan-out below.
+ */
+export async function listSiteAssigneeUserIds(db: D1Database, siteId: string): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT user_id FROM site_team_members WHERE site_id = ? AND user_id IS NOT NULL
+       UNION
+       SELECT assigned_to_user_id AS user_id FROM site_tasks WHERE site_id = ? AND assigned_to_user_id IS NOT NULL`
+    )
+    .bind(siteId, siteId)
+    .all<{ user_id: string }>();
+  return (results ?? []).map((r) => r.user_id);
+}
+
+/**
+ * Turns a site voice note into one task shared by everyone assigned to the
+ * site — the "also assign it to the various users" half of the voice-note
+ * feature. The timeline half needs no code: the `calls` row this hangs off
+ * is already composed into getSiteTimeline.
+ *
+ * One todo with N assignees, not N todos: todo_assignees is many-to-many
+ * (migration 0025) precisely so a single piece of work can be shared, and
+ * N copies would mean N things to close for one recording.
+ *
+ * No schema change needed. todos.call_id is NOT NULL REFERENCES calls(id),
+ * and a site voice note already creates a real `calls` row, so the
+ * recording is a valid parent as-is.
+ *
+ * `origin` is 'manual', not 'llm'. This task is created synchronously at
+ * upload so the recording lands as actionable work immediately; the todos
+ * Claude extracts from the same transcript arrive later, once Sarvam and
+ * the extraction finish, and carry origin='llm'. Both are expected — this
+ * one says "someone recorded this", the LLM's say "here's what was in it".
+ *
+ * Returns null when nobody is assigned to the site. There is no one to
+ * assign to in that case, and writing an assignee-less todo would put a
+ * row in the admin action queue for every recording on an unstaffed site.
+ * The voice note is still on the timeline either way.
+ */
+export async function createSiteVoiceNoteTask(
+  db: D1Database,
+  input: { callId: string; siteId: string; siteName: string | null; uploaderName: string | null; uploadedByUserId: string }
+): Promise<{ todoId: string; assigneeUserIds: string[] } | null> {
+  const assigneeUserIds = await listSiteAssigneeUserIds(db, input.siteId);
+  if (assigneeUserIds.length === 0) return null;
+
+  const todoId = crypto.randomUUID();
+  const who = input.uploaderName?.trim() || "someone";
+  const where = input.siteName?.trim();
+  const text = where ? `Voice note from ${who} — ${where}` : `Voice note from ${who}`;
+
+  /* `owner` is NOT NULL and predates todo_assignees, which migration 0025
+     made the authoritative assignment. It's free text used for display, so
+     a single assignee gets their name and a shared task reads "Site team"
+     rather than an arbitrary one of several names. */
+  const owner = assigneeUserIds.length === 1 ? ((await getUserById(db, assigneeUserIds[0]))?.name ?? "Site team") : "Site team";
+
+  await db.batch([
+    db
+      .prepare(`INSERT INTO todos (id, call_id, owner, text, due_date, origin) VALUES (?, ?, ?, ?, NULL, 'manual')`)
+      .bind(todoId, input.callId, owner, text),
+    ...assigneeUserIds.map((userId) =>
+      db
+        .prepare(
+          `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at) VALUES (?, ?, ?, datetime('now'))`
+        )
+        .bind(todoId, userId, input.uploadedByUserId)
+    ),
+  ]);
+
+  return { todoId, assigneeUserIds };
+}
+
 /** True if `callId` is linked (call_sites) to any site `userId` is on the team roster for — lets a `staff` session open a call's transcript from their site's timeline. */
 /**
  * Excludes site voice memos (`calls.recorded_for_site_id IS NOT NULL`)
