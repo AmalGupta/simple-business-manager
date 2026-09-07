@@ -6,7 +6,15 @@
 // and uploader are set explicitly at upload time instead of waiting for
 // extraction to infer a site from transcript content.
 
-import { getSiteName, getUserById, insertCall, linkCallToSiteExplicit, setCallFailed, setCallSubmitted } from "@sbm/core";
+import {
+  createSiteVoiceNoteTask,
+  getSiteName,
+  getUserById,
+  insertCall,
+  linkCallToSiteExplicit,
+  setCallFailed,
+  setCallSubmitted,
+} from "@sbm/core";
 import { normalizeAudioContentType, submitRecording } from "../lib/sarvam";
 import { buildVoiceNoteKey } from "../lib/voice-note-key";
 import type { Env } from "../index";
@@ -54,6 +62,23 @@ export async function handlePostSiteVoiceNote(
   });
   await linkCallToSiteExplicit(env.DB, callId, siteId);
 
+  /* Fan the recording out as one shared task to everyone assigned to the
+     site. Awaited rather than deferred to waitUntil: the point is that the
+     recording becomes actionable the moment it's uploaded, so the caller's
+     immediate refetch has to see it. It's two small writes.
+
+     Deliberately before Sarvam is even submitted, and independent of it —
+     the todos Claude extracts from the transcript land later with
+     origin='llm'. A transcription that fails still leaves the task, which
+     is the right outcome: the audio is playable regardless. */
+  const task = await createSiteVoiceNoteTask(env.DB, {
+    callId,
+    siteId,
+    siteName,
+    uploaderName: uploader?.name ?? null,
+    uploadedByUserId,
+  });
+
   const callbackUrl = `${new URL(request.url).origin}/webhooks/sarvam`;
   ctx.waitUntil(
     submitRecording(env, r2Key, callbackUrl)
@@ -61,5 +86,6 @@ export async function handlePostSiteVoiceNote(
       .catch((err) => setCallFailed(env.DB, callId, `submit: ${String(err)}`))
   );
 
-  return json({ callId }, 202);
+  // assignedTo is [] when nobody is on the site — see createSiteVoiceNoteTask.
+  return json({ callId, todoId: task?.todoId ?? null, assignedTo: task?.assigneeUserIds ?? [] }, 202);
 }
