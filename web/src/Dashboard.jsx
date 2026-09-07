@@ -43,8 +43,6 @@ import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.js
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
 import { CallsNeedingActionTile } from "./views/home/CallsNeedingActionTile.jsx";
 import { CallsNeedingActionView } from "./views/calls/CallsNeedingActionView.jsx";
-import { CustomizationTile } from "./views/customization/CustomizationTile.jsx";
-import { CustomizationView } from "./views/customization/CustomizationView.jsx";
 import {
   fetchCall,
   fetchCallsCalendar,
@@ -431,6 +429,9 @@ export default function SimpleBusinessManager() {
   const customization = me?.customization ?? { inner_scrolls: false, horizontal_scrolls: false };
   const innerScrolls = Boolean(customization.inner_scrolls);
   const horizontalScrolls = Boolean(customization.horizontal_scrolls);
+  const onCustomizationChange = useCallback((next) => {
+    setMe((m) => (m ? { ...m, customization: next } : m));
+  }, []);
 
   const shell = (children, { wide = false, fillViewport = false } = {}) => (
     <div
@@ -668,7 +669,14 @@ export default function SimpleBusinessManager() {
     return shell(
       <>
         {me.role === "staff" && (
-          <AppHeader me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
+          <AppHeader
+            me={me}
+            onLogout={onLogout}
+            onResetPin={onResetPin}
+            onUpdatePhone={onUpdatePhone}
+            customization={customization}
+            onCustomizationChange={onCustomizationChange}
+          />
         )}
         <SitesDirectoryView
           onBack={() => setView(view.from ?? homeView)}
@@ -700,15 +708,6 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "staff-directory") return shell(<StaffDirectoryView onBack={() => setView(homeView)} />);
 
-  if (view.name === "customization")
-    return shell(
-      <CustomizationView
-        customization={customization}
-        onCustomizationChange={(next) => setMe((m) => (m ? { ...m, customization: next } : m))}
-        onBack={() => setView(homeView)}
-      />
-    );
-
   if (view.name === "callers-directory") return shell(<CallersDirectoryView onBack={() => setView(homeView)} />);
 
   if (view.name === "calls-needing-action")
@@ -725,7 +724,14 @@ export default function SimpleBusinessManager() {
   if (view.name === "staff-home")
     return shell(
       <>
-        <AppHeader me={me} onLogout={onLogout} onResetPin={onResetPin} onUpdatePhone={onUpdatePhone} />
+        <AppHeader
+          me={me}
+          onLogout={onLogout}
+          onResetPin={onResetPin}
+          onUpdatePhone={onUpdatePhone}
+          customization={customization}
+          onCustomizationChange={onCustomizationChange}
+        />
 
         {/* Staff home tiles: Pending Work, To-Do / Calendar, Site Visit,
             Complaints, and optional call todos when assigned. */}
@@ -914,6 +920,8 @@ export default function SimpleBusinessManager() {
         onLogout={onLogout}
         onResetPin={onResetPin}
         onUpdatePhone={onUpdatePhone}
+        customization={customization}
+        onCustomizationChange={onCustomizationChange}
         right={<span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>}
       >
         <StreakWall
@@ -980,9 +988,6 @@ export default function SimpleBusinessManager() {
         />
         {(me.role === "admin" || me.role === "superadmin") && (
           <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />
-        )}
-        {(me.role === "admin" || me.role === "superadmin") && (
-          <CustomizationTile onOpen={() => setView({ name: "customization" })} />
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
           <CallerTile count={callersCount} onOpen={() => setView({ name: "callers-directory" })} />
