@@ -5,7 +5,13 @@ import { today, isoDate } from "../../lib/dates.js";
 import { BackLink } from "../../components/BackLink.jsx";
 import { StreakWall } from "./StreakWall.jsx";
 import { CallActionCard } from "./CallActionCard.jsx";
-import { getCachedCallsNeedingAction, refreshCallsNeedingAction, resolveCall, postTodoVoiceNote } from "../../lib/api.js";
+import {
+  getCachedCallsNeedingAction,
+  loadCallsNeedingAction,
+  refreshCallsNeedingAction,
+  resolveCall,
+  postTodoVoiceNote,
+} from "../../lib/api.js";
 
 const CARD_GAP = 16;
 
@@ -67,9 +73,16 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   // DOM node by `key`, so an unchanged list causes no visible re-render and
   // scroll position is preserved). If there was no cache, this is what
   // populates the view the first time.
-  const load = useCallback(() => {
+  //
+  // `fetcher` defaults to the TTL-aware loader: a mount within the cache's
+  // TTL of the last fetch (e.g. hopping back into this view seconds after
+  // leaving it) resolves from the cache with no network round trip at all,
+  // rather than always re-hitting /api/calls/needing-action on every visit.
+  // Callers that just made a mutation (and so know the cache is stale) pass
+  // the forced refresher instead.
+  const load = useCallback((fetcher = loadCallsNeedingAction) => {
     setError("");
-    refreshCallsNeedingAction()
+    fetcher()
       .then(({ items: data, voiceNotesByTodoId: notes }) => {
         setItems(data);
         setVoiceNotesByTodoId(notes);
@@ -181,12 +194,23 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   };
 
   // Assignment itself is Dashboard.jsx's onAssignTodo (PATCH + its own
-  // global todoRefreshKey bump for other views) — this view isn't
-  // subscribed to that, so without a refresh here a card's "Assigned to…"
-  // label would stay stale until the next background tick.
+  // global todoRefreshKey bump for other views). It now returns the updated
+  // todo (with its fresh assignees[]) — patch this card's copy locally
+  // instead of a full network refetch just to pick that field up, then
+  // resync the shared cache in the background for the next cold open.
   const handleAssignTodo = async (todoId, userIds) => {
-    await onAssignTodo(todoId, userIds);
-    load();
+    const updated = await onAssignTodo(todoId, userIds);
+    if (updated?.id) {
+      setItems((list) =>
+        (list ?? []).map((call) => ({
+          ...call,
+          todos: call.todos.map((td) => (td.id === updated.id ? { ...td, ...updated } : td)),
+        }))
+      );
+    } else {
+      load(refreshCallsNeedingAction); // fallback: response shape unexpected, force a real refetch
+    }
+    refreshCallsNeedingAction().catch(() => {}); // resync the shared cache for next open
   };
 
   const handleResolve = async (callId) => {

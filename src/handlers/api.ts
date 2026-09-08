@@ -169,11 +169,14 @@ export async function handleGetCallsDay(request: Request, env: Env): Promise<Res
 export async function handleGetCallsByTodoStatus(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
-  const status = new URL(request.url).searchParams.get("status");
+  const url = new URL(request.url);
+  const status = url.searchParams.get("status");
   if (status !== "open" && status !== "snoozed") {
     return json({ error: "status must be open or snoozed" }, 400);
   }
-  return json(await listCallsByTodoStatus(env.DB, status));
+  const limitParam = Number(url.searchParams.get("limit"));
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 200) : 200;
+  return json(await listCallsByTodoStatus(env.DB, status, limit));
 }
 
 /** Calls Needing Action carousel — every call with an AI-generated todo list not yet resolved. */
