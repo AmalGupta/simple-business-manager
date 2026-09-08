@@ -100,6 +100,29 @@ export const SITES_GRID_CSS = `
   color: var(--color-ink-emphasis);
   font-weight: 700;
 }
+/* The site name as a link: inherits the cell's own weight and colour so
+   the column still reads as a column, with the underline as the only hint
+   that it opens something until you hover. */
+.sbm-sites-grid .sbm-site-link {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline;
+  /* Slate, not the hairline colour used for borders — at #E4E7EC on white
+     the underline was invisible at arm's length, which for the row's only
+     affordance is the same as not having one. */
+  text-decoration-color: var(--color-slate);
+  text-underline-offset: 3px;
+}
+.sbm-sites-grid .sbm-site-link:hover {
+  color: var(--color-accent);
+  text-decoration-color: var(--color-accent);
+}
 /* AG Grid's autoHeight wrapper defaults to min-width:auto, so it refuses
    to shrink below its content and a long caller line pushes the row's +
    out over the next column instead of ellipsing. Only the name cell uses

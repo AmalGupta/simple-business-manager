@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { t } from "../../theme.js";
 import { postSitesBackfill, patchSite } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
@@ -20,6 +20,23 @@ import { SitesReviewGrid } from "./SitesReviewGrid.jsx";
    ------------------------------------------------------------------ */
 export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
   const [pending, setPending] = useState(() => Object.fromEntries(sites.map((s) => [s.id, s.is_confirmed])));
+
+  /* Seeding only in the useState initializer wasn't enough: the dashboard
+     renders this view before its /api/sites fetch lands, so the map was
+     built from an empty list and every row afterwards read as an unsaved
+     change (undefined !== null). The screen opened claiming nineteen sites
+     needed updating, and the button would have patched is_confirmed
+     undefined across all of them. Seed only rows we haven't seen, so a
+     refetch mid-review never discards decisions still on screen. */
+  useEffect(() => {
+    setPending((current) => {
+      const unseen = sites.filter((s) => !(s.id in current));
+      if (unseen.length === 0) return current;
+      const next = { ...current };
+      for (const s of unseen) next[s.id] = s.is_confirmed;
+      return next;
+    });
+  }, [sites]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -50,6 +67,18 @@ export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
   const setChoice = (id, value) => {
     setSaved(false);
     setPending((p) => ({ ...p, [id]: p[id] === value ? null : value }));
+  };
+
+  /* The details dialog confirms as it saves — the one place on this screen
+     that writes immediately rather than batching, because filling in a
+     site's address and contact is a decision already made, not a triage
+     judgement being queued. The pending map has to move with it: leave it
+     null and the refetched 'Y' reads as an unsaved change, so the sticky
+     button would offer to set the site back to undecided. */
+  const saveDetails = async (site, patch) => {
+    await patchSite(site.id, patch);
+    setPending((p) => ({ ...p, [site.id]: "Y" }));
+    await onSaved();
   };
 
   const update = async () => {
@@ -103,6 +132,7 @@ export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
           onChoose={setChoice}
           canManage={canManage}
           onContactsChanged={onSaved}
+          onDetailsSaved={saveDetails}
         />
       )}
 
