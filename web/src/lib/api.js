@@ -13,6 +13,53 @@ async function fetchJSON(path) {
   return res.json();
 }
 
+/* Shared stale-while-revalidate cache, generalized from the
+   Calls-Needing-Action singleton below. A view can call `load(key)` on
+   mount to paint instantly from whatever's cached and only hit the
+   network if that entry is missing or past `ttlMs` — so hopping back and
+   forth between views (Open Items, Clients, Sites, ...) doesn't refetch
+   on every navigation, but data still can't go stale forever. `key` lets
+   one cache instance serve several variants (e.g. todo status, caller
+   category) without separate module-level singletons per view. */
+function createSwrCache(fetcher, { ttlMs = 20000 } = {}) {
+  const entries = new Map();
+
+  function get(key) {
+    return entries.get(key)?.data ?? null;
+  }
+
+  function isStale(key) {
+    const entry = entries.get(key);
+    return !entry || Date.now() - entry.fetchedAt > ttlMs;
+  }
+
+  function refresh(key, ...args) {
+    const existing = entries.get(key);
+    if (existing?.inFlight) return existing.inFlight;
+    const inFlight = fetcher(...args)
+      .then((data) => {
+        entries.set(key, { data, fetchedAt: Date.now(), inFlight: null });
+        return data;
+      })
+      .catch((err) => {
+        const entry = entries.get(key);
+        if (entry) entry.inFlight = null;
+        throw err;
+      });
+    entries.set(key, { data: existing?.data ?? null, fetchedAt: existing?.fetchedAt ?? 0, inFlight });
+    return inFlight;
+  }
+
+  /** Cache hit within TTL → resolves immediately, no network. Otherwise fetches. */
+  function load(key, ...args) {
+    const cached = get(key);
+    if (cached !== null && !isStale(key)) return Promise.resolve(cached);
+    return refresh(key, ...args);
+  }
+
+  return { get, isStale, refresh, load };
+}
+
 export async function fetchCalls() {
   const page = await fetchCallsPage({ include_low_signal: false });
   return page.items;
@@ -73,6 +120,19 @@ export async function fetchCallsByTodoStatus(status) {
   return fetchJSON(`/api/calls/by-todo-status?status=${encodeURIComponent(status)}`);
 }
 
+/* Cached by status (open / snoozed) — Open Items and Parked share this
+   endpoint/component, so caching by status keeps them independent. */
+const callsByTodoStatusCache = createSwrCache(fetchCallsByTodoStatus);
+export function getCachedCallsByTodoStatus(status) {
+  return callsByTodoStatusCache.get(status);
+}
+export function loadCallsByTodoStatus(status) {
+  return callsByTodoStatusCache.load(status, status);
+}
+export function refreshCallsByTodoStatus(status) {
+  return callsByTodoStatusCache.refresh(status, status);
+}
+
 /** Background hydrate after lean fetchCalls() — map of call id → transcript text (or null). */
 export async function fetchCallTranscripts() {
   return fetchJSON("/api/calls/transcripts");
@@ -106,6 +166,19 @@ export async function fetchSites() {
 
 export async function fetchConfirmedSites() {
   return fetchJSON("/api/sites/confirmed");
+}
+
+/* Sites Directory has one shape (no filters), so a single-key cache. */
+const confirmedSitesCache = createSwrCache(fetchConfirmedSites);
+const CONFIRMED_SITES_KEY = "default";
+export function getCachedConfirmedSites() {
+  return confirmedSitesCache.get(CONFIRMED_SITES_KEY);
+}
+export function loadConfirmedSites() {
+  return confirmedSitesCache.load(CONFIRMED_SITES_KEY);
+}
+export function refreshConfirmedSites() {
+  return confirmedSitesCache.refresh(CONFIRMED_SITES_KEY);
 }
 
 export async function postCreateSite(details) {
@@ -376,6 +449,21 @@ export async function fetchCallers({ category, q, limit, offset } = {}) {
   return res.json();
 }
 
+/* Callers Directory ("Clients" etc.) cached by category — only the
+   unfiltered, no-search browse view is cached; a live `q` search always
+   hits the network fresh since results are per-keystroke and shouldn't
+   linger in a shared cache. */
+const callersByCategoryCache = createSwrCache((category) => fetchCallers({ category }));
+export function getCachedCallersByCategory(category) {
+  return callersByCategoryCache.get(category);
+}
+export function loadCallersByCategory(category) {
+  return callersByCategoryCache.load(category, category);
+}
+export function refreshCallersByCategory(category) {
+  return callersByCategoryCache.refresh(category, category);
+}
+
 export async function postCreateCaller(input) {
   const res = await fetch("/api/callers", {
     method: "POST",
@@ -445,29 +533,22 @@ export async function fetchCallsNeedingAction() {
 /* Shared cache for the Calls Needing Action list — warmed on home-page load
    (see Dashboard.jsx) so opening the carousel tile renders instantly from
    cache instead of showing a loading state, while a background refresh
-   keeps it current. Module-level singleton: same origin, same session, no
-   need for localStorage — it just needs to survive across view mounts
-   within one page load. */
-let callsNeedingActionCache = null;
-let callsNeedingActionInFlight = null;
+   keeps it current. */
+const callsNeedingActionCache = createSwrCache(fetchCallsNeedingAction);
+const CALLS_NEEDING_ACTION_KEY = "default";
 
 export function getCachedCallsNeedingAction() {
-  return callsNeedingActionCache;
+  return callsNeedingActionCache.get(CALLS_NEEDING_ACTION_KEY);
 }
 
-/** Fetches fresh data, updates the shared cache, and returns it. Concurrent
- *  callers share one in-flight request rather than firing duplicate fetches. */
+/** Always hits the network and updates the cache — use after a mutation. */
 export function refreshCallsNeedingAction() {
-  if (callsNeedingActionInFlight) return callsNeedingActionInFlight;
-  callsNeedingActionInFlight = fetchCallsNeedingAction()
-    .then((data) => {
-      callsNeedingActionCache = data;
-      return data;
-    })
-    .finally(() => {
-      callsNeedingActionInFlight = null;
-    });
-  return callsNeedingActionInFlight;
+  return callsNeedingActionCache.refresh(CALLS_NEEDING_ACTION_KEY);
+}
+
+/** Cache hit within TTL resolves instantly with no request; otherwise refreshes. */
+export function loadCallsNeedingAction() {
+  return callsNeedingActionCache.load(CALLS_NEEDING_ACTION_KEY);
 }
 
 export async function resolveCall(callId) {

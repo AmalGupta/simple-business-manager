@@ -1315,16 +1315,18 @@ export async function getCallsDayView(db: D1Database, date: string): Promise<Cal
 /** Open / parked todo drilldowns — calls that have at least one todo in `status`. */
 export async function listCallsByTodoStatus(
   db: D1Database,
-  status: "open" | "snoozed"
+  status: "open" | "snoozed",
+  limit = 200
 ): Promise<CallRow[]> {
   const { sql: where, binds } = buildCallListWhere({ includeLowSignal: false });
   const { results: rawCalls } = await db
     .prepare(
       `${CALL_LIST_SELECT} ${where}
          AND calls.id IN (SELECT DISTINCT call_id FROM todos WHERE status = ?)
-       ORDER BY calls.recorded_at DESC, calls.id DESC`
+       ORDER BY calls.recorded_at DESC, calls.id DESC
+       LIMIT ?`
     )
-    .bind(...binds, status)
+    .bind(...binds, status, limit)
     .all<RawCallJoinRow>();
   return hydrateCallRows(db, rawCalls ?? []);
 }

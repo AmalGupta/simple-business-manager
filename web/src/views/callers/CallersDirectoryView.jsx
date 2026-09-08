@@ -1,7 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
 import { t } from "../../theme.js";
-import { fetchCallers, postCreateCaller, patchCaller } from "../../lib/api.js";
+import {
+  postCreateCaller,
+  patchCaller,
+  getCachedCallersByCategory,
+  loadCallersByCategory,
+  refreshCallersByCategory,
+} from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { AddCallerModal } from "./AddCallerModal.jsx";
@@ -35,18 +41,34 @@ const EMPTY_COUNTS = { spam: 0, client: 0, family: 0, staff: 0 };
    Client/staff categories are processed by Drive ingest (not skipped). */
 export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const [category, setCategory] = useState("client");
-  const [callers, setCallers] = useState(null);
-  const [counts, setCounts] = useState(EMPTY_COUNTS);
+  const [callers, setCallers] = useState(() => getCachedCallersByCategory("client")?.items ?? null);
+  const [counts, setCounts] = useState(() => ({
+    ...EMPTY_COUNTS,
+    ...(getCachedCallersByCategory("client")?.counts ?? {}),
+  }));
   const [showAddModal, setShowAddModal] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState("");
 
+  const applyData = (data) => {
+    setCallers(data.items ?? []);
+    setCounts({ ...EMPTY_COUNTS, ...(data.counts ?? {}) });
+  };
+
+  /** Cache-aware — instant paint if the category's cache is still fresh. */
   const load = useCallback((cat) => {
-    return fetchCallers({ category: cat })
-      .then((data) => {
-        setCallers(data.items ?? []);
-        setCounts({ ...EMPTY_COUNTS, ...(data.counts ?? {}) });
-      })
+    return loadCallersByCategory(cat)
+      .then(applyData)
+      .catch((err) => {
+        console.error("[sbm] failed to load callers", err);
+        setCallers([]);
+      });
+  }, []);
+
+  /** Bypasses the cache — use after a mutation that invalidates it. */
+  const reload = useCallback((cat) => {
+    return refreshCallersByCategory(cat)
+      .then(applyData)
       .catch((err) => {
         console.error("[sbm] failed to load callers", err);
         setCallers([]);
@@ -54,7 +76,9 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   }, []);
 
   useEffect(() => {
-    setCallers(null);
+    const hit = getCachedCallersByCategory(category);
+    if (hit) applyData(hit);
+    else setCallers(null);
     load(category);
   }, [category, load]);
 
@@ -63,7 +87,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
     setError("");
     try {
       await patchCaller(id, { category: nextCategory });
-      await load(category);
+      await reload(category);
     } catch (err) {
       console.error("[sbm] failed to update caller category", err);
       setError("Failed to update category — try again.");
@@ -194,10 +218,14 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
           onClose={() => setShowAddModal(false)}
           onCreate={async (input) => {
             const created = await postCreateCaller(input);
+            /* Either way the target category's cache is now stale — force a
+               real refetch rather than the plain `load`, which would happily
+               serve the pre-creation cached list if still within its TTL. */
             if (input.category && input.category !== category) {
               setCategory(input.category);
+              await refreshCallersByCategory(input.category);
             } else {
-              await load(category);
+              await reload(category);
             }
             return created;
           }}
