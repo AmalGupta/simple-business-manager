@@ -63,7 +63,8 @@ function contactsLabel(site) {
 /* The name is the row's one piece of prose, so it doubles as the way in
    to the details form — a discovered site arrives as a bare string, and
    this is where the H.No, sector and contact that make it a real record
-   get filled in. Staff see plain text: PATCH /api/sites/:id is admin-only,
+   get filled in, and where the string itself gets corrected if the call
+   was misheard. Staff see plain text: PATCH /api/sites/:id is admin-only,
    so a link would open a dialog that can't save. */
 function SiteNameCell({ site, canManage, onOpenDetails }) {
   if (!canManage) return site.name;
@@ -564,13 +565,15 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
       {detailsSite && (
         <SiteDetailsModal
           site={detailsSite}
-          /* The name is the title rather than a field: it's what was
-             clicked, and it isn't editable — the column is UNIQUE and
-             carries the pipeline's only handle on this site. */
+          /* Title is the name as it stands, so the row you clicked is still
+             identifiable once you've edited the field below it. Editable
+             here and nowhere else: this is the screen where a name the
+             extraction misheard gets corrected. */
           title={detailsSite.name}
-          intro="Saving marks this site valid and adds it to the confirmed sites list."
+          intro="Correct the name if the call got it wrong. Saving marks this site valid and adds it to the confirmed sites list."
           saveLabel="Save site"
           extraPatch={{ is_confirmed: "Y" }}
+          editableName
           onClose={() => setDetailsSite(null)}
           onSave={(patch) => onDetailsSaved(detailsSite, patch)}
         />

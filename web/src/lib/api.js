@@ -201,7 +201,12 @@ export async function patchSite(id, patch) {
     headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
     body: JSON.stringify(patch),
   });
-  if (!res.ok) throw new Error(`PATCH /api/sites/${id} → ${res.status}`);
+  /* Server message first: a rename can come back 409 "a site with that name
+     already exists", and the dialog shows this string to the operator. */
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/sites/${id} → ${res.status}`);
+  }
   return res.json();
 }
 
