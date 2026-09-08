@@ -10,6 +10,7 @@ import { postSiteContacts, postSiteVoiceNote } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
 import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
+import { SiteDetailsModal } from "./SiteDetailsModal.jsx";
 import {
   SITES_GRID_CSS,
   DateWindowFilter,
@@ -57,6 +58,25 @@ function callerLabel(site) {
 
 function contactsLabel(site) {
   return (site.contacts ?? []).map((c) => c.name).join(", ");
+}
+
+/* The name is the row's one piece of prose, so it doubles as the way in
+   to the details form — a discovered site arrives as a bare string, and
+   this is where the H.No, sector and contact that make it a real record
+   get filled in. Staff see plain text: PATCH /api/sites/:id is admin-only,
+   so a link would open a dialog that can't save. */
+function SiteNameCell({ site, canManage, onOpenDetails }) {
+  if (!canManage) return site.name;
+  return (
+    <button
+      type="button"
+      className="sbm-site-link"
+      onClick={() => onOpenDetails(site)}
+      title="Add site details and mark it valid"
+    >
+      {site.name}
+    </button>
+  );
 }
 
 /* Accent rather than the grey the other row affordances use: it's the
@@ -250,7 +270,7 @@ const EMPTY_FILTERS = { name: "", caller: "", callDate: "any", decision: "any" }
  * `pending` maps site id -> "Y" | "N" | null, owned by SitesReviewView so
  * the save stays batched. `onChoose(id, value)` toggles one row.
  */
-export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, onContactsChanged }) {
+export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, onContactsChanged, onDetailsSaved }) {
   const gridRef = useRef(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   /* The recording modal is owned here rather than by the mic cell: every
@@ -259,6 +279,7 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
   const [noteSite, setNoteSite] = useState(null);
   const [noteNotice, setNoteNotice] = useState("");
   const [contactsSite, setContactsSite] = useState(null);
+  const [detailsSite, setDetailsSite] = useState(null);
   /* The POST returns the site's full contact list, so hold it here and let
      it win over the fetched row: the names appear the moment the dialog
      closes rather than after the parent's refetch lands. */
@@ -310,6 +331,8 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
   }, []);
 
   const openContacts = useCallback((site) => setContactsSite(site), []);
+
+  const openDetails = useCallback((site) => setDetailsSite(site), []);
 
   const saveContacts = async (callerIds) => {
     const contacts = await postSiteContacts(contactsSite.id, callerIds);
@@ -390,7 +413,11 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
             <span
               style={{ display: "flex", flexDirection: "column", gap: 2, padding: "8px 0", width: "100%", minWidth: 0 }}
             >
-              <span>{p.data?.name}</span>
+              <span>
+                {p.data?.id ? (
+                  <SiteNameCell site={p.data} canManage={canManage} onOpenDetails={openDetails} />
+                ) : null}
+              </span>
               <span
                 style={{
                   display: "flex",
@@ -431,6 +458,8 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
         minWidth: 120,
         cellClass: "sbm-scol-name",
         valueGetter: (p) => p.data?.name ?? "",
+        cellRenderer: (p) =>
+          p.data?.id ? <SiteNameCell site={p.data} canManage={canManage} onOpenDetails={openDetails} /> : null,
       },
       {
         headerName: "Caller/Contact",
@@ -461,7 +490,7 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
       decisionCol,
       notesCol,
     ];
-  }, [narrow, onChoose, openNote, openContacts, canManage]);
+  }, [narrow, onChoose, openNote, openContacts, openDetails, canManage]);
 
   const defaultColDef = useMemo(
     () => ({
@@ -530,6 +559,20 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
           )}
           onClose={() => setContactsSite(null)}
           onSave={saveContacts}
+        />
+      )}
+      {detailsSite && (
+        <SiteDetailsModal
+          site={detailsSite}
+          /* The name is the title rather than a field: it's what was
+             clicked, and it isn't editable — the column is UNIQUE and
+             carries the pipeline's only handle on this site. */
+          title={detailsSite.name}
+          intro="Saving marks this site valid and adds it to the confirmed sites list."
+          saveLabel="Save site"
+          extraPatch={{ is_confirmed: "Y" }}
+          onClose={() => setDetailsSite(null)}
+          onSave={(patch) => onDetailsSaved(detailsSite, patch)}
         />
       )}
     </>

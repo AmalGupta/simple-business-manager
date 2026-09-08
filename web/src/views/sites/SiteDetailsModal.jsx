@@ -46,7 +46,20 @@ function FieldRow({ label, children }) {
   );
 }
 
-export function SiteDetailsModal({ site, onClose, onSave }) {
+/* `extraPatch` is for callers that are doing something to the site beyond
+   editing these fields — the review screen confirms as it saves. It's
+   merged in before the "nothing changed" check below, so those callers
+   still save when the operator only wanted to confirm and left every
+   field alone. */
+export function SiteDetailsModal({
+  site,
+  onClose,
+  onSave,
+  title = "Site details",
+  intro = "",
+  saveLabel = "Save details",
+  extraPatch = null,
+}) {
   const [values, setValues] = useState(() => {
     const initial = { target_closure_date: site?.target_closure_date ?? "" };
     for (const f of FIELDS) initial[f.key] = site?.[f.key] ?? "";
@@ -63,7 +76,7 @@ export function SiteDetailsModal({ site, onClose, onSave }) {
        eleven every save would stamp "address, sector, city updated" on a
        visit where nothing was touched. Comparing against the loaded
        record keeps the audit trail meaning what it says. */
-    const patch = {};
+    const patch = { ...extraPatch };
     for (const f of FIELDS) {
       const next = values[f.key].trim();
       const current = (site?.[f.key] ?? "").trim();
@@ -92,7 +105,8 @@ export function SiteDetailsModal({ site, onClose, onSave }) {
   };
 
   return (
-    <Modal label="Site details" title="Site details" onClose={onClose} width={420} scroll>
+    <Modal label="Site details" title={title} onClose={onClose} width={420} scroll>
+      {intro && <p style={{ fontSize: 12, color: t.edge2, margin: "0 0 12px" }}>{intro}</p>}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {FIELDS.map((f) => (
           <FieldRow key={f.key} label={f.label}>
@@ -138,7 +152,7 @@ export function SiteDetailsModal({ site, onClose, onSave }) {
           disabled={saving}
           style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}
         >
-          {saving ? "Saving…" : "Save details"}
+          {saving ? "Saving…" : saveLabel}
         </button>
       </div>
     </Modal>
