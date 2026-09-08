@@ -8,7 +8,7 @@ import { SitesReviewGrid } from "./SitesReviewGrid.jsx";
 /* ------------------------------------------------------------------
    Site review — reached via "Show unconfirmed sites" below Tile 3.
    Every site (discovered by the main extraction or the Haiku site scan),
-   with a Valid / Not valid decision per row. Changes are local until
+   with an Is Valid switch per row. Changes are local until
    "Update confirmed sites" — deliberately batched rather than saving
    per-toggle, so reviewing a dozen sites is a dozen taps, not a dozen
    round trips.

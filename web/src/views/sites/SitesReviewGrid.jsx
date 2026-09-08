@@ -3,9 +3,12 @@ import { AgGridReact } from "ag-grid-react";
 import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
+import { Mic } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtShort } from "../../lib/dates.js";
+import { postSiteVoiceNote } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
+import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
 import {
   SITES_GRID_CSS,
   DateWindowFilter,
@@ -21,8 +24,9 @@ ModuleRegistry.registerModules([AllCommunityModule]);
 /* ------------------------------------------------------------------
    The unconfirmed-sites review table. Same look and filter vocabulary
    as the confirmed-sites directory (sitesGridChrome.jsx), but the
-   Valid / Not valid decision is a column rather than the whole point of
-   a card row.
+   validity decision is a column — an Is Valid switch — rather than the
+   whole point of a card row, with a mic beside it for a voice note on
+   the sites that survive the decision.
 
    This screen carries the volume — the pipeline discovers far more site
    names than get confirmed — so sorting and filtering matter more here
@@ -50,20 +54,101 @@ function callerLabel(site) {
   return site.discovered_from_caller_name || "Unknown caller";
 }
 
-function choiceButtonStyle(active, kind) {
-  return {
-    flex: 1,
-    minWidth: 0,
-    padding: "6px 0",
-    border: `1px solid ${active ? (kind === "Y" ? t.accent : t.putty) : t.frost}`,
-    borderRadius: t.radiusButton,
-    background: active ? (kind === "Y" ? t.accent : t.puttyBg) : t.white,
-    color: active ? (kind === "Y" ? t.white : t.putty) : t.edge2,
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: "pointer",
-    whiteSpace: "nowrap",
-  };
+/* "Call date" is the date of the call the site name was extracted from,
+   not the site's most recent call — a distinction nothing on the row
+   makes on its own. The grid suppresses AG Grid's own tooltips (see
+   SITES_GRID_CSS and enableBrowserTooltips below), so this is a native
+   title on a custom header rather than `headerTooltip`, which would
+   render nothing. The class keeps the shared header typography. */
+function CallDateHeader() {
+  return (
+    <span
+      className="ag-header-cell-text"
+      title="Date of the call that helped discover this site"
+      style={{ cursor: "help" }}
+    >
+      Call date
+    </span>
+  );
+}
+
+/* One switch rather than the Valid / Not valid button pair, but the
+   decision still has three states — a row nobody has judged yet is not
+   the same as one judged invalid, and the "Undecided" filter is what
+   makes the backlog workable. So "off" carries two appearances: warn
+   tint for an explicit N, plain grey for untouched. The caption spells
+   out which, because a switch alone can only say on or off. */
+const DECISION_LOOK = {
+  Y: { caption: "Valid", track: t.accent, border: t.accent, knob: t.white, captionColor: t.accent },
+  N: { caption: "Not valid", track: t.puttyBg, border: t.putty, knob: t.putty, captionColor: t.putty },
+  null: { caption: "Undecided", track: t.white, border: t.frost, knob: t.frost, captionColor: t.edge2 },
+};
+
+function ValidSwitch({ site, decision, onChoose }) {
+  const look = DECISION_LOOK[decision ?? "null"];
+  const on = decision === "Y";
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minWidth: 0 }}>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        aria-label={`${site.name} is valid`}
+        onClick={() => onChoose(site.id, on ? "N" : "Y")}
+        style={{
+          flexShrink: 0,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: on ? "flex-end" : "flex-start",
+          width: 38,
+          height: 22,
+          padding: 2,
+          border: `1px solid ${look.border}`,
+          borderRadius: 999,
+          background: look.track,
+          cursor: "pointer",
+        }}
+      >
+        <span style={{ width: 16, height: 16, borderRadius: "50%", background: look.knob }} />
+      </button>
+      <span style={{ fontSize: 11, fontWeight: 600, color: look.captionColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {look.caption}
+      </span>
+    </span>
+  );
+}
+
+/* Gated on the pending decision, not the saved one: a voice note fans a
+   task out to the site's staff, which is only a sane thing to do once
+   someone has said the site is real. Marking a row Valid enables the mic
+   immediately rather than after the batched save, so the two decisions
+   can be made in one pass. */
+function AddNoteButton({ site, decision, onOpen }) {
+  const enabled = decision === "Y";
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(site)}
+      disabled={!enabled}
+      aria-label={enabled ? `Add voice note to ${site.name}` : `Mark ${site.name} valid to add notes`}
+      title={enabled ? "Add voice note" : "Mark the site valid to add notes"}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 32,
+        height: 32,
+        border: `1px solid ${t.frost}`,
+        borderRadius: t.radiusButton,
+        background: t.white,
+        color: t.edge2,
+        cursor: enabled ? "pointer" : "not-allowed",
+        opacity: enabled ? 1 : 0.4,
+      }}
+    >
+      <Mic size={14} />
+    </button>
+  );
 }
 
 function FilterBar({ filters, setFilters, shown, total }) {
@@ -72,7 +157,7 @@ function FilterBar({ filters, setFilters, shown, total }) {
     <div className="sbm-sites-filters">
       <TextFilter label="Site" value={filters.name} onChange={(v) => set("name", v)} placeholder="Search name…" />
       <TextFilter
-        label="Discovered by"
+        label="Caller/Contact"
         value={filters.caller}
         onChange={(v) => set("caller", v)}
         placeholder="Search caller…"
@@ -98,6 +183,11 @@ const EMPTY_FILTERS = { name: "", caller: "", callDate: "any", decision: "any" }
 export function SitesReviewGrid({ sites, pending, onChoose }) {
   const gridRef = useRef(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
+  /* The recording modal is owned here rather than by the mic cell: every
+     decision change rebuilds the row objects, so a cell-local state would
+     be thrown away mid-recording. */
+  const [noteSite, setNoteSite] = useState(null);
+  const [noteNotice, setNoteNotice] = useState("");
   const [narrow, setNarrow] = useState(
     typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)").matches : false
   );
@@ -134,48 +224,58 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
     });
   }, [rows, filters]);
 
+  const openNote = useCallback((site) => {
+    setNoteNotice("");
+    setNoteSite(site);
+  }, []);
+
+  /* Same route the site page uses: the memo becomes a call on the site,
+     is transcribed, and fans a task out to whoever is assigned. None of
+     that is visible from this screen, so say how many people got it
+     rather than letting the save look like it only filed an audio clip. */
+  const saveNote = async (blob, fileName) => {
+    const result = await postSiteVoiceNote(noteSite.id, blob, fileName);
+    const count = result?.assignedTo?.length ?? 0;
+    setNoteNotice(
+      count > 0
+        ? `Voice note saved to ${noteSite.name} and assigned to ${count} ${count === 1 ? "person" : "people"}.`
+        : `Voice note saved to ${noteSite.name}. No one is assigned to this site yet, so it wasn't given to anyone.`
+    );
+  };
+
   const columnDefs = useMemo(() => {
     const decisionCol = {
-      headerName: "Valid?",
+      headerName: "Is Valid",
       colId: "decision",
-      width: narrow ? 150 : 176,
+      width: narrow ? 128 : 132,
       suppressSizeToFit: true,
       sortable: true,
       cellClass: "sbm-scol-decision",
       /* "" for undecided sorts before "N" and "Y", so one click on this
          header brings everything still needing a judgement to the top. */
       valueGetter: (p) => p.data?.decision ?? "",
-      cellRenderer: (p) => {
-        const id = p.data?.id;
-        if (!id) return null;
-        return (
-          <span style={{ display: "flex", gap: 6, width: "100%" }}>
-            <button
-              type="button"
-              aria-pressed={p.data.decision === "Y"}
-              aria-label={`Mark ${p.data.name} valid`}
-              onClick={() => onChoose(id, "Y")}
-              style={choiceButtonStyle(p.data.decision === "Y", "Y")}
-            >
-              Valid
-            </button>
-            <button
-              type="button"
-              aria-pressed={p.data.decision === "N"}
-              aria-label={`Mark ${p.data.name} not valid`}
-              onClick={() => onChoose(id, "N")}
-              style={choiceButtonStyle(p.data.decision === "N", "N")}
-            >
-              Not valid
-            </button>
-          </span>
-        );
-      },
+      cellRenderer: (p) =>
+        p.data?.id ? <ValidSwitch site={p.data} decision={p.data.decision} onChoose={onChoose} /> : null,
     };
 
-    /* On a phone there isn't room for four columns, so the evidence
-       collapses into the site cell as a second line — which is what the
-       old card list showed — leaving name and decision side by side. */
+    const notesCol = {
+      /* Short label on a phone: at the width a 32px button needs, the
+         full "Add notes" only ever renders as "ADD N…". */
+      headerName: narrow ? "Notes" : "Add notes",
+      colId: "notes",
+      width: narrow ? 68 : 104,
+      suppressSizeToFit: true,
+      sortable: false,
+      resizable: false,
+      cellClass: "sbm-scol-notes",
+      cellRenderer: (p) =>
+        p.data?.id ? <AddNoteButton site={p.data} decision={p.data.decision} onOpen={openNote} /> : null,
+    };
+
+    /* On a phone there isn't room for the evidence columns, so they
+       collapse into the site cell as a second line — which is what the
+       old card list showed — leaving name, decision and mic side by
+       side. The last two are narrow enough to survive the squeeze. */
     if (narrow) {
       return [
         {
@@ -198,6 +298,7 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
           ),
         },
         decisionCol,
+        notesCol,
       ];
     }
 
@@ -205,13 +306,13 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
       {
         headerName: "Site",
         colId: "name",
-        flex: 1.5,
-        minWidth: 140,
+        flex: 1,
+        minWidth: 120,
         cellClass: "sbm-scol-name",
         valueGetter: (p) => p.data?.name ?? "",
       },
       {
-        headerName: "Discovered by",
+        headerName: "Caller/Contact",
         colId: "caller",
         flex: 1.4,
         minWidth: 150,
@@ -223,14 +324,16 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
         colId: "callDate",
         width: 118,
         suppressSizeToFit: true,
+        headerComponent: CallDateHeader,
         cellClass: "sbm-scol-calldate",
         valueGetter: (p) => p.data?.discovered_from_call_date ?? "",
         valueFormatter: (p) => (p.value ? fmtShort(p.value) : "—"),
         comparator: (a, b) => (a || "").localeCompare(b || ""),
       },
       decisionCol,
+      notesCol,
     ];
-  }, [narrow, onChoose]);
+  }, [narrow, onChoose, openNote]);
 
   const defaultColDef = useMemo(
     () => ({
@@ -261,6 +364,7 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
     <>
       <style>{SITES_GRID_CSS}</style>
       <FilterBar filters={filters} setFilters={setFilters} shown={filtered.length} total={rows.length} />
+      {noteNotice && <p style={{ fontSize: 12, color: t.edge2, margin: "0 0 12px" }}>{noteNotice}</p>}
       <Card
         style={{
           padding: 0,
@@ -289,6 +393,7 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
           </div>
         </div>
       </Card>
+      {noteSite && <VoiceNoteModal onClose={() => setNoteSite(null)} onSave={saveNote} />}
     </>
   );
 }

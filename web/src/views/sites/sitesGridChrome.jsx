@@ -129,11 +129,31 @@ export const SITES_GRID_CSS = `
   display: flex;
   align-items: center;
 }
-/* The decision cell holds two buttons, so it opts out of the flex
-   centering above and manages its own layout. */
+/* The decision and notes cells hold controls rather than text, so they
+   opt out of the flex centering above and manage their own layout. */
 .sbm-sites-grid .sbm-scol-decision {
   padding-top: 0;
   padding-bottom: 0;
+  /* Tighter than the grid default so the switch and its caption fit the
+     column without the caption ellipsing on a phone. */
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.sbm-sites-grid .sbm-scol-notes {
+  padding-top: 0;
+  padding-bottom: 0;
+  justify-content: center;
+}
+/* The mic column is sized by its 32px button, so the default cell padding
+   would eat the header label. Applies to the header too, otherwise the
+   label ellipses to "ADD N…". */
+.sbm-sites-grid .sbm-scol-notes,
+.sbm-sites-grid .ag-header-cell[col-id="notes"] {
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.sbm-sites-grid .ag-header-cell[col-id="notes"] .ag-header-cell-label {
+  justify-content: center;
 }
 /* Kill transparent / distracting tooltips, same as the calls grid. */
 .sbm-sites-grid .ag-tooltip,
