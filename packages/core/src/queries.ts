@@ -1556,6 +1556,8 @@ export interface SiteRow {
   /** Joined through discovered_from_call_id, never stored on the site row. */
   discovered_from_caller_name: string | null;
   discovered_from_call_date: string | null;
+  /** Linked Callers Directory rows (caller_sites). Merged in by the handler via getSiteContactsBySiteIds, same as ConfirmedSiteRow. */
+  contacts?: SiteContactRow[];
 }
 
 export interface SiteIntakeDetails {

@@ -3,12 +3,13 @@ import { AgGridReact } from "ag-grid-react";
 import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
-import { Mic } from "lucide-react";
+import { Mic, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtShort } from "../../lib/dates.js";
-import { postSiteVoiceNote } from "../../lib/api.js";
+import { postSiteContacts, postSiteVoiceNote } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
+import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
 import {
   SITES_GRID_CSS,
   DateWindowFilter,
@@ -52,6 +53,65 @@ const DECISION_FILTERS = [
 function callerLabel(site) {
   if (!site.discovered_from_call_id) return "No originating call";
   return site.discovered_from_caller_name || "Unknown caller";
+}
+
+function contactsLabel(site) {
+  return (site.contacts ?? []).map((c) => c.name).join(", ");
+}
+
+/* Who the site was first heard from, and who it belongs to, in one cell:
+   the discovering caller reads as evidence for the validity decision,
+   the linked contacts as the answer to "whose site is this". Two lines
+   rather than two columns because the second is usually empty — most
+   rows here have never been curated. */
+function CallerCell({ site, canManage, onAssociate }) {
+  const contacts = contactsLabel(site);
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minWidth: 0 }}>
+      <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0, flex: 1 }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {callerLabel(site)}
+        </span>
+        {contacts && (
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 400,
+              color: t.edge2,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {contacts}
+          </span>
+        )}
+      </span>
+      {canManage && (
+        <button
+          type="button"
+          onClick={() => onAssociate(site)}
+          aria-label={`Add associated contacts to ${site.name}`}
+          title="Add associated contacts"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            width: 24,
+            height: 24,
+            border: `1px solid ${t.frost}`,
+            borderRadius: t.radiusButton,
+            background: t.white,
+            color: t.edge2,
+            cursor: "pointer",
+          }}
+        >
+          <Plus size={14} />
+        </button>
+      )}
+    </span>
+  );
 }
 
 /* "Call date" is the date of the call the site name was extracted from,
@@ -180,7 +240,7 @@ const EMPTY_FILTERS = { name: "", caller: "", callDate: "any", decision: "any" }
  * `pending` maps site id -> "Y" | "N" | null, owned by SitesReviewView so
  * the save stays batched. `onChoose(id, value)` toggles one row.
  */
-export function SitesReviewGrid({ sites, pending, onChoose }) {
+export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, onContactsChanged }) {
   const gridRef = useRef(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   /* The recording modal is owned here rather than by the mic cell: every
@@ -188,6 +248,11 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
      be thrown away mid-recording. */
   const [noteSite, setNoteSite] = useState(null);
   const [noteNotice, setNoteNotice] = useState("");
+  const [contactsSite, setContactsSite] = useState(null);
+  /* The POST returns the site's full contact list, so hold it here and let
+     it win over the fetched row: the names appear the moment the dialog
+     closes rather than after the parent's refetch lands. */
+  const [contactsBySite, setContactsBySite] = useState({});
   const [narrow, setNarrow] = useState(
     typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)").matches : false
   );
@@ -205,8 +270,13 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
      diffs against getRowId and refreshes on its own — no manual
      refreshCells call, and the decision column stays sortable. */
   const rows = useMemo(
-    () => (sites ?? []).map((s) => ({ ...s, decision: pending[s.id] ?? null })),
-    [sites, pending]
+    () =>
+      (sites ?? []).map((s) => ({
+        ...s,
+        decision: pending[s.id] ?? null,
+        contacts: contactsBySite[s.id] ?? s.contacts ?? [],
+      })),
+    [sites, pending, contactsBySite]
   );
 
   const filtered = useMemo(() => {
@@ -228,6 +298,16 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
     setNoteNotice("");
     setNoteSite(site);
   }, []);
+
+  const openContacts = useCallback((site) => setContactsSite(site), []);
+
+  const saveContacts = async (callerIds) => {
+    const contacts = await postSiteContacts(contactsSite.id, callerIds);
+    setContactsBySite((current) => ({ ...current, [contactsSite.id]: contacts }));
+    // Server truth for every other screen reading this list (and for a
+    // later remount of this one) — the local override is only the bridge.
+    await onContactsChanged?.();
+  };
 
   /* Same route the site page uses: the memo becomes a call on the site,
      is transcribed, and fans a task out to whoever is assigned. None of
@@ -288,12 +368,42 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
           wrapText: true,
           valueGetter: (p) => p.data?.name ?? "",
           cellRenderer: (p) => (
-            <span style={{ display: "flex", flexDirection: "column", gap: 2, padding: "8px 0" }}>
-              <span>{p.data?.name}</span>
-              <span style={{ fontSize: 11, fontWeight: 400, color: t.edge2 }}>
-                {callerLabel(p.data ?? {})}
-                {p.data?.discovered_from_call_date ? ` · ${fmtShort(p.data.discovered_from_call_date)}` : ""}
+            <span style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", width: "100%" }}>
+              <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+                <span>{p.data?.name}</span>
+                <span style={{ fontSize: 11, fontWeight: 400, color: t.edge2 }}>
+                  {callerLabel(p.data ?? {})}
+                  {p.data?.discovered_from_call_date ? ` · ${fmtShort(p.data.discovered_from_call_date)}` : ""}
+                </span>
+                {contactsLabel(p.data ?? {}) && (
+                  <span style={{ fontSize: 11, fontWeight: 400, color: t.edge2 }}>
+                    {contactsLabel(p.data)}
+                  </span>
+                )}
               </span>
+              {canManage && p.data?.id && (
+                <button
+                  type="button"
+                  onClick={() => openContacts(p.data)}
+                  aria-label={`Add associated contacts to ${p.data.name}`}
+                  title="Add associated contacts"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexShrink: 0,
+                    width: 24,
+                    height: 24,
+                    border: `1px solid ${t.frost}`,
+                    borderRadius: t.radiusButton,
+                    background: t.white,
+                    color: t.edge2,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Plus size={14} />
+                </button>
+              )}
             </span>
           ),
         },
@@ -315,9 +425,16 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
         headerName: "Caller/Contact",
         colId: "caller",
         flex: 1.4,
-        minWidth: 150,
-        cellClass: (p) => (p.data?.discovered_from_call_id ? "sbm-scol-caller" : "sbm-scol-caller sbm-no-origin"),
+        minWidth: 170,
+        cellClass: (p) =>
+          p.data?.discovered_from_call_id || (p.data?.contacts ?? []).length > 0
+            ? "sbm-scol-caller"
+            : "sbm-scol-caller sbm-no-origin",
+        /* Sorts and filters on the caller, not the contacts — the column
+           is still primarily the provenance of the row. */
         valueGetter: (p) => callerLabel(p.data ?? {}),
+        cellRenderer: (p) =>
+          p.data?.id ? <CallerCell site={p.data} canManage={canManage} onAssociate={openContacts} /> : null,
       },
       {
         headerName: "Call date",
@@ -333,7 +450,7 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
       decisionCol,
       notesCol,
     ];
-  }, [narrow, onChoose, openNote]);
+  }, [narrow, onChoose, openNote, openContacts, canManage]);
 
   const defaultColDef = useMemo(
     () => ({
@@ -394,6 +511,16 @@ export function SitesReviewGrid({ sites, pending, onChoose }) {
         </div>
       </Card>
       {noteSite && <VoiceNoteModal onClose={() => setNoteSite(null)} onSave={saveNote} />}
+      {contactsSite && (
+        <AssociateContactsModal
+          site={contactsSite}
+          existingContactIds={(contactsBySite[contactsSite.id] ?? contactsSite.contacts ?? []).map(
+            (c) => c.caller_id
+          )}
+          onClose={() => setContactsSite(null)}
+          onSave={saveContacts}
+        />
+      )}
     </>
   );
 }
