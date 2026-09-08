@@ -18,7 +18,7 @@ import { SitesReviewGrid } from "./SitesReviewGrid.jsx";
    and shows each site's originating caller and call date so the decision
    is a judgement on evidence rather than on a bare string.
    ------------------------------------------------------------------ */
-export function SitesReviewView({ sites, onBack, onSaved }) {
+export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
   const [pending, setPending] = useState(() => Object.fromEntries(sites.map((s) => [s.id, s.is_confirmed])));
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -97,7 +97,13 @@ export function SitesReviewView({ sites, onBack, onSaved }) {
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No sites yet.</p>
         </Card>
       ) : (
-        <SitesReviewGrid sites={sites} pending={pending} onChoose={setChoice} />
+        <SitesReviewGrid
+          sites={sites}
+          pending={pending}
+          onChoose={setChoice}
+          canManage={canManage}
+          onContactsChanged={onSaved}
+        />
       )}
 
       {/* Sticky, because the whole point of batching is to decide many rows
