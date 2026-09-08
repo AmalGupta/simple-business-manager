@@ -100,6 +100,15 @@ export const SITES_GRID_CSS = `
   color: var(--color-ink-emphasis);
   font-weight: 700;
 }
+/* AG Grid's autoHeight wrapper defaults to min-width:auto, so it refuses
+   to shrink below its content and a long caller line pushes the row's +
+   out over the next column instead of ellipsing. Only the name cell uses
+   autoHeight, and only on a phone, but the reset is harmless elsewhere. */
+.sbm-sites-grid .sbm-scol-name.ag-cell,
+.sbm-sites-grid .sbm-scol-name .ag-cell-wrapper,
+.sbm-sites-grid .sbm-scol-name .ag-cell-value {
+  min-width: 0;
+}
 .sbm-sites-grid .sbm-scol-open,
 .sbm-sites-grid .sbm-scol-activity,
 .sbm-sites-grid .sbm-scol-discovered,

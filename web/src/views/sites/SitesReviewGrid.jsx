@@ -59,6 +59,38 @@ function contactsLabel(site) {
   return (site.contacts ?? []).map((c) => c.name).join(", ");
 }
 
+/* Accent rather than the grey the other row affordances use: it's the
+   only control here that adds data instead of judging what's already
+   there, and at 24px next to two lines of text a hairline grey square
+   read as decoration. Outline, not filled — one per row, and a column
+   of filled blue would shout over the decision switch. */
+function AssociateButton({ site, onAssociate }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onAssociate(site)}
+      aria-label={`Add associated contacts to ${site.name}`}
+      title="Add associated contacts"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        width: 24,
+        height: 24,
+        border: `1px solid ${t.accent}`,
+        borderRadius: t.radiusButton,
+        background: t.white,
+        color: t.accent,
+        cursor: "pointer",
+        padding: 0,
+      }}
+    >
+      <Plus size={14} />
+    </button>
+  );
+}
+
 /* Who the site was first heard from, and who it belongs to, in one cell:
    the discovering caller reads as evidence for the validity decision,
    the linked contacts as the answer to "whose site is this". Two lines
@@ -87,29 +119,7 @@ function CallerCell({ site, canManage, onAssociate }) {
           </span>
         )}
       </span>
-      {canManage && (
-        <button
-          type="button"
-          onClick={() => onAssociate(site)}
-          aria-label={`Add associated contacts to ${site.name}`}
-          title="Add associated contacts"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-            width: 24,
-            height: 24,
-            border: `1px solid ${t.frost}`,
-            borderRadius: t.radiusButton,
-            background: t.white,
-            color: t.edge2,
-            cursor: "pointer",
-          }}
-        >
-          <Plus size={14} />
-        </button>
-      )}
+      {canManage && <AssociateButton site={site} onAssociate={onAssociate} />}
     </span>
   );
 }
@@ -343,7 +353,11 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
          full "Add notes" only ever renders as "ADD N…". */
       headerName: narrow ? "Notes" : "Add notes",
       colId: "notes",
-      width: narrow ? 68 : 104,
+      /* 56 on a phone is the 32px button plus its 8px cell padding and a
+         hair over for the "Notes" label — the 12px this gives back to the
+         site column is what keeps "No originating call" off the ellipsis
+         now that the + shares that line. */
+      width: narrow ? 56 : 104,
       suppressSizeToFit: true,
       sortable: false,
       resizable: false,
@@ -367,42 +381,39 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
           autoHeight: true,
           wrapText: true,
           valueGetter: (p) => p.data?.name ?? "",
+          /* The + sits inline after the caller line rather than at the
+             right edge of the cell, where the decision and mic columns
+             squeezed it out of the viewport on a phone. Beside the name
+             it reads as belonging to the contacts, and it can't be
+             clipped: the text ellipsises around it. */
           cellRenderer: (p) => (
-            <span style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", width: "100%" }}>
-              <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-                <span>{p.data?.name}</span>
-                <span style={{ fontSize: 11, fontWeight: 400, color: t.edge2 }}>
+            <span
+              style={{ display: "flex", flexDirection: "column", gap: 2, padding: "8px 0", width: "100%", minWidth: 0 }}
+            >
+              <span>{p.data?.name}</span>
+              <span
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  minWidth: 0,
+                  fontSize: 11,
+                  fontWeight: 400,
+                  color: t.edge2,
+                }}
+              >
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {callerLabel(p.data ?? {})}
                   {p.data?.discovered_from_call_date ? ` · ${fmtShort(p.data.discovered_from_call_date)}` : ""}
                 </span>
-                {contactsLabel(p.data ?? {}) && (
-                  <span style={{ fontSize: 11, fontWeight: 400, color: t.edge2 }}>
-                    {contactsLabel(p.data)}
-                  </span>
+                {canManage && p.data?.id && (
+                  <AssociateButton site={p.data} onAssociate={openContacts} />
                 )}
               </span>
-              {canManage && p.data?.id && (
-                <button
-                  type="button"
-                  onClick={() => openContacts(p.data)}
-                  aria-label={`Add associated contacts to ${p.data.name}`}
-                  title="Add associated contacts"
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                    width: 24,
-                    height: 24,
-                    border: `1px solid ${t.frost}`,
-                    borderRadius: t.radiusButton,
-                    background: t.white,
-                    color: t.edge2,
-                    cursor: "pointer",
-                  }}
-                >
-                  <Plus size={14} />
-                </button>
+              {contactsLabel(p.data ?? {}) && (
+                <span style={{ fontSize: 11, fontWeight: 400, color: t.edge2 }}>
+                  {contactsLabel(p.data)}
+                </span>
               )}
             </span>
           ),
