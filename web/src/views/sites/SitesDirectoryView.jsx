@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Plus } from "lucide-react";
 import { t } from "../../theme.js";
-import { fetchConfirmedSites } from "../../lib/api.js";
+import { getCachedConfirmedSites, loadConfirmedSites } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { SitesGrid } from "./SitesGrid.jsx";
@@ -24,11 +24,13 @@ export function SitesDirectoryView({
   innerScrolls = false,
   horizontalScrolls = false,
 }) {
-  const [sites, setSites] = useState(null);
+  const [sites, setSites] = useState(() => getCachedConfirmedSites());
 
   useEffect(() => {
     let cancelled = false;
-    fetchConfirmedSites()
+    /* Instant paint from cache when fresh (per-view TTL in api.js);
+       otherwise falls through to a real fetch — see loadConfirmedSites. */
+    loadConfirmedSites()
       .then((data) => {
         if (!cancelled) setSites(data);
       })

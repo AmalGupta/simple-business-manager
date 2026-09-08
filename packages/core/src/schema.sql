@@ -13,7 +13,7 @@ CREATE TABLE callers (
   staff_user_id  TEXT REFERENCES users(id),        -- set when this caller IS a staff member's own number
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_callers_category ON callers(category);
+CREATE INDEX idx_callers_category ON callers(category, name); -- migration 0029: covers ORDER BY callers.name too
 CREATE INDEX idx_callers_staff_user ON callers(staff_user_id);
 
 CREATE TABLE calls (

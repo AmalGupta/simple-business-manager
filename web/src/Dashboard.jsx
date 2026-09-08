@@ -409,18 +409,18 @@ export default function SimpleBusinessManager() {
      Also refresh my_open_todos so an admin "Assign to me" shows up on the
      personal queue tile without a full page reload. */
   const onAssignTodo = useCallback(async (todoId, userIds) => {
+    const updated = await patchTodo(todoId, { assigned_to_user_ids: userIds });
+    setTodoRefreshKey((k) => k + 1);
     try {
-      await patchTodo(todoId, { assigned_to_user_ids: userIds });
-      setTodoRefreshKey((k) => k + 1);
-      try {
-        const summary = await fetchDashboardSummary();
-        setMyOpenTodos(summary.my_open_todos ?? []);
-      } catch (err) {
-        console.error("[sbm] failed to refresh my open todos after assign", err);
-      }
+      const summary = await fetchDashboardSummary();
+      setMyOpenTodos(summary.my_open_todos ?? []);
     } catch (err) {
-      throw err;
+      console.error("[sbm] failed to refresh my open todos after assign", err);
     }
+    // Callers that already have the full todo in hand (e.g. the Calls
+    // Needing Action carousel) can patch their own list locally with this
+    // instead of doing a full network refetch just to pick up assignees[].
+    return updated;
   }, []);
 
   useEffect(() => {
