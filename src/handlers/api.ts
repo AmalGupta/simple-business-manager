@@ -17,6 +17,8 @@ import {
   getCallsDayView,
   getCallDiarizedForExtract,
   getCallsNeedingAction,
+  getCallsNeedingActionCalendar,
+  CALLS_NEEDING_ACTION_MAX_LIMIT,
   getCallWithTodos,
   getCallerById,
   getConfirmedSitesSummary,
@@ -179,14 +181,49 @@ export async function handleGetCallsByTodoStatus(request: Request, env: Env): Pr
   return json(await listCallsByTodoStatus(env.DB, status, limit));
 }
 
-/** Calls Needing Action carousel — every call with an AI-generated todo list not yet resolved. */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Calls Needing Action carousel — one date window's worth of calls with an
+ * AI-generated todo list not yet resolved. The window is optional so that
+ * omitting it still means "everything up to the limit", but the carousel
+ * always sends one: it opens on the last 5 days and widens as you scroll.
+ */
 export async function handleGetCallsNeedingAction(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
-  const items = await getCallsNeedingAction(env.DB);
+  const params = new URL(request.url).searchParams;
+  const dateFrom = params.get("date_from")?.trim() || null;
+  const dateTo = params.get("date_to")?.trim() || null;
+  for (const [name, value] of [
+    ["date_from", dateFrom],
+    ["date_to", dateTo],
+  ] as const) {
+    if (value && !ISO_DATE.test(value)) return json({ error: `${name} must be yyyy-mm-dd` }, 400);
+  }
+  const limitParam = Number(params.get("limit"));
+  const limit =
+    Number.isFinite(limitParam) && limitParam > 0
+      ? Math.min(limitParam, CALLS_NEEDING_ACTION_MAX_LIMIT)
+      : CALLS_NEEDING_ACTION_MAX_LIMIT;
+
+  const items = await getCallsNeedingAction(env.DB, { dateFrom, dateTo, limit });
   const todoIds = items.flatMap((c) => c.todos.map((td) => td.id));
   const voiceNotesByTodo = await getLatestVoiceNotesByTodoIds(env.DB, todoIds);
   return json({ items, voice_notes_by_todo_id: Object.fromEntries(voiceNotesByTodo) });
+}
+
+/** Per-day qualifying-call counts for the carousel's date strip. */
+export async function handleGetCallsNeedingActionCalendar(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const params = new URL(request.url).searchParams;
+  const year = Number.parseInt(params.get("year") ?? "", 10);
+  const month = Number.parseInt(params.get("month") ?? "", 10);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+    return json({ error: "year and month (1–12) required" }, 400);
+  }
+  return json(await getCallsNeedingActionCalendar(env.DB, year, month));
 }
 
 /** Manual admin ack that a call has been reviewed — unconditional, no gate on open todos. */
@@ -534,8 +571,6 @@ const SITE_PATCH_KEYS = [
 const SITE_TEXT_PATCH_KEYS = SITE_PATCH_KEYS.filter(
   (k) => k !== "name" && k !== "is_confirmed" && k !== "target_closure_date"
 );
-
-const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export async function handlePatchSite(request: Request, env: Env, id: string): Promise<Response> {
   const gate = await requireAdmin(request, env);

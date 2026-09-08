@@ -1,3 +1,5 @@
+import { addDaysIso, todayIso } from "./dates.js";
+
 /* Same-origin API, gated by the X-SBM-Key shared secret — see
    docs/BUILD_BRIEF.md "No Cloudflare Access on this worker". Baked in at
    build time (web/.env, gitignored) since this is a static SPA with no
@@ -524,10 +526,27 @@ export async function postSiteVoiceNote(siteId, blob, fileName) {
    notes (a plain multipart POST/`<audio>` GET can't reliably carry the
    custom header). */
 
+/** How many days back the carousel opens on, and how far each widening step
+ *  reaches. */
+export const CNA_WINDOW_DAYS = 5;
+
+/** The window the carousel opens on: the last CNA_WINDOW_DAYS days through
+ *  today. Shared with the home-page cache warm-up so the two can't pick
+ *  different windows and miss each other's cache entry. */
+export function defaultCallsNeedingActionWindow() {
+  const to = todayIso();
+  return { dateFrom: addDaysIso(to, -CNA_WINDOW_DAYS), dateTo: to };
+}
+
 /** Returns { items, voiceNotesByTodoId } — the latter a Map<todoId, TodoVoiceNote>. */
-export async function fetchCallsNeedingAction() {
-  const res = await fetch("/api/calls/needing-action", { headers: { "X-SBM-Key": SBM_KEY } });
-  if (!res.ok) throw new Error(`GET /api/calls/needing-action → ${res.status}`);
+export async function fetchCallsNeedingAction({ dateFrom = null, dateTo = null } = {}) {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  const qs = params.toString();
+  const url = `/api/calls/needing-action${qs ? `?${qs}` : ""}`;
+  const res = await fetch(url, { headers: { "X-SBM-Key": SBM_KEY } });
+  if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
   const data = await res.json();
   return {
     items: data.items ?? [],
@@ -535,25 +554,33 @@ export async function fetchCallsNeedingAction() {
   };
 }
 
-/* Shared cache for the Calls Needing Action list — warmed on home-page load
-   (see Dashboard.jsx) so opening the carousel tile renders instantly from
-   cache instead of showing a loading state, while a background refresh
-   keeps it current. */
+/* Shared cache for the Calls Needing Action list, keyed by date window — the
+   carousel loads one window at a time and merges them client-side, so each
+   window is its own cache entry (same pattern as callsByTodoStatusCache).
+   The default window is warmed on home-page load (see Dashboard.jsx) so
+   opening the carousel tile renders instantly from cache instead of showing
+   a loading state, while a background refresh keeps it current. */
 const callsNeedingActionCache = createSwrCache(fetchCallsNeedingAction);
-const CALLS_NEEDING_ACTION_KEY = "default";
 
-export function getCachedCallsNeedingAction() {
-  return callsNeedingActionCache.get(CALLS_NEEDING_ACTION_KEY);
+const windowKey = ({ dateFrom = null, dateTo = null } = {}) => `${dateFrom ?? ""}..${dateTo ?? ""}`;
+
+export function getCachedCallsNeedingAction(window) {
+  return callsNeedingActionCache.get(windowKey(window));
 }
 
 /** Always hits the network and updates the cache — use after a mutation. */
-export function refreshCallsNeedingAction() {
-  return callsNeedingActionCache.refresh(CALLS_NEEDING_ACTION_KEY);
+export function refreshCallsNeedingAction(window) {
+  return callsNeedingActionCache.refresh(windowKey(window), window);
 }
 
 /** Cache hit within TTL resolves instantly with no request; otherwise refreshes. */
-export function loadCallsNeedingAction() {
-  return callsNeedingActionCache.load(CALLS_NEEDING_ACTION_KEY);
+export function loadCallsNeedingAction(window) {
+  return callsNeedingActionCache.load(windowKey(window), window);
+}
+
+/** Per-day qualifying-call counts for the carousel's date strip — { days, min_year }. */
+export async function fetchCallsNeedingActionCalendar(year, month) {
+  return fetchJSON(`/api/calls/needing-action/calendar?year=${year}&month=${month}`);
 }
 
 export async function resolveCall(callId) {

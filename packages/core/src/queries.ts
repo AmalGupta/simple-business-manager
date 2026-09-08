@@ -1049,6 +1049,13 @@ const CALL_LIST_FROM = `
   LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
 `;
 
+/* When a call actually happened: the recorder's filename timestamp, falling
+   back to upload time (migration 0004). Byte-identical to the expression
+   indexed by idx_calls_effective_date and idx_calls_needing_action — SQLite
+   matches expression indexes by shape, so reformatting this string silently
+   turns every date filter back into a table scan. */
+const CALL_EFFECTIVE_DATE = `COALESCE(calls.recording_date, substr(calls.recorded_at, 1, 10))`;
+
 function buildCallListWhere(filters: CallListFilters): { sql: string; binds: unknown[] } {
   const clauses = ["calls.deleted_at IS NULL", "calls.stt_status != 'skipped'"];
   const binds: unknown[] = [];
@@ -1060,11 +1067,11 @@ function buildCallListWhere(filters: CallListFilters): { sql: string; binds: unk
     clauses.push("(calls.call_type IS NULL OR calls.call_type != 'low_signal')");
   }
   if (filters.dateFrom) {
-    clauses.push("COALESCE(calls.recording_date, substr(calls.recorded_at, 1, 10)) >= ?");
+    clauses.push(`${CALL_EFFECTIVE_DATE} >= ?`);
     binds.push(filters.dateFrom);
   }
   if (filters.dateTo) {
-    clauses.push("COALESCE(calls.recording_date, substr(calls.recorded_at, 1, 10)) <= ?");
+    clauses.push(`${CALL_EFFECTIVE_DATE} <= ?`);
     binds.push(filters.dateTo);
   }
   if (filters.callers?.length) {
@@ -1406,36 +1413,109 @@ export async function getTodoRowWithAssignees(db: D1Database, id: string): Promi
 // todo list not yet explicitly resolved. See migration 0025.
 // ---------------------------------------------------------------------------
 
+/* What qualifies a call for the carousel, shared by the list, the tile count
+   and the date strip so the three can't drift apart. NOT gated on remaining
+   open todos — resolve is a manual ack, independent of todo completion, so an
+   all-done-but-unresolved call stays listed until the admin taps Resolve. */
+const CALLS_NEEDING_ACTION_WHERE = `calls.resolved_at IS NULL
+     AND calls.deleted_at IS NULL
+     AND EXISTS (SELECT 1 FROM todos WHERE todos.call_id = calls.id AND todos.origin = 'llm')`;
+
+export const CALLS_NEEDING_ACTION_MAX_LIMIT = 200;
+
+export interface CallsNeedingActionWindow {
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  limit?: number;
+}
+
 /**
- * Every call with >=1 LLM-generated todo, not yet explicitly resolved by an
- * admin. NOT gated on remaining open todos — resolve is a manual ack,
- * independent of todo completion, so an all-done-but-unresolved call stays
- * listed until the admin taps Resolve. Ordered oldest-first so the carousel
- * and its date slider agree on ordering.
+ * One date window's worth of qualifying calls, oldest-first so the carousel
+ * and its date strip agree on ordering. The window is what keeps this cheap:
+ * unwindowed, ~99% of the calls table qualifies (see migration 0027), so the
+ * old bare LIMIT 200 silently showed a fraction of the set and disagreed with
+ * the tile count. An absent window still means "everything", capped at the
+ * limit — CSV-style callers can keep asking for that.
  */
-export async function getCallsNeedingAction(db: D1Database, limit = 200): Promise<CallRow[]> {
+export async function getCallsNeedingAction(
+  db: D1Database,
+  opts: CallsNeedingActionWindow = {}
+): Promise<CallRow[]> {
+  const limit = Math.min(
+    Math.max(1, opts.limit ?? CALLS_NEEDING_ACTION_MAX_LIMIT),
+    CALLS_NEEDING_ACTION_MAX_LIMIT
+  );
+  const clauses = [CALLS_NEEDING_ACTION_WHERE];
+  const binds: unknown[] = [];
+  if (opts.dateFrom) {
+    clauses.push(`${CALL_EFFECTIVE_DATE} >= ?`);
+    binds.push(opts.dateFrom);
+  }
+  if (opts.dateTo) {
+    clauses.push(`${CALL_EFFECTIVE_DATE} <= ?`);
+    binds.push(opts.dateTo);
+  }
   const { results } = await db
     .prepare(
-      `${CALL_LIST_SELECT} WHERE calls.resolved_at IS NULL
-         AND calls.deleted_at IS NULL
-         AND EXISTS (SELECT 1 FROM todos WHERE todos.call_id = calls.id AND todos.origin = 'llm')
-       ORDER BY COALESCE(calls.recording_date, substr(calls.recorded_at, 1, 10)) ASC, calls.recorded_at ASC
+      `${CALL_LIST_SELECT} WHERE ${clauses.join("\n     AND ")}
+       ORDER BY ${CALL_EFFECTIVE_DATE} ASC, calls.recorded_at ASC
        LIMIT ?`
     )
-    .bind(limit)
+    .bind(...binds, limit)
     .all<RawCallJoinRow>();
   return hydrateCallRows(db, results ?? []);
 }
 
 export async function countCallsNeedingAction(db: D1Database): Promise<number> {
   const row = await db
-    .prepare(
-      `SELECT COUNT(*) AS n FROM calls
-       WHERE calls.resolved_at IS NULL AND calls.deleted_at IS NULL
-         AND EXISTS (SELECT 1 FROM todos WHERE todos.call_id = calls.id AND todos.origin = 'llm')`
-    )
+    .prepare(`SELECT COUNT(*) AS n FROM calls WHERE ${CALLS_NEEDING_ACTION_WHERE}`)
     .first<{ n: number }>();
   return row?.n ?? 0;
+}
+
+/**
+ * Qualifying-call counts per day for one month, for the carousel's date strip.
+ * getCallsCalendar can't be reused: it groups on `recorded_at` (upload time)
+ * and counts every call, so its dots would point at days the carousel has
+ * nothing on. This groups on the same effective-date expression the list
+ * orders by, over the same qualifying set.
+ */
+export async function getCallsNeedingActionCalendar(
+  db: D1Database,
+  year: number,
+  month: number
+): Promise<CallsCalendarResult> {
+  const monthIndex = month - 1;
+  if (monthIndex < 0 || monthIndex > 11) throw new Error("invalid month");
+  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
+
+  const [{ results: dayRows }, minRow] = await Promise.all([
+    db
+      .prepare(
+        `SELECT ${CALL_EFFECTIVE_DATE} AS day, COUNT(*) AS n
+         FROM calls
+         WHERE ${CALLS_NEEDING_ACTION_WHERE}
+           AND ${CALL_EFFECTIVE_DATE} >= ?
+           AND ${CALL_EFFECTIVE_DATE} <= ?
+         GROUP BY day`
+      )
+      .bind(monthStart, monthEnd)
+      .all<{ day: string; n: number }>(),
+    db
+      .prepare(
+        `SELECT MIN(CAST(substr(${CALL_EFFECTIVE_DATE}, 1, 4) AS INTEGER)) AS min_year
+         FROM calls
+         WHERE ${CALLS_NEEDING_ACTION_WHERE}`
+      )
+      .first<{ min_year: number | null }>(),
+  ]);
+
+  const days: Record<string, number> = {};
+  for (const row of dayRows ?? []) if (row.day) days[row.day] = row.n;
+
+  return { days, min_year: minRow?.min_year ?? new Date().getFullYear() };
 }
 
 /** Manual admin ack — unconditional, no gate on remaining open todos. */
