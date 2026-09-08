@@ -61,6 +61,7 @@ import {
   patchComplaint,
   fetchOpenSiteTasks,
   refreshCallsNeedingAction,
+  defaultCallsNeedingActionWindow,
 } from "./lib/api.js";
 
 export default function SimpleBusinessManager() {
@@ -203,7 +204,11 @@ export default function SimpleBusinessManager() {
     // admin home loads, so opening the tile renders instantly from cache
     // instead of a loading spinner — see CallsNeedingActionView.jsx and
     // getCachedCallsNeedingAction/refreshCallsNeedingAction in lib/api.js.
-    refreshCallsNeedingAction().catch((err) => console.error("[sbm] failed to prefetch calls needing action", err));
+    // Must be the same window the carousel opens on, or it warms a cache
+    // entry the view never reads.
+    refreshCallsNeedingAction(defaultCallsNeedingActionWindow()).catch((err) =>
+      console.error("[sbm] failed to prefetch calls needing action", err)
+    );
 
     return () => {
       cancelled = true;
