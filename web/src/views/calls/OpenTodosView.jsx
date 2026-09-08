@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../theme.js";
 import { fmtShort, isUrgent } from "../../lib/dates.js";
 import { TILE_ROW_STYLE } from "../../styles.js";
-import { fetchCallsByTodoStatus } from "../../lib/api.js";
+import { getCachedCallsByTodoStatus, loadCallsByTodoStatus, refreshCallsByTodoStatus } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { TodoRow } from "../../components/TodoRow.jsx";
@@ -23,18 +23,31 @@ export function OpenTodosView({
   status = "open",
   refreshKey = 0,
 }) {
-  const [calls, setCalls] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const cached = getCachedCallsByTodoStatus(status);
+  const [calls, setCalls] = useState(cached ?? []);
+  const [loading, setLoading] = useState(cached === null);
+  /* refreshKey bumps after a mutation (toggle/park) elsewhere on the
+     dashboard — that must force a real network refetch even if the cached
+     entry is still within its TTL, since the mutation itself invalidated
+     it. A plain status/mount change instead prefers the cache so hopping
+     back into this view doesn't always re-hit the network. */
+  const lastRefreshKey = useRef(refreshKey);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
-    fetchCallsByTodoStatus(status)
+    const forceRefresh = lastRefreshKey.current !== refreshKey;
+    lastRefreshKey.current = refreshKey;
+    if (!forceRefresh) {
+      const hit = getCachedCallsByTodoStatus(status);
+      if (hit) setCalls(hit);
+    }
+    setLoading(getCachedCallsByTodoStatus(status) === null);
+    (forceRefresh ? refreshCallsByTodoStatus(status) : loadCallsByTodoStatus(status))
       .then((data) => {
         if (!cancelled) setCalls(Array.isArray(data) ? data : []);
       })
       .catch(() => {
-        if (!cancelled) setCalls([]);
+        if (!cancelled) setCalls((prev) => prev);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
