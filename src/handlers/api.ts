@@ -374,7 +374,17 @@ export async function handleGetSites(request: Request, env: Env): Promise<Respon
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
   const forUserId = session.user_role === "staff" ? session.user_id : null;
-  return json(await listSites(env.DB, forUserId));
+  const rows = await listSites(env.DB, forUserId);
+  /* Contacts merged here rather than joined in SITE_ROW_SELECT, for the same
+     reason handleGetConfirmedSites does it: a site has many, and flattening
+     them into the row query would either multiply rows or GROUP_CONCAT them
+     into a string the client has to re-split. The review screen shows and
+     edits them per row, so this list needs them too. */
+  const contactsBySite = await getSiteContactsBySiteIds(
+    env.DB,
+    rows.map((row) => row.id)
+  );
+  return json(rows.map((row) => ({ ...row, contacts: contactsBySite.get(row.id) ?? [] })));
 }
 
 /** "Add new site" — any logged-in role. Staff creators are auto-added to the
