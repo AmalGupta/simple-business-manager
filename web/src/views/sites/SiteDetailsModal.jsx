@@ -59,9 +59,10 @@ export function SiteDetailsModal({
   intro = "",
   saveLabel = "Save details",
   extraPatch = null,
+  editableName = false,
 }) {
   const [values, setValues] = useState(() => {
-    const initial = { target_closure_date: site?.target_closure_date ?? "" };
+    const initial = { target_closure_date: site?.target_closure_date ?? "", name: site?.name ?? "" };
     for (const f of FIELDS) initial[f.key] = site?.[f.key] ?? "";
     return initial;
   });
@@ -77,6 +78,19 @@ export function SiteDetailsModal({
        visit where nothing was touched. Comparing against the loaded
        record keeps the audit trail meaning what it says. */
     const patch = { ...extraPatch };
+    /* Not in FIELDS, so the site page's copy of this form can't rename by
+       accident: its surrounding view is keyed by the old name and would be
+       orphaned by the refetch. Blank is refused rather than collapsed to
+       NULL like the rest — sites.name is NOT NULL, and a site with no name
+       can't be found again on any screen. */
+    if (editableName) {
+      const nextName = values.name.trim();
+      if (!nextName) {
+        setError("A site needs a name.");
+        return;
+      }
+      if (nextName !== (site?.name ?? "").trim()) patch.name = nextName;
+    }
     for (const f of FIELDS) {
       const next = values[f.key].trim();
       const current = (site?.[f.key] ?? "").trim();
@@ -108,6 +122,16 @@ export function SiteDetailsModal({
     <Modal label="Site details" title={title} onClose={onClose} width={420} scroll>
       {intro && <p style={{ fontSize: 12, color: t.edge2, margin: "0 0 12px" }}>{intro}</p>}
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {editableName && (
+          <FieldRow label="Site name">
+            <input
+              value={values.name}
+              placeholder="Site name"
+              onChange={(e) => set("name", e.target.value)}
+              style={TEXT_INPUT_STYLE}
+            />
+          </FieldRow>
+        )}
         {FIELDS.map((f) => (
           <FieldRow key={f.key} label={f.label}>
             <input
