@@ -513,6 +513,7 @@ export async function handlePostSitesBackfill(request: Request, env: Env): Promi
  * the gate, so widening it here is what unlocks editing them.
  */
 const SITE_PATCH_KEYS = [
+  "name",
   "is_confirmed",
   "address",
   "poc_name",
@@ -526,9 +527,12 @@ const SITE_PATCH_KEYS = [
   "target_closure_date",
 ] as const;
 
-/** The free-text subset — everything above except the two with their own validation. */
+/** The free-text subset — everything above except those with their own
+ *  validation. `name` is excluded because the others collapse blank to NULL
+ *  and sites.name is NOT NULL: an all-spaces name has to be a 400, not a
+ *  constraint error. */
 const SITE_TEXT_PATCH_KEYS = SITE_PATCH_KEYS.filter(
-  (k) => k !== "is_confirmed" && k !== "target_closure_date"
+  (k) => k !== "name" && k !== "is_confirmed" && k !== "target_closure_date"
 );
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -546,6 +550,9 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
   if (typeof body !== "object" || body === null) return json({ error: "invalid body" }, 400);
   const record = body as Record<string, unknown>;
 
+  if ("name" in record && (typeof record.name !== "string" || record.name.trim() === "")) {
+    return json({ error: "name cannot be empty" }, 400);
+  }
   if ("is_confirmed" in record && record.is_confirmed !== "Y" && record.is_confirmed !== "N" && record.is_confirmed !== null) {
     return json({ error: "is_confirmed must be 'Y', 'N', or null" }, 400);
   }
@@ -575,14 +582,25 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
     if (typeof value === "string" && SITE_TEXT_PATCH_KEYS.includes(key as never)) {
       const trimmed = value.trim();
       patch[key] = trimmed === "" ? null : trimmed;
+    } else if (key === "name") {
+      // Validated non-blank above; trimmed here so the stored name matches
+      // what the pipeline's own upsertSite would have written.
+      patch.name = String(value).trim();
     } else {
       patch[key] = value as string | null;
     }
   }
 
-  const updated = await updateSite(env.DB, id, patch, gate.user_id);
-  if (!updated) return json({ error: "not found" }, 404);
-  return json(updated);
+  try {
+    const updated = await updateSite(env.DB, id, patch, gate.user_id);
+    if (!updated) return json({ error: "not found" }, 404);
+    return json(updated);
+  } catch (err) {
+    // UNIQUE(name) — renaming onto a site that already exists. Same shape as
+    // the caller-phone conflict in handlers/callers.ts.
+    if (String(err).includes("UNIQUE")) return json({ error: "a site with that name already exists" }, 409);
+    return json({ error: `update failed: ${String(err)}` }, 500);
+  }
 }
 
 /**

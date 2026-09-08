@@ -1658,6 +1658,12 @@ export async function listSites(db: D1Database, forUserId?: string | null): Prom
 }
 
 const SITE_PATCH_FIELDS = [
+  /* Editable so a name the extraction got wrong can be corrected from the
+     review screen. Note it stays the pipeline's match key — upsertSite
+     conflicts on it — so a later call still mentioning the old spelling
+     creates a fresh unreviewed site rather than finding this one. That
+     duplicate is triaged the same way any other bad name is. */
+  "name",
   "is_confirmed",
   "address",
   "poc_name",
@@ -1693,6 +1699,11 @@ export async function updateSite(
 ): Promise<SiteRow | null> {
   const fields = SITE_PATCH_FIELDS.filter((f) => f in patch);
   if (fields.length > 0) {
+    /* Read before the UPDATE lands: the rename summary below is the only
+       record of what the site used to be called. */
+    const previous = fields.includes("name")
+      ? await db.prepare(`SELECT name FROM sites WHERE id = ?`).bind(id).first<{ name: string }>()
+      : null;
     const setClause = fields.map((f) => `${f} = ?`).join(", ");
     const values = fields.map((f) => patch[f] ?? null);
     const statements = [db.prepare(`UPDATE sites SET ${setClause} WHERE id = ?`).bind(...values, id)];
@@ -1735,6 +1746,23 @@ export async function updateSite(
         db
           .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
           .bind(crypto.randomUUID(), id, actorUserId ?? null, summary)
+      );
+    }
+    /* Value-bearing like the date above, and for a stronger reason: the old
+       name is how this site was identified everywhere else — in the roster
+       the model reads, in the extractions of every call already linked to
+       it — so once the column is overwritten the timeline is the only place
+       it survives. */
+    if (previous && previous.name !== patch.name) {
+      statements.push(
+        db
+          .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
+          .bind(
+            crypto.randomUUID(),
+            id,
+            actorUserId ?? null,
+            `Renamed from "${previous.name}" to "${patch.name}"`
+          )
       );
     }
     await db.batch(statements);
