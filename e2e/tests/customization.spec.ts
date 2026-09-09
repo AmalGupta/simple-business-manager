@@ -51,6 +51,35 @@ test.describe("Customization smoke", () => {
     await expect(page.getByLabel("Vertical scroll")).not.toBeChecked();
   });
 
+  test("Sites directory grid keeps its height when inner_scrolls is on", async ({ page }) => {
+    await loginAsAdmin(page);
+    // POST /api/sites creates the site already confirmed, so the "N confirmed
+    // sites" rollup is there however the shared local D1 happens to be seeded.
+    await page.request.post("/api/sites", { data: { name: `E2E Directory Site ${Date.now()}` } });
+    await page.request.patch("/api/me/customization", {
+      data: { inner_scrolls: true, horizontal_scrolls: false },
+    });
+    await page.reload();
+    await expect(page.getByText("Simple Business Manager")).toBeVisible();
+
+    // Anchored on the count so it can't match "Show unconfirmed sites".
+    const rollup = page.getByRole("button", { name: /^\d+ confirmed sites?/ });
+    await expect(rollup).toBeVisible();
+    await rollup.click();
+    await expect(page.getByRole("heading", { name: "Sites", exact: true })).toBeVisible();
+
+    /* The regression: with inner_scrolls on the grid resolved its height:100%
+       against a parent sitting at content height, collapsed to 2px, and the
+       screen showed the filter bar with nothing under it. */
+    await expect(page.locator(".ag-row").first()).toBeVisible();
+    const height = await page.locator(".sbm-sites-grid").evaluate((el) => el.getBoundingClientRect().height);
+    expect(height).toBeGreaterThan(200);
+
+    await page.request.patch("/api/me/customization", {
+      data: { inner_scrolls: false, horizontal_scrolls: false },
+    });
+  });
+
   test("Calls grid page-scrolls when inner_scrolls is off", async ({ page }) => {
     const grid = await openCallsWithMockedRows(page, 40);
     await page.request.patch("/api/me/customization", {

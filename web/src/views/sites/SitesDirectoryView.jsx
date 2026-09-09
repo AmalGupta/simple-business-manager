@@ -44,10 +44,21 @@ export function SitesDirectoryView({
   }, []);
 
   return (
-    <div>
+    /* Under inner_scrolls the grid sizes itself with height:100% (see
+       SITES_GRID_CSS), so it needs a definite height to resolve against:
+       this column has to claim the flex height Dashboard's fillViewport
+       <main> offers instead of sitting at content height. Without it the
+       grid collapsed to 2px and the page looked like it had no rows. */
+    <div
+      style={
+        innerScrolls
+          ? { display: "flex", flexDirection: "column", flex: "1 1 auto", minHeight: 0, overflow: "hidden" }
+          : undefined
+      }
+    >
       <BackLink onClick={onBack}>{isHome ? "Home" : "Back"}</BackLink>
 
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1.25rem", gap: 12, flexShrink: 0 }}>
         <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>Sites</h1>
         {onAddSite && (
           <button
