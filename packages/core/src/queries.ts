@@ -1650,6 +1650,8 @@ export async function updateTodo(
 export interface SiteRow {
   id: string;
   name: string;
+  /** Composed from the details — see composeSiteNameBeingUsed. NULL until the site has any. */
+  site_name_being_used: string | null;
   is_confirmed: "Y" | "N" | null;
   address: string | null;
   poc_name: string | null;
@@ -1698,7 +1700,7 @@ export interface SiteIntakeDetails {
  * Truncating here rather than in the client keeps a Z-suffixed timestamp
  * from being re-read in local time and landing on the wrong day.
  */
-const SITE_ROW_SELECT = `SELECT sites.id, sites.name, sites.is_confirmed, sites.address, sites.poc_name,
+const SITE_ROW_SELECT = `SELECT sites.id, sites.name, sites.site_name_being_used, sites.is_confirmed, sites.address, sites.poc_name,
   sites.house_no, sites.sector, sites.city, sites.poc_contact_number, sites.assigned_by, sites.referred_by,
   sites.site_location, sites.target_closure_date, sites.discovered_from_call_id,
   callers.name AS discovered_from_caller_name,
@@ -1706,6 +1708,43 @@ const SITE_ROW_SELECT = `SELECT sites.id, sites.name, sites.is_confirmed, sites.
   FROM sites
   LEFT JOIN calls ON calls.id = sites.discovered_from_call_id
   LEFT JOIN callers ON callers.id = calls.client_id`;
+
+/** The " | CL. " that separates the address half from the client half. */
+export const SITE_CLIENT_SEPARATOR = " | CL. ";
+
+/**
+ * The name the site tables show — "#244, IAS-PCS | CL. Raj Kamal Ji": the
+ * address an operator recognises, then whose site it is. Written to
+ * sites.site_name_being_used on every create and detail edit rather than
+ * composed at render, so the two names are interchangeable — SQL can sort
+ * and search on this one while `name` stays the pipeline's match key
+ * (upsertSiteByName conflicts on it, and the extraction roster reads it).
+ *
+ * NULL when the site carries none of these details: a site discovered from
+ * a call is just its name until someone fills the details form in.
+ */
+export function composeSiteNameBeingUsed(site: {
+  name?: string | null;
+  house_no?: string | null;
+  sector?: string | null;
+  city?: string | null;
+  poc_name?: string | null;
+}): string | null {
+  const clean = (value?: string | null) => (value?.trim() ? value.trim() : null);
+  const houseNo = clean(site.house_no);
+  const sector = clean(site.sector);
+  const city = clean(site.city);
+  const client = clean(site.poc_name);
+
+  const locality = sector && city ? `${sector}-${city}` : (sector ?? city);
+  const address = houseNo ? (locality ? `#${houseNo}, ${locality}` : `#${houseNo}`) : locality;
+  if (!address && !client) return null;
+
+  /* A site with a client but no address keeps its own name on the left, so
+     the row still says which site it is rather than only who owns it. */
+  const left = address ?? clean(site.name) ?? "";
+  return client ? `${left}${SITE_CLIENT_SEPARATOR}${client}` : left;
+}
 
 /** Display name for a new site — explicit name wins, else H.No + sector + city. */
 export function resolveSiteName(details: SiteIntakeDetails): string {
@@ -1786,6 +1825,9 @@ const SITE_PATCH_FIELDS = [
 ] as const;
 type SitePatchField = (typeof SITE_PATCH_FIELDS)[number];
 
+/** The patch fields composeSiteNameBeingUsed reads, so a change to any of them rebuilds it. */
+const SITE_DISPLAY_NAME_INPUTS = ["name", "house_no", "sector", "city", "poc_name"] as const;
+
 /**
  * One dynamic patch for everything editable on a site: confirmation status
  * (SitesReviewView) and address/point-of-contact (SiteView — always
@@ -1808,13 +1850,26 @@ export async function updateSite(
   const fields = SITE_PATCH_FIELDS.filter((f) => f in patch);
   if (fields.length > 0) {
     /* Read before the UPDATE lands: the rename summary below is the only
-       record of what the site used to be called. */
-    const previous = fields.includes("name")
-      ? await db.prepare(`SELECT name FROM sites WHERE id = ?`).bind(id).first<{ name: string }>()
+       record of what the site used to be called, and the display name is
+       composed from this patch merged over the details already on the row —
+       editing the city alone still has to rebuild the whole string. */
+    const touchesDisplayName = fields.some((f) => (SITE_DISPLAY_NAME_INPUTS as readonly string[]).includes(f));
+    const previous = touchesDisplayName
+      ? await db
+          .prepare(`SELECT name, house_no, sector, city, poc_name FROM sites WHERE id = ?`)
+          .bind(id)
+          .first<Pick<SiteRow, "name" | "house_no" | "sector" | "city" | "poc_name">>()
       : null;
-    const setClause = fields.map((f) => `${f} = ?`).join(", ");
-    const values = fields.map((f) => patch[f] ?? null);
-    const statements = [db.prepare(`UPDATE sites SET ${setClause} WHERE id = ?`).bind(...values, id)];
+
+    const assignments = fields.map((f) => `${f} = ?`);
+    const values: (string | null)[] = fields.map((f) => patch[f] ?? null);
+    if (touchesDisplayName) {
+      const merged = { ...previous } as Record<string, string | null>;
+      for (const f of SITE_DISPLAY_NAME_INPUTS) if (f in patch) merged[f] = patch[f] ?? null;
+      assignments.push(`site_name_being_used = ?`);
+      values.push(composeSiteNameBeingUsed(merged));
+    }
+    const statements = [db.prepare(`UPDATE sites SET ${assignments.join(", ")} WHERE id = ?`).bind(...values, id)];
 
     const detailFields = fields.filter(
       (f) =>
@@ -1861,7 +1916,7 @@ export async function updateSite(
        the model reads, in the extractions of every call already linked to
        it — so once the column is overwritten the timeline is the only place
        it survives. */
-    if (previous && previous.name !== patch.name) {
+    if (fields.includes("name") && previous && previous.name !== patch.name) {
       statements.push(
         db
           .prepare(`INSERT INTO site_edits (id, site_id, actor_user_id, summary) VALUES (?, ?, ?, ?)`)
@@ -1926,13 +1981,14 @@ export async function createSite(
     await db.batch([
       db
         .prepare(
-          `INSERT INTO sites (id, name, is_confirmed, address, poc_name, house_no, sector, city,
+          `INSERT INTO sites (id, name, site_name_being_used, is_confirmed, address, poc_name, house_no, sector, city,
            poc_contact_number, assigned_by, referred_by, site_location)
-           VALUES (?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           VALUES (?, ?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           id,
           intake.name,
+          composeSiteNameBeingUsed(intake),
           intake.address,
           intake.poc_name,
           intake.house_no,
@@ -2423,6 +2479,8 @@ export async function getSitesNeedingAttention(db: D1Database, limit = 4): Promi
 export interface ConfirmedSiteRow {
   id: string;
   name: string;
+  /** Composed from the details — see composeSiteNameBeingUsed. NULL until the site has any. */
+  site_name_being_used: string | null;
   open_count: number;
   target_closure_date: string | null;
   /** Most recent entry of any kind on this site — see the activity CTE below. NULL for a site nothing has happened on yet. */
@@ -2491,7 +2549,8 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
      last_activity AS (
        SELECT site_id, MAX(created_at) AS last_at FROM activity GROUP BY site_id
      )
-     SELECT sites.id AS id, sites.name AS name, sites.target_closure_date AS target_closure_date,
+     SELECT sites.id AS id, sites.name AS name, sites.site_name_being_used AS site_name_being_used,
+            sites.target_closure_date AS target_closure_date,
             COALESCE(SUM(CASE WHEN todos.status = 'open' THEN 1 ELSE 0 END), 0) AS open_count,
             last_activity.last_at AS last_activity_at,
             callers.name AS discovered_from_caller_name,
@@ -2503,7 +2562,7 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
      LEFT JOIN calls disc ON disc.id = sites.discovered_from_call_id
      LEFT JOIN callers ON callers.id = disc.client_id
      WHERE ${confirmedClause} ${scoped}
-     GROUP BY sites.id, sites.name, sites.target_closure_date, last_activity.last_at,
+     GROUP BY sites.id, sites.name, sites.site_name_being_used, sites.target_closure_date, last_activity.last_at,
               callers.name, substr(COALESCE(disc.recording_date, disc.recorded_at), 1, 10)
      ORDER BY sites.name ASC`
   );

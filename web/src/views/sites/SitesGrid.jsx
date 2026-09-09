@@ -10,8 +10,11 @@ import {
   SITES_GRID_CSS,
   DateWindowFilter,
   FilterCount,
+  SiteDisplayName,
   TextFilter,
   daysAgo,
+  siteDisplayName,
+  siteSearchText,
   windowFor,
 } from "./sitesGridChrome.jsx";
 
@@ -87,7 +90,7 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
     const discoveredWindow = windowFor(filters.discovered);
 
     return rows.filter((s) => {
-      if (name && !s.name.toLowerCase().includes(name)) return false;
+      if (name && !siteSearchText(s).includes(name)) return false;
       if (contact) {
         const hit = (s.contacts ?? []).some(
           (c) => c.name.toLowerCase().includes(contact) || (c.phone ?? "").includes(contact)
@@ -108,13 +111,13 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
         flex: narrow ? 1.4 : 1.5,
         minWidth: 130,
         cellClass: "sbm-scol-name",
-        valueGetter: (p) => p.data?.name ?? "",
+        valueGetter: (p) => siteDisplayName(p.data),
         /* The unread badge can't be a valueFormatter because it's a styled
            pill, and it's documented as never-decorative — it means "new
            since you last posted". */
         cellRenderer: (p) => {
           const count = p.data?.unread_count ?? 0;
-          if (count <= 0) return p.value;
+          if (count <= 0) return <SiteDisplayName site={p.data} />;
           return (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <span
@@ -137,7 +140,7 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
               >
                 {count}
               </span>
-              {p.value}
+              <SiteDisplayName site={p.data} />
             </span>
           );
         },
