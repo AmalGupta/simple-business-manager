@@ -102,7 +102,15 @@ CREATE TABLE sites (
   -- never rewrites it. NULL for the migration 0006 seeds and for sites added
   -- by hand through createSite. The caller name and date shown on the review
   -- screen are joined through this, not copied — see SITE_ROW_SELECT.
-  discovered_from_call_id TEXT REFERENCES calls(id)
+  discovered_from_call_id TEXT REFERENCES calls(id),
+  -- migration 0031: what the site tables show — "#244, IAS-PCS | CL. Raj
+  -- Kamal Ji", composed from house_no/sector/city/poc_name by
+  -- composeSiteNameBeingUsed on every create and detail edit. Deliberately a
+  -- second column rather than a rewrite of `name`: `name` stays the
+  -- pipeline's match key (upsertSiteByName conflicts on it) and the two are
+  -- interchangeable wherever one reads better than the other. NULL while a
+  -- site has none of those details.
+  site_name_being_used TEXT
 );
 
 -- Always-editable roster of people assigned to a site — see
