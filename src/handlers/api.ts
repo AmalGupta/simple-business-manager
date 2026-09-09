@@ -18,6 +18,7 @@ import {
   getCallDiarizedForExtract,
   getCallsNeedingAction,
   getCallsNeedingActionCalendar,
+  countCallsNeedingAction,
   CALLS_NEEDING_ACTION_MAX_LIMIT,
   getCallWithTodos,
   getCallerById,
@@ -213,17 +214,40 @@ export async function handleGetCallsNeedingAction(request: Request, env: Env): P
   return json({ items, voice_notes_by_todo_id: Object.fromEntries(voiceNotesByTodo) });
 }
 
+/**
+ * Reads the required date_from/date_to pair shared by the two aggregate
+ * endpoints below. Returns a 400 Response instead of a window when either is
+ * missing or malformed: both callers aggregate over the whole qualifying set
+ * without one, which is the expensive query the window exists to avoid.
+ */
+function callsNeedingActionRange(request: Request): { dateFrom: string; dateTo: string } | Response {
+  const params = new URL(request.url).searchParams;
+  const dateFrom = params.get("date_from")?.trim() ?? "";
+  const dateTo = params.get("date_to")?.trim() ?? "";
+  if (!ISO_DATE.test(dateFrom) || !ISO_DATE.test(dateTo)) {
+    return json({ error: "date_from and date_to (yyyy-mm-dd) required" }, 400);
+  }
+  if (dateFrom > dateTo) return json({ error: "date_from must not be after date_to" }, 400);
+  return { dateFrom, dateTo };
+}
+
 /** Per-day qualifying-call counts for the carousel's date strip. */
 export async function handleGetCallsNeedingActionCalendar(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
-  const params = new URL(request.url).searchParams;
-  const year = Number.parseInt(params.get("year") ?? "", 10);
-  const month = Number.parseInt(params.get("month") ?? "", 10);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
-    return json({ error: "year and month (1–12) required" }, 400);
-  }
-  return json(await getCallsNeedingActionCalendar(env.DB, year, month));
+  const range = callsNeedingActionRange(request);
+  if (range instanceof Response) return range;
+  return json(await getCallsNeedingActionCalendar(env.DB, range));
+}
+
+/** Total qualifying calls in a date range — the carousel's header count, which
+ *  describes the whole lookback rather than the days of cards it has loaded. */
+export async function handleGetCallsNeedingActionCount(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const range = callsNeedingActionRange(request);
+  if (range instanceof Response) return range;
+  return json({ count: await countCallsNeedingAction(env.DB, range) });
 }
 
 /** Manual admin ack that a call has been reviewed — unconditional, no gate on open todos. */

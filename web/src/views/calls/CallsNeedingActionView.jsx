@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { t } from "../../theme.js";
 import { today, isoDate, todayIso, addDaysIso, fmtShort } from "../../lib/dates.js";
@@ -6,9 +6,12 @@ import { BackLink } from "../../components/BackLink.jsx";
 import { StreakWall } from "./StreakWall.jsx";
 import { CallActionCard } from "./CallActionCard.jsx";
 import {
+  CNA_LOOKBACK_DAYS,
   CNA_WINDOW_DAYS,
+  callsNeedingActionLookback,
   defaultCallsNeedingActionWindow,
   fetchCallsNeedingActionCalendar,
+  fetchCallsNeedingActionCount,
   getCachedCallsNeedingAction,
   loadCallsNeedingAction,
   refreshCallsNeedingAction,
@@ -18,12 +21,31 @@ import {
 
 const CARD_GAP = 16;
 
-/** Consecutive empty CNA_WINDOW_DAYS steps before auto-widening backwards
- *  gives up and waits for an explicit "Load earlier days". */
-const MAX_EMPTY_BACK_STEPS = 2;
-
 function callDateIso(call) {
   return (call.recording_date || call.recorded_at || "").slice(0, 10);
+}
+
+const minIso = (a, b) => (a < b ? a : b);
+const maxIso = (a, b) => (a > b ? a : b);
+
+/** Nearest day with qualifying calls strictly before `dateIso`, at or after
+ *  `floorIso` — where a backward prefetch should jump to, so an empty
+ *  fortnight costs one request instead of three fruitless five-day probes. */
+function previousDayWithCalls(dayCounts, dateIso, floorIso) {
+  let best = null;
+  for (const [day, n] of Object.entries(dayCounts)) {
+    if (n > 0 && day < dateIso && day >= floorIso && (best === null || day > best)) best = day;
+  }
+  return best;
+}
+
+/** Mirror of previousDayWithCalls, forwards, at or before `ceilIso`. */
+function nextDayWithCalls(dayCounts, dateIso, ceilIso) {
+  let best = null;
+  for (const [day, n] of Object.entries(dayCounts)) {
+    if (n > 0 && day > dateIso && day <= ceilIso && (best === null || day < best)) best = day;
+  }
+  return best;
 }
 
 /* Same ordering the server returns (queries.ts getCallsNeedingAction) — the
@@ -90,16 +112,6 @@ function iconButtonStyle(disabled) {
   };
 }
 
-const HEADER_LINK_STYLE = {
-  all: "unset",
-  cursor: "pointer",
-  fontSize: 12,
-  fontWeight: 600,
-  color: "rgba(255,255,255,0.85)",
-  textDecoration: "underline",
-  textUnderlineOffset: 3,
-};
-
 /* Admin carousel of calls with an AI-generated todo list not yet resolved —
    opened from the home tile CallsNeedingActionTile.
 
@@ -110,12 +122,20 @@ const HEADER_LINK_STYLE = {
    fetched windows are merged into one store keyed by call id, so scrolling
    back over days you've already seen never refetches them.
 
-   Top section is StreakWall (the same "date slider" the home page uses). Its
-   dots come from a per-month server aggregate, not from the loaded window —
-   with a 6-day window, deriving them from the loaded items would make every
-   other day look empty and leave nothing worth clicking. Selecting a day
-   still scrolls rather than filters (plan doc scope decision #5), but now
-   fetches that day first if it isn't loaded yet.
+   Opening fires three requests in parallel (SBM-25), all of them scoped to
+   the same CNA_LOOKBACK_DAYS lookback so the screen can't contradict itself:
+   the cards for the opening window, the per-day counts behind the strip's
+   dots, and the total for the header. The two aggregates cover the whole
+   lookback rather than the loaded window — that's what lets a day the
+   carousel hasn't fetched still read as worth clicking, and what tells a
+   backward prefetch where the next non-empty day is.
+
+   Top section is StreakWall (the same "date slider" the home page uses).
+   Selecting a day scrolls rather than filters (plan doc scope decision #5),
+   fetching that day first if it isn't loaded yet, and the day selected stays
+   put: background prefetch prepends older cards, and the carousel re-anchors
+   on the card that was at its left edge so the reader doesn't get slid off
+   the day they picked.
 
    The remaining screen is a CSS scroll-snap carousel: 4 cards desktop, 3
    tablet, 1 mobile. */
@@ -136,17 +156,29 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     () => getCachedCallsNeedingAction(defaultCallsNeedingActionWindow())?.voiceNotesByTodoId ?? new Map()
   );
 
-  // Every date we've fetched, whether or not it had calls — a date that came
-  // back empty must count as loaded or we'd ask for it again on every scroll.
-  // A ref, not state: nothing in the render tree depends on it (the strip's
-  // dots come from the server aggregate), and the fetch logic needs to read
-  // it without waiting for a re-render.
+  // Every date we've fetched cards for, whether or not it had any — a date
+  // that came back empty must count as loaded or we'd ask for it again on
+  // every scroll. A ref, not state: nothing in the render tree depends on it
+  // (the strip's dots come from the server aggregate), and the fetch logic
+  // needs to read it without waiting for a re-render.
   const loadedDates = useRef(new Set());
   const [loadedBounds, setLoadedBounds] = useState(null); // { from, to } — for the window label
-  const emptyBackSteps = useRef(0);
 
-  const [monthCounts, setMonthCounts] = useState({ days: {}, min_year: today().getFullYear() });
-  const [calendarTick, setCalendarTick] = useState(0);
+  // The lookback is fixed for the life of the view rather than recomputed per
+  // render: every window, dot and total is measured against it, and having it
+  // shift under a tab left open across midnight would strand loaded cards
+  // outside their own floor.
+  const lookback = useMemo(callsNeedingActionLookback, []);
+
+  const [dayCounts, setDayCounts] = useState({}); // { iso: qualifying calls } — the strip's dots
+  const [minYear, setMinYear] = useState(() => today().getFullYear());
+  const [lookbackTotal, setLookbackTotal] = useState(null);
+  // Dates the per-day counts are known for, same bookkeeping as loadedDates.
+  const countedDates = useRef(new Set());
+  // Prefetch reads the counts at fire time; before they land it falls back to
+  // a fixed step, and only a loaded map is allowed to say "nothing earlier".
+  const dayCountsRef = useRef({});
+  const countsReady = useRef(false);
   const [calMonth, setCalMonth] = useState(() => {
     const d = today();
     return { year: d.getFullYear(), month: d.getMonth() };
@@ -161,12 +193,24 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   const handledFocus = useRef(0);
   const carouselRef = useRef(null);
 
+  // Id of the card that belongs at the carousel's left edge. Set by scrolling
+  // and by selecting a day, then re-applied whenever the card list changes —
+  // see the re-anchoring layout effect below.
+  const anchorId = useRef(null);
+
   const items = useMemo(() => [...callsById.values()].sort(byCallDate), [callsById]);
 
   // Mirror of the sorted list that event handlers (the scroll listener and the
   // edge observer) read at fire time rather than at closure-creation time.
+  //
+  // Updated in a layout effect, before the re-anchoring one below: a merge
+  // that prepends cards moves the anchored card's index, and re-anchoring
+  // scrolls, so the scroll handler runs right after this commit. On a passive
+  // effect the mirror was still the pre-merge list when it did, and the strip
+  // followed the card that used to be at that index instead of the day the
+  // reader had selected.
   const itemsRef = useRef(items);
-  useEffect(() => {
+  useLayoutEffect(() => {
     itemsRef.current = items;
   }, [items]);
 
@@ -191,10 +235,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
    * Fetches whatever part of [fromIso, toIso] isn't loaded yet and merges it.
    * Requests one contiguous span covering the missing dates — re-asking for an
    * already-loaded day inside a gap is cheaper than splitting the request, and
-   * merging by id makes it idempotent. Resolves to how many calls came back,
-   * or null when there was nothing to fetch (or the fetch failed), which is
-   * how the auto-widening below tells "no calls in those days" from "already
-   * had those days".
+   * merging by id makes it idempotent.
    */
   const ensureRange = useCallback(
     async (fromIso, toIso) => {
@@ -211,7 +252,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
           to: prev && prev.to > missing[missing.length - 1] ? prev.to : missing[missing.length - 1],
         }));
       }
-      if (missing.length === 0) return null;
+      if (missing.length === 0) return;
 
       const dateFrom = missing[0];
       const dateTo = missing[missing.length - 1];
@@ -223,12 +264,10 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
           dateTo,
         });
         merge(fetched, notes);
-        return fetched.length;
       } catch (err) {
         console.error("[sbm] failed to load calls needing action", err);
         for (const d of missing) loadedDates.current.delete(d);
         setError("Failed to load — try again.");
-        return null;
       } finally {
         setFetching(false);
         setHasLoaded(true);
@@ -237,10 +276,40 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     [merge]
   );
 
+  /**
+   * Loads the per-day counts for whatever part of [fromIso, toIso] isn't
+   * known yet. Only ever additive on the counts map, so a month browsed to
+   * outside the lookback keeps its dots alongside the lookback's.
+   */
+  const ensureCounts = useCallback(async (fromIso, toIso) => {
+    const missing = [];
+    for (let d = fromIso; d <= toIso; d = addDaysIso(d, 1)) {
+      if (!countedDates.current.has(d)) missing.push(d);
+    }
+    if (missing.length === 0) return;
+    for (const d of missing) countedDates.current.add(d);
+    const dateFrom = missing[0];
+    const dateTo = missing[missing.length - 1];
+    try {
+      const data = await fetchCallsNeedingActionCalendar({ dateFrom, dateTo });
+      // Days with no calls are absent from the response rather than zero, so
+      // this both fills in counts and leaves untouched days reading as 0.
+      dayCountsRef.current = { ...dayCountsRef.current, ...(data.days ?? {}) };
+      setDayCounts(dayCountsRef.current);
+      if (data.min_year) setMinYear(data.min_year);
+    } catch (err) {
+      console.error("[sbm] failed to load calls-needing-action calendar", err);
+      for (const d of missing) countedDates.current.delete(d);
+    }
+  }, []);
+
   /** Loads a date if needed, then scrolls the carousel to it. */
   const focusOnDate = useCallback(
     async (date) => {
       setFocusDate(date);
+      // Dropped so the re-anchoring effect doesn't pull the carousel back to
+      // wherever it was while this date's cards are being merged in.
+      anchorId.current = null;
       await ensureRange(date, date);
       focusNonce.current += 1;
       setFocusRequest({ date, nonce: focusNonce.current });
@@ -248,50 +317,57 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     [ensureRange]
   );
 
-  /** One more CNA_WINDOW_DAYS of history before the earliest day loaded. */
-  const loadEarlier = useCallback(() => {
-    const earliest = loadedBounds?.from ?? todayIso();
-    emptyBackSteps.current = 0; // an explicit ask always resumes auto-widening
-    return ensureRange(addDaysIso(earliest, -CNA_WINDOW_DAYS), addDaysIso(earliest, -1));
-  }, [ensureRange, loadedBounds]);
-
   const widenForward = useCallback(async () => {
     const list = itemsRef.current;
     if (list.length === 0) return;
-    const newest = callDateIso(list[list.length - 1]);
-    const from = addDaysIso(newest, 1);
-    const capped = addDaysIso(newest, CNA_WINDOW_DAYS);
     const nowIso = todayIso();
+    const newest = callDateIso(list[list.length - 1]);
     // Never past today: there are no calls in the future, so an uncapped
     // forward reach would ask for a range that can never be satisfied.
-    const to = capped < nowIso ? capped : nowIso;
-    if (from <= to) await ensureRange(from, to);
+    if (newest >= nowIso) return;
+    const target = nextDayWithCalls(dayCountsRef.current, newest, nowIso);
+    if (countsReady.current && target === null) return;
+    const to = target ?? minIso(addDaysIso(newest, CNA_WINDOW_DAYS), nowIso);
+    await ensureRange(addDaysIso(newest, 1), to);
   }, [ensureRange]);
 
   const widenBackward = useCallback(async () => {
     const list = itemsRef.current;
     if (list.length === 0) return;
-    // History is unbounded backwards, so auto-widening stops after a couple of
-    // fruitless steps rather than walking through an empty year one screenful
-    // at a time. "Load earlier days" is the unbounded way past that.
-    if (emptyBackSteps.current >= MAX_EMPTY_BACK_STEPS) return;
     const oldest = callDateIso(list[0]);
-    const added = await ensureRange(addDaysIso(oldest, -CNA_WINDOW_DAYS), addDaysIso(oldest, -1));
-    if (added === null) return;
-    emptyBackSteps.current = added > 0 ? 0 : emptyBackSteps.current + 1;
-  }, [ensureRange]);
+    // The lookback is the floor. Before SBM-25 history was unbounded here and
+    // widening had to give up after two empty steps to avoid walking back
+    // through an empty year a screenful at a time; now it stops at a real
+    // edge, and the counts tell it which days in between are worth asking for.
+    if (oldest <= lookback.dateFrom) return;
+    const target = previousDayWithCalls(dayCountsRef.current, oldest, lookback.dateFrom);
+    if (countsReady.current && target === null) return;
+    const from = target ?? maxIso(addDaysIso(oldest, -CNA_WINDOW_DAYS), lookback.dateFrom);
+    await ensureRange(from, addDaysIso(oldest, -1));
+  }, [ensureRange, lookback]);
 
-  // Opens on the last CNA_WINDOW_DAYS days, then focuses today (display
-  // strategy #1). Focus goes through the same request/nonce path as a day
-  // click so that it still lands if the fetch resolves after this effect.
+  // Opening: cards for the last CNA_WINDOW_DAYS days, then focus today
+  // (display strategy #1), alongside the two lookback-wide aggregates. All
+  // three go out together — the cards are the only one the first paint waits
+  // on, and neither aggregate is on the path to showing them.
   useEffect(() => {
     const { dateFrom, dateTo } = defaultCallsNeedingActionWindow();
     ensureRange(dateFrom, dateTo).finally(() => {
+      // Focus goes through the same request/nonce path as a day click so that
+      // it still lands if the fetch resolves after this effect.
       focusNonce.current += 1;
       setFocusRequest({ date: dateTo, nonce: focusNonce.current });
       setFocusDate(dateTo);
     });
-  }, [ensureRange]);
+
+    ensureCounts(lookback.dateFrom, lookback.dateTo).finally(() => {
+      countsReady.current = true;
+    });
+
+    fetchCallsNeedingActionCount(lookback)
+      .then(setLookbackTotal)
+      .catch((err) => console.error("[sbm] failed to count calls needing action", err));
+  }, [ensureRange, ensureCounts, lookback]);
 
   // Consumes one focus request. Depends on `items` too, so a request made
   // while the carousel was still empty lands as soon as the cards exist; the
@@ -307,23 +383,43 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     const isFirst = handledFocus.current === 0;
     handledFocus.current = focusRequest.nonce;
     scrollCardToStart(carouselRef.current, idx);
+    // The card the reader asked for is now the one to keep at the left edge.
+    anchorId.current = items[idx].id;
     if (isFirst) setFocused(true);
   }, [focusRequest, items]);
 
-  // Strip dots and the year dropdown come from the server, over the same
-  // qualifying set the list uses — so a day with calls reads as clickable
-  // even when it's far outside the loaded window.
+  /**
+   * Keeps the anchored card at the left edge across changes to the card list.
+   *
+   * Prepending is the case that matters: a background backward prefetch adds
+   * older cards, the browser keeps scrollLeft where it was, and the day the
+   * reader was on silently slides right out of view — SBM-25's "the calls in
+   * focus become the last day of the window that just loaded". Correcting the
+   * offset in a layout effect puts it back before the browser paints, so the
+   * merge is invisible rather than a jump.
+   */
+  useLayoutEffect(() => {
+    const container = carouselRef.current;
+    if (!container || !anchorId.current || items.length === 0) return;
+    const idx = items.findIndex((c) => c.id === anchorId.current);
+    if (idx <= 0) return; // already the first card: nothing can have shifted it
+    const child = container.children[idx];
+    if (!child) return;
+    const drift = child.getBoundingClientRect().left - container.getBoundingClientRect().left;
+    if (Math.abs(drift) < 1) return;
+    scrollCardToStart(container, idx);
+  }, [items]);
+
+  // A month browsed to outside the lookback has no dots yet, so fetch its
+  // counts too. Clamped to today — the strip renders later days as blank,
+  // unclickable cells, and asking for them would make every month visited
+  // this month look uncovered and refetch on every visit.
   useEffect(() => {
-    let cancelled = false;
-    fetchCallsNeedingActionCalendar(calMonth.year, calMonth.month + 1)
-      .then((data) => {
-        if (!cancelled) setMonthCounts({ days: data.days ?? {}, min_year: data.min_year ?? today().getFullYear() });
-      })
-      .catch((err) => console.error("[sbm] failed to load calls-needing-action calendar", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [calMonth.year, calMonth.month, calendarTick]);
+    const first = isoDate(calMonth.year, calMonth.month, 1);
+    const last = isoDate(calMonth.year, calMonth.month, new Date(calMonth.year, calMonth.month + 1, 0).getDate());
+    const to = minIso(last, todayIso());
+    if (first <= to) ensureCounts(first, to);
+  }, [calMonth, ensureCounts]);
 
   useEffect(() => {
     const onResize = () => setVisibleCount(computeVisibleCount());
@@ -348,7 +444,10 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
         const idx = Math.max(0, Math.min(Math.round(container.scrollLeft / step), list.length - 1));
         setScrollIndex(idx);
         const inView = list[idx];
-        if (inView) setFocusDate(callDateIso(inView));
+        if (inView) {
+          setFocusDate(callDateIso(inView));
+          anchorId.current = inView.id;
+        }
       });
     };
     container.addEventListener("scroll", onScroll, { passive: true });
@@ -359,7 +458,8 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   }, [items.length]);
 
   // Background widening (display strategy #4): arriving at the oldest or
-  // newest loaded card fetches the next CNA_WINDOW_DAYS beyond it.
+  // newest loaded card fetches the next day beyond it that has calls, or one
+  // more CNA_WINDOW_DAYS step if the counts haven't landed yet.
   //
   // Deliberately an observer on the edge cards rather than a read of scroll
   // offsets. Scroll events turned out to be an unreliable signal here in both
@@ -411,18 +511,18 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     for (let day = 1; day <= daysInMonth; day++) {
       const iso = isoDate(year, month, day);
       const future = iso > nowIso;
-      days.push({ date: iso, held: future ? null : true, calls: monthCounts.days[iso] ?? 0, future });
+      days.push({ date: iso, held: future ? null : true, calls: dayCounts[iso] ?? 0, future });
     }
     return days;
-  }, [calMonth, monthCounts]);
+  }, [calMonth, dayCounts]);
 
   const yearOptions = useMemo(() => {
     const current = today().getFullYear();
-    const minYear = Math.min(monthCounts.min_year ?? current, current);
+    const first = Math.min(minYear, current);
     const out = [];
-    for (let y = minYear; y <= current + 1; y++) out.push(y);
+    for (let y = first; y <= current + 1; y++) out.push(y);
     return out;
-  }, [monthCounts.min_year]);
+  }, [minYear]);
 
   const goToMonth = (year, month) => {
     let y = year;
@@ -477,14 +577,26 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   };
 
   const handleResolve = async (callId) => {
+    const resolvedDate = callDateIso(callsById.get(callId) ?? {});
     await resolveCall(callId);
     setCallsById((prev) => {
       const next = new Map(prev);
       next.delete(callId);
       return next;
     });
+    // Resolving takes exactly one call out of the qualifying set, so the two
+    // aggregates can be adjusted rather than refetched — the strip's dot for
+    // that day drops by one, and clears once its last call is resolved.
+    if (resolvedDate) {
+      const remaining = (dayCountsRef.current[resolvedDate] ?? 1) - 1;
+      const next = { ...dayCountsRef.current };
+      if (remaining > 0) next[resolvedDate] = remaining;
+      else delete next[resolvedDate];
+      dayCountsRef.current = next;
+      setDayCounts(next);
+    }
+    setLookbackTotal((n) => (typeof n === "number" ? Math.max(0, n - 1) : n));
     onResolved?.();
-    setCalendarTick((n) => n + 1); // the strip's dot for that day is now one lower
     resyncDefaultWindow();
   };
 
@@ -505,8 +617,13 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   // early, and comparing against count - 1 left Next enabled but inert there.
   const atEnd = scrollIndex >= count - visibleCount;
   const windowLabel = loadedBounds
-    ? `${count} call${count === 1 ? "" : "s"} · ${fmtShort(loadedBounds.from)} – ${fmtShort(loadedBounds.to)}`
+    ? `${count} loaded · ${fmtShort(loadedBounds.from)} – ${fmtShort(loadedBounds.to)}`
     : "";
+  // The header describes the whole lookback, not the days of cards in hand —
+  // the loaded window is what the label on the left is for.
+  const lookbackLabel = `Calls needing action in last ${CNA_LOOKBACK_DAYS} days${
+    lookbackTotal === null ? "" : ` · ${lookbackTotal}`
+  }`;
 
   return (
     <div>
@@ -554,9 +671,9 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
           }}
         >
           <span>{fetching ? "Loading…" : windowLabel}</span>
-          <button type="button" onClick={loadEarlier} style={HEADER_LINK_STYLE}>
-            Load earlier days
-          </button>
+          <span style={{ fontWeight: 600, color: "rgba(255,255,255,0.85)", textAlign: "right" }}>
+            {lookbackLabel}
+          </span>
         </div>
 
         <StreakWall
@@ -578,7 +695,9 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
       {error && <p style={{ fontSize: 14, color: t.signal }}>{error}</p>}
       {hasLoaded && count === 0 && !error && (
         <p style={{ fontSize: 14, color: t.edge2 }}>
-          Nothing needs action in these days. Pick a date above, or load earlier days.
+          {lookbackTotal === 0
+            ? `Nothing needs action in the last ${CNA_LOOKBACK_DAYS} days.`
+            : "Nothing needs action in these days. Pick a marked date above."}
         </p>
       )}
 

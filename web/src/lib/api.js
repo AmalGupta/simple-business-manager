@@ -526,9 +526,15 @@ export async function postSiteVoiceNote(siteId, blob, fileName) {
    notes (a plain multipart POST/`<audio>` GET can't reliably carry the
    custom header). */
 
-/** How many days back the carousel opens on, and how far each widening step
- *  reaches. */
+/** How many days of cards the carousel opens on, and how far each widening
+ *  step reaches. */
 export const CNA_WINDOW_DAYS = 5;
+
+/** How far back the carousel goes at all. The date strip's dots and the header
+ *  total both describe this whole span, and scrolling can widen the loaded
+ *  cards across it but not past it — "needing action" stops meaning anything
+ *  actionable somewhere behind two months of history. */
+export const CNA_LOOKBACK_DAYS = 60;
 
 /** The window the carousel opens on: the last CNA_WINDOW_DAYS days through
  *  today. Shared with the home-page cache warm-up so the two can't pick
@@ -536,6 +542,12 @@ export const CNA_WINDOW_DAYS = 5;
 export function defaultCallsNeedingActionWindow() {
   const to = todayIso();
   return { dateFrom: addDaysIso(to, -CNA_WINDOW_DAYS), dateTo: to };
+}
+
+/** The full span the carousel can reach: the last CNA_LOOKBACK_DAYS days. */
+export function callsNeedingActionLookback() {
+  const to = todayIso();
+  return { dateFrom: addDaysIso(to, -CNA_LOOKBACK_DAYS), dateTo: to };
 }
 
 /** Returns { items, voiceNotesByTodoId } — the latter a Map<todoId, TodoVoiceNote>. */
@@ -578,9 +590,16 @@ export function loadCallsNeedingAction(window) {
   return callsNeedingActionCache.load(windowKey(window), window);
 }
 
-/** Per-day qualifying-call counts for the carousel's date strip — { days, min_year }. */
-export async function fetchCallsNeedingActionCalendar(year, month) {
-  return fetchJSON(`/api/calls/needing-action/calendar?year=${year}&month=${month}`);
+/** Per-day qualifying-call counts over a date range, for the carousel's date
+ *  strip — { days, min_year }. */
+export async function fetchCallsNeedingActionCalendar({ dateFrom, dateTo }) {
+  return fetchJSON(`/api/calls/needing-action/calendar?date_from=${dateFrom}&date_to=${dateTo}`);
+}
+
+/** Total qualifying calls in a date range — the carousel's header count. */
+export async function fetchCallsNeedingActionCount({ dateFrom, dateTo }) {
+  const data = await fetchJSON(`/api/calls/needing-action/count?date_from=${dateFrom}&date_to=${dateTo}`);
+  return data.count ?? 0;
 }
 
 export async function resolveCall(callId) {

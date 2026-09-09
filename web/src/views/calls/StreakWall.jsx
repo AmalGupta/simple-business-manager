@@ -171,17 +171,21 @@ export function StreakWall({ days, onSelectDay, selected, year, month, onChangeY
                 {WEEKDAY_LABELS[dow]}
               </span>
               <span style={{ fontSize: 14 }}>{dayNum}</span>
+              {/* The marker for "this day has calls". Solid and 7px rather
+                  than the 4px translucent dot it started as: at that size, on
+                  the dark header, it read as an artefact of the font and the
+                  strip looked uniformly empty (SBM-25). */}
               {d.calls > 0 && (
                 <span
                   style={{
                     position: "absolute",
                     left: "50%",
-                    bottom: 4,
-                    width: 4,
-                    height: 4,
-                    marginLeft: -2,
+                    bottom: 5,
+                    width: 7,
+                    height: 7,
+                    marginLeft: -3.5,
                     borderRadius: "50%",
-                    background: isToday ? t.edge2 : "rgba(255,255,255,0.85)",
+                    background: isToday ? t.accent : t.white,
                   }}
                 />
               )}
