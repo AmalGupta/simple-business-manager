@@ -1743,13 +1743,15 @@ export function composeSiteNameBeingUsed(site: {
   const city = clean(site.city);
   const client = clean(site.poc_name);
 
-  /* The address half needs a house number: a locality on its own is not an
-     identity. UAT had six sites carrying only a city or sector, and building
-     the name out of that turned two different sites into "AIRPORT ROAD" and
-     two more into "NEW CHANDIGARH". Without a house number the site keeps its
-     own name and only picks up the client suffix. */
+  /* Replacing the name costs the operator whatever only the name carried, so
+     the address has to be a full one: a house number AND a locality. UAT shows
+     both halves of that. Six sites hold a locality alone, which turned two
+     different sites into "AIRPORT ROAD" and two more into "NEW CHANDIGARH";
+     and "H.NO 244 IAS Society" holds a house number alone, where composing
+     "#244" drops the society nobody typed into a field. Either way the site
+     keeps its own name and only picks up the client suffix. */
   const locality = sector && city ? `${sector}-${city}` : (sector ?? city);
-  const address = houseNo ? (locality ? `#${houseNo}, ${locality}` : `#${houseNo}`) : null;
+  const address = houseNo && locality ? `#${houseNo}, ${locality}` : null;
   if (!address && !client) return null;
 
   const left = address ?? clean(site.name) ?? "";

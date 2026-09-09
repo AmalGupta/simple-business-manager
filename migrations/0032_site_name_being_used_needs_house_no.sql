@@ -5,12 +5,15 @@
 --
 -- Two changes, both found by running 0031 against real UAT data:
 --
--- 1. The address half now requires a house number. 0031 built it from any of
---    house_no/sector/city, and six UAT sites carry only a city or a sector —
---    so "Homeland REGALI" and "E NEST BUILDING (CHAWLA SIR)" both became
---    "AIRPORT ROAD", and "Twin Tower MARBELLA GRAND" and "THE TIARA" both
---    became "NEW CHANDIGARH". A locality is not an identity. Without a house
---    number the site keeps its own name and only takes the client suffix.
+-- 1. The address half now requires a house number AND a locality, where 0031
+--    built it from any one of house_no/sector/city. Replacing the name costs
+--    whatever only the name carried, so a partial address is not worth it:
+--    six UAT sites hold a locality alone, which made "Homeland REGALI" and
+--    "E NEST BUILDING (CHAWLA SIR)" both read "AIRPORT ROAD" and "Twin Tower
+--    MARBELLA GRAND" and "THE TIARA" both read "NEW CHANDIGARH"; and
+--    "H.NO 244 IAS Society" holds a house number alone, where "#244" drops
+--    the society nobody typed into a field. Short of both, the site keeps its
+--    own name and only takes the client suffix.
 --
 -- 2. A house number that already carries its label ("H.NO 244", "H.NO E1")
 --    has that prefix stripped, so the row reads "#244" rather than
@@ -58,9 +61,9 @@ located AS (
   FROM unprefixed
 ),
 addressed AS (
-  -- No house number, no address half: concatenation with the NULL hn yields
-  -- NULL, which is exactly the rule.
-  SELECT id, pc, nm, '#' || hn || coalesce(', ' || locality, '') AS address
+  -- Missing either half yields NULL through the concatenation, which is
+  -- exactly the rule.
+  SELECT id, pc, nm, '#' || hn || ', ' || locality AS address
   FROM located
 ),
 composed AS (

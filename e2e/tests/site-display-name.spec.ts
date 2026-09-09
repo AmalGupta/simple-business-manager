@@ -56,9 +56,26 @@ test.describe("Site display name", () => {
     expect((await patched.json()).site_name_being_used).toBe("#244, IAS-Kharar | CL. Raj Kamal Ji");
   });
 
-  /* A locality on its own is not an identity: UAT had six sites carrying only
-     a city or sector, and composing from that turned two different sites into
-     "AIRPORT ROAD". The house number is what licenses replacing the name. */
+  /* Half an address is not worth the name it replaces. UAT had six sites
+     carrying only a city or sector, which turned two different sites into
+     "AIRPORT ROAD"; and "H.NO 244 IAS Society" carried only a house number,
+     where "#244" drops the society nobody typed into a field. */
+  test("a house number with no locality does not replace the name", async ({ page }) => {
+    await loginAsAdmin(page);
+    const houseOnly = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: { name: `E2E H.NO 244 IAS Society ${Date.now()}`, house_no: "H.NO 244" },
+    });
+    expect((await houseOnly.json()).site_name_being_used).toBeNull();
+
+    const withClient = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: { name: `E2E H.NO 244 Society ${Date.now()}`, house_no: "H.NO 244", poc_name: "RAJ KAMAL JI" },
+    });
+    const row = await withClient.json();
+    expect(row.site_name_being_used).toBe(`${row.name} | CL. RAJ KAMAL JI`);
+  });
+
   test("a sector or city alone does not replace the name", async ({ page }) => {
     await loginAsAdmin(page);
     const cityOnly = await page.request.post("/api/sites", {
