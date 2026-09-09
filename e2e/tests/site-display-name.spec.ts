@@ -56,6 +56,52 @@ test.describe("Site display name", () => {
     expect((await patched.json()).site_name_being_used).toBe("#244, IAS-Kharar | CL. Raj Kamal Ji");
   });
 
+  /* Half an address is not worth the name it replaces. UAT had six sites
+     carrying only a city or sector, which turned two different sites into
+     "AIRPORT ROAD"; and "H.NO 244 IAS Society" carried only a house number,
+     where "#244" drops the society nobody typed into a field. */
+  test("a house number with no locality does not replace the name", async ({ page }) => {
+    await loginAsAdmin(page);
+    const houseOnly = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: { name: `E2E H.NO 244 IAS Society ${Date.now()}`, house_no: "H.NO 244" },
+    });
+    expect((await houseOnly.json()).site_name_being_used).toBeNull();
+
+    const withClient = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: { name: `E2E H.NO 244 Society ${Date.now()}`, house_no: "H.NO 244", poc_name: "RAJ KAMAL JI" },
+    });
+    const row = await withClient.json();
+    expect(row.site_name_being_used).toBe(`${row.name} | CL. RAJ KAMAL JI`);
+  });
+
+  test("a sector or city alone does not replace the name", async ({ page }) => {
+    await loginAsAdmin(page);
+    const cityOnly = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: { name: `E2E City Only ${Date.now()}`, city: "AIRPORT ROAD" },
+    });
+    expect((await cityOnly.json()).site_name_being_used).toBeNull();
+
+    const withClient = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: { name: `E2E City Client ${Date.now()}`, city: "AIRPORT ROAD", poc_name: "Tushar" },
+    });
+    const row = await withClient.json();
+    expect(row.site_name_being_used).toBe(`${row.name} | CL. Tushar`);
+  });
+
+  // Operators type the label into the field — real UAT rows hold "H.NO 244".
+  test("a house number keeps its own prefix out of the composed name", async ({ page }) => {
+    await loginAsAdmin(page);
+    const created = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: { name: `E2E Prefixed ${Date.now()}`, house_no: "H.NO 8", sector: "MANOHAR CITY", city: "NEW VHD" },
+    });
+    expect((await created.json()).site_name_being_used).toBe("#8, MANOHAR CITY-NEW VHD");
+  });
+
   test("a site with no details keeps its own name", async ({ page }) => {
     await loginAsAdmin(page);
     const storedName = `E2E Bare ${Date.now()}`;
