@@ -14,6 +14,18 @@ export const dayKey = (iso) => (iso ? String(iso).slice(0, 10) : null);
 export const isoDate = (year, month, day) =>
   `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 export const daysUntil = (iso) => (iso ? Math.round((new Date(iso) - today()) / DAY) : null);
+export const todayIso = () => {
+  const d = today();
+  return isoDate(d.getFullYear(), d.getMonth(), d.getDate());
+};
+/* Shifts an ISO date by whole days. Goes through local Y/M/D rather than
+   epoch arithmetic so it stays correct across a DST boundary, where a day
+   isn't 86400000ms. */
+export const addDaysIso = (iso, days) => {
+  const [y, m, d] = String(iso).slice(0, 10).split("-").map(Number);
+  const shifted = new Date(y, m - 1, d + days);
+  return isoDate(shifted.getFullYear(), shifted.getMonth(), shifted.getDate());
+};
 export const fmtDate = (iso) =>
   iso
     ? new Date(iso).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" })

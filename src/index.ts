@@ -38,6 +38,7 @@ import {
   handlePostSiteTeamMember,
   handleAutoAssignTodos,
   handleGetCallsNeedingAction,
+  handleGetCallsNeedingActionCalendar,
   handleResolveCall,
   handleReExtractCall,
   handleRetryCallStt,
@@ -201,6 +202,11 @@ export default {
     if (url.pathname === "/api/calls/needing-action" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetCallsNeedingAction(request, env);
+    }
+
+    if (url.pathname === "/api/calls/needing-action/calendar" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetCallsNeedingActionCalendar(request, env);
     }
 
     if (url.pathname === "/api/dashboard/summary" && request.method === "GET") {

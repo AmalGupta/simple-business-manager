@@ -49,13 +49,16 @@ const WEEKDAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"];
    stacked above the date so a column no longer has to line up visually.
    Each day carries a hover/focus tooltip with the date and call count. */
 export function StreakWall({ days, onSelectDay, selected, year, month, onChangeYear, onChangeMonth, onPrevMonth, onNextMonth, yearOptions, todayIso }) {
-  const todayRef = useRef(null);
+  const focusRef = useRef(null);
 
-  /* Auto-scroll today into view — a horizontal bar that opens scrolled to
-     day 1 with today off-screen defeats "the focus date should be today." */
+  /* Auto-scroll the day in focus into view — a horizontal bar that opens
+     scrolled to day 1 with today off-screen defeats "the focus date should
+     be today." That's the selected day where there is one (the Calls Needing
+     Action carousel keeps it in step with the card on screen), otherwise
+     today, which is the home page's only case. */
   useEffect(() => {
-    todayRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
-  }, [year, month, days]);
+    focusRef.current?.scrollIntoView({ inline: "center", block: "nearest" });
+  }, [year, month, days, selected]);
 
   return (
     <div>
@@ -134,11 +137,12 @@ export function StreakWall({ days, onSelectDay, selected, year, month, onChangeY
           }
 
           const isToday = d.date === todayIso;
+          const isFocused = selected ? d.date === selected : isToday;
 
           return (
             <button
               key={d.date}
-              ref={isToday ? todayRef : undefined}
+              ref={isFocused ? focusRef : undefined}
               className="sbm-pane sbm-day sbm-tip"
               onClick={() => onSelectDay(d.date)}
               aria-label={`${fmtLong(d.date)}${isToday ? ", today" : ""}, ${d.held ? "held" : "missed"}, ${d.calls} calls`}
