@@ -1429,6 +1429,25 @@ export interface CallsNeedingActionWindow {
   limit?: number;
 }
 
+/* The qualifying predicate plus an optional effective-date window. Shared by
+   the list, the per-day counts and the total so that a window means exactly
+   the same set of calls in all three — the carousel shows one window of
+   cards while the strip and the header total describe a wider one, and they
+   only add up if there's a single definition of "in this window". */
+function callsNeedingActionWhere(opts: CallsNeedingActionWindow): { sql: string; binds: unknown[] } {
+  const clauses = [CALLS_NEEDING_ACTION_WHERE];
+  const binds: unknown[] = [];
+  if (opts.dateFrom) {
+    clauses.push(`${CALL_EFFECTIVE_DATE} >= ?`);
+    binds.push(opts.dateFrom);
+  }
+  if (opts.dateTo) {
+    clauses.push(`${CALL_EFFECTIVE_DATE} <= ?`);
+    binds.push(opts.dateTo);
+  }
+  return { sql: clauses.join("\n     AND "), binds };
+}
+
 /**
  * One date window's worth of qualifying calls, oldest-first so the carousel
  * and its date strip agree on ordering. The window is what keeps this cheap:
@@ -1445,63 +1464,59 @@ export async function getCallsNeedingAction(
     Math.max(1, opts.limit ?? CALLS_NEEDING_ACTION_MAX_LIMIT),
     CALLS_NEEDING_ACTION_MAX_LIMIT
   );
-  const clauses = [CALLS_NEEDING_ACTION_WHERE];
-  const binds: unknown[] = [];
-  if (opts.dateFrom) {
-    clauses.push(`${CALL_EFFECTIVE_DATE} >= ?`);
-    binds.push(opts.dateFrom);
-  }
-  if (opts.dateTo) {
-    clauses.push(`${CALL_EFFECTIVE_DATE} <= ?`);
-    binds.push(opts.dateTo);
-  }
+  const where = callsNeedingActionWhere(opts);
   const { results } = await db
     .prepare(
-      `${CALL_LIST_SELECT} WHERE ${clauses.join("\n     AND ")}
+      `${CALL_LIST_SELECT} WHERE ${where.sql}
        ORDER BY ${CALL_EFFECTIVE_DATE} ASC, calls.recorded_at ASC
        LIMIT ?`
     )
-    .bind(...binds, limit)
+    .bind(...where.binds, limit)
     .all<RawCallJoinRow>();
   return hydrateCallRows(db, results ?? []);
 }
 
-export async function countCallsNeedingAction(db: D1Database): Promise<number> {
+/** Total qualifying calls, optionally inside a date window — the home tile
+ *  asks for all of them, the carousel header for the last 60 days. */
+export async function countCallsNeedingAction(
+  db: D1Database,
+  opts: CallsNeedingActionWindow = {}
+): Promise<number> {
+  const where = callsNeedingActionWhere(opts);
   const row = await db
-    .prepare(`SELECT COUNT(*) AS n FROM calls WHERE ${CALLS_NEEDING_ACTION_WHERE}`)
+    .prepare(`SELECT COUNT(*) AS n FROM calls WHERE ${where.sql}`)
+    .bind(...where.binds)
     .first<{ n: number }>();
   return row?.n ?? 0;
 }
 
 /**
- * Qualifying-call counts per day for one month, for the carousel's date strip.
- * getCallsCalendar can't be reused: it groups on `recorded_at` (upload time)
- * and counts every call, so its dots would point at days the carousel has
- * nothing on. This groups on the same effective-date expression the list
+ * Qualifying-call counts per day across a date range, for the carousel's date
+ * strip. getCallsCalendar can't be reused: it groups on `recorded_at` (upload
+ * time) and counts every call, so its dots would point at days the carousel
+ * has nothing on. This groups on the same effective-date expression the list
  * orders by, over the same qualifying set.
+ *
+ * A range rather than a month because the strip needs dots for days it hasn't
+ * loaded cards for: the carousel opens on 5 days but asks for the whole 60-day
+ * lookback in one request, so every day worth clicking reads as clickable
+ * straight away, and the backward prefetch can skip empty stretches instead of
+ * probing them 5 days at a time.
  */
 export async function getCallsNeedingActionCalendar(
   db: D1Database,
-  year: number,
-  month: number
+  opts: CallsNeedingActionWindow = {}
 ): Promise<CallsCalendarResult> {
-  const monthIndex = month - 1;
-  if (monthIndex < 0 || monthIndex > 11) throw new Error("invalid month");
-  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
-
+  const where = callsNeedingActionWhere(opts);
   const [{ results: dayRows }, minRow] = await Promise.all([
     db
       .prepare(
         `SELECT ${CALL_EFFECTIVE_DATE} AS day, COUNT(*) AS n
          FROM calls
-         WHERE ${CALLS_NEEDING_ACTION_WHERE}
-           AND ${CALL_EFFECTIVE_DATE} >= ?
-           AND ${CALL_EFFECTIVE_DATE} <= ?
+         WHERE ${where.sql}
          GROUP BY day`
       )
-      .bind(monthStart, monthEnd)
+      .bind(...where.binds)
       .all<{ day: string; n: number }>(),
     db
       .prepare(
