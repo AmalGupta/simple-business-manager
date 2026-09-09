@@ -103,9 +103,11 @@ CREATE TABLE sites (
   -- by hand through createSite. The caller name and date shown on the review
   -- screen are joined through this, not copied — see SITE_ROW_SELECT.
   discovered_from_call_id TEXT REFERENCES calls(id),
-  -- migration 0031: what the site tables show — "#244, IAS-PCS | CL. Raj
-  -- Kamal Ji", composed from house_no/sector/city/poc_name by
-  -- composeSiteNameBeingUsed on every create and detail edit. Deliberately a
+  -- migration 0031, corrected by 0032: what the site tables show — "#244,
+  -- IAS-PCS | CL. Raj Kamal Ji", composed from house_no/sector/city/poc_name
+  -- by composeSiteNameBeingUsed on every create and detail edit. The address
+  -- half needs a house number; a sector or city alone is not an identity and
+  -- turned two different sites into "AIRPORT ROAD". Deliberately a
   -- second column rather than a rewrite of `name`: `name` stays the
   -- pipeline's match key (upsertSiteByName conflicts on it) and the two are
   -- interchangeable wherever one reads better than the other. NULL while a

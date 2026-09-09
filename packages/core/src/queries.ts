@@ -1712,6 +1712,13 @@ const SITE_ROW_SELECT = `SELECT sites.id, sites.name, sites.site_name_being_used
 /** The " | CL. " that separates the address half from the client half. */
 export const SITE_CLIENT_SEPARATOR = " | CL. ";
 
+/* Operators type the label into the field as often as not — real UAT rows
+   hold "H.NO 244" and "H.NO E1" — and the composed name adds its own "#",
+   so without this the row reads "#H.NO 244". Only stripped when something
+   follows it, so a lone "H.NO" is left alone rather than blanked; migration
+   0032 mirrors this set of prefixes in SQL. */
+const HOUSE_NO_PREFIX = /^(?:#|h\.?\s?no\.?|house\s?no\.?)\s*(?=\S)/i;
+
 /**
  * The name the site tables show — "#244, IAS-PCS | CL. Raj Kamal Ji": the
  * address an operator recognises, then whose site it is. Written to
@@ -1731,17 +1738,20 @@ export function composeSiteNameBeingUsed(site: {
   poc_name?: string | null;
 }): string | null {
   const clean = (value?: string | null) => (value?.trim() ? value.trim() : null);
-  const houseNo = clean(site.house_no);
+  const houseNo = clean(clean(site.house_no)?.replace(HOUSE_NO_PREFIX, ""));
   const sector = clean(site.sector);
   const city = clean(site.city);
   const client = clean(site.poc_name);
 
+  /* The address half needs a house number: a locality on its own is not an
+     identity. UAT had six sites carrying only a city or sector, and building
+     the name out of that turned two different sites into "AIRPORT ROAD" and
+     two more into "NEW CHANDIGARH". Without a house number the site keeps its
+     own name and only picks up the client suffix. */
   const locality = sector && city ? `${sector}-${city}` : (sector ?? city);
-  const address = houseNo ? (locality ? `#${houseNo}, ${locality}` : `#${houseNo}`) : locality;
+  const address = houseNo ? (locality ? `#${houseNo}, ${locality}` : `#${houseNo}`) : null;
   if (!address && !client) return null;
 
-  /* A site with a client but no address keeps its own name on the left, so
-     the row still says which site it is rather than only who owns it. */
   const left = address ?? clean(site.name) ?? "";
   return client ? `${left}${SITE_CLIENT_SEPARATOR}${client}` : left;
 }
