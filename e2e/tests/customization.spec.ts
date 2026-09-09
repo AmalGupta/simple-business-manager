@@ -2,6 +2,7 @@ import { expect, test } from "@playwright/test";
 import { loginAsAdmin } from "../fixtures/login";
 import { openCallsWithMockedRows } from "../fixtures/calls-grid";
 import { TEST_ADMIN } from "../fixtures/test-data";
+import { sbmApiKey } from "../fixtures/dev-vars";
 
 async function openSiteCustomization(page) {
   await page.getByRole("button", { name: new RegExp(TEST_ADMIN.name) }).click();
@@ -55,7 +56,12 @@ test.describe("Customization smoke", () => {
     await loginAsAdmin(page);
     // POST /api/sites creates the site already confirmed, so the "N confirmed
     // sites" rollup is there however the shared local D1 happens to be seeded.
-    await page.request.post("/api/sites", { data: { name: `E2E Directory Site ${Date.now()}` } });
+    // The route is key-gated (isAuthorized), not session-gated.
+    const seeded = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: { name: `E2E Directory Site ${Date.now()}` },
+    });
+    expect(seeded.ok()).toBeTruthy();
     await page.request.patch("/api/me/customization", {
       data: { inner_scrolls: true, horizontal_scrolls: false },
     });

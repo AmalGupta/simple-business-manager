@@ -16,8 +16,11 @@ import {
   DateWindowFilter,
   FilterCount,
   SelectFilter,
+  SiteDisplayName,
   TextFilter,
   daysAgo,
+  siteDisplayName,
+  siteSearchText,
   windowFor,
 } from "./sitesGridChrome.jsx";
 
@@ -67,7 +70,7 @@ function contactsLabel(site) {
    was misheard. Staff see plain text: PATCH /api/sites/:id is admin-only,
    so a link would open a dialog that can't save. */
 function SiteNameCell({ site, canManage, onOpenDetails }) {
-  if (!canManage) return site.name;
+  if (!canManage) return <SiteDisplayName site={site} />;
   return (
     <button
       type="button"
@@ -75,7 +78,7 @@ function SiteNameCell({ site, canManage, onOpenDetails }) {
       onClick={() => onOpenDetails(site)}
       title="Add site details and mark it valid"
     >
-      {site.name}
+      <SiteDisplayName site={site} />
     </button>
   );
 }
@@ -318,7 +321,7 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
     const decisionFilter = DECISION_FILTERS.find((d) => d.id === filters.decision) ?? DECISION_FILTERS[0];
 
     return rows.filter((s) => {
-      if (name && !s.name.toLowerCase().includes(name)) return false;
+      if (name && !siteSearchText(s).includes(name)) return false;
       if (caller && !callerLabel(s).toLowerCase().includes(caller)) return false;
       if (!callDateWindow.test(daysAgo(s.discovered_from_call_date))) return false;
       if (!decisionFilter.test(s.decision)) return false;
@@ -404,7 +407,7 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
           cellClass: "sbm-scol-name",
           autoHeight: true,
           wrapText: true,
-          valueGetter: (p) => p.data?.name ?? "",
+          valueGetter: (p) => siteDisplayName(p.data),
           /* The + sits inline after the caller line rather than at the
              right edge of the cell, where the decision and mic columns
              squeezed it out of the viewport on a phone. Beside the name
@@ -458,7 +461,7 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
         flex: 1,
         minWidth: 120,
         cellClass: "sbm-scol-name",
-        valueGetter: (p) => p.data?.name ?? "",
+        valueGetter: (p) => siteDisplayName(p.data),
         cellRenderer: (p) =>
           p.data?.id ? <SiteNameCell site={p.data} canManage={canManage} onOpenDetails={openDetails} /> : null,
       },

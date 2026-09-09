@@ -211,6 +211,47 @@ export const SITES_GRID_CSS = `
 }
 `;
 
+/* The site's composed name and the raw one are interchangeable by design
+   (migration 0031): `sites.name` stays the pipeline's match key, while
+   site_name_being_used — "#244, IAS-PCS | CL. Raj Kamal Ji" — is what these
+   two grids show once someone has filled the details in. A site with no
+   details has no composed name and keeps showing its own.
+   ------------------------------------------------------------------ */
+const CLIENT_SEPARATOR = " | CL. ";
+
+export function siteDisplayName(site) {
+  return site?.site_name_being_used?.trim() || site?.name || "";
+}
+
+/** Both names, so typing either the H.No or the original site name finds the row. */
+export function siteSearchText(site) {
+  return `${siteDisplayName(site)} ${site?.name ?? ""}`.toLowerCase();
+}
+
+/* "CL." is the bold marker in the spec, but the cell around it is already
+   700 and the body face stops at 600 — a heavier weight would render
+   identically. So the client half carries the contrast instead: slate at
+   normal weight, the way every other secondary value in these grids reads,
+   which leaves CL. standing out as the bold token it's meant to be. */
+export function SiteDisplayName({ site }) {
+  const label = siteDisplayName(site);
+  const at = label.indexOf(CLIENT_SEPARATOR);
+  if (at === -1) return label;
+  /* One wrapping span rather than a fragment: .ag-cell is display:flex, so
+     sibling text nodes become separate flex items and the space in front of
+     the "|" gets trimmed away ("IAS-PCS| CL."). Inside a single item the
+     whitespace survives. */
+  return (
+    <span style={{ minWidth: 0 }}>
+      {label.slice(0, at)}
+      <span style={{ fontWeight: 400, color: t.edge2 }}>
+        {" | "}
+        <span style={{ fontWeight: 700, color: t.edge }}>CL.</span> {label.slice(at + CLIENT_SEPARATOR.length)}
+      </span>
+    </span>
+  );
+}
+
 /* Shared by every date filter on both grids. `test` takes whole days-ago.
    "Over 30 days" and "Nothing recorded" are expressed as windows rather
    than a second input, so the whole control stays a single select. */
