@@ -150,6 +150,8 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   const [hasLoaded, setHasLoaded] = useState(() =>
     Boolean(getCachedCallsNeedingAction(defaultCallsNeedingActionWindow()))
   );
+  /** True until the three opening requests, and any fallback they trigger, are done. */
+  const [opening, setOpening] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState("");
   const [voiceNotesByTodoId, setVoiceNotesByTodoId] = useState(
@@ -235,7 +237,10 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
    * Fetches whatever part of [fromIso, toIso] isn't loaded yet and merges it.
    * Requests one contiguous span covering the missing dates — re-asking for an
    * already-loaded day inside a gap is cheaper than splitting the request, and
-   * merging by id makes it idempotent.
+   * merging by id makes it idempotent. Resolves to how many calls came back,
+   * or null when there was nothing to fetch or the fetch failed — the opening
+   * effect reads that to notice an empty window, which it can't do from the
+   * card list, since that only reflects the fetch a render later.
    */
   const ensureRange = useCallback(
     async (fromIso, toIso) => {
@@ -252,7 +257,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
           to: prev && prev.to > missing[missing.length - 1] ? prev.to : missing[missing.length - 1],
         }));
       }
-      if (missing.length === 0) return;
+      if (missing.length === 0) return null;
 
       const dateFrom = missing[0];
       const dateTo = missing[missing.length - 1];
@@ -264,10 +269,12 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
           dateTo,
         });
         merge(fetched, notes);
+        return fetched.length;
       } catch (err) {
         console.error("[sbm] failed to load calls needing action", err);
         for (const d of missing) loadedDates.current.delete(d);
         setError("Failed to load — try again.");
+        return null;
       } finally {
         setFetching(false);
         setHasLoaded(true);
@@ -352,7 +359,12 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   // on, and neither aggregate is on the path to showing them.
   useEffect(() => {
     const { dateFrom, dateTo } = defaultCallsNeedingActionWindow();
-    ensureRange(dateFrom, dateTo).finally(() => {
+    const cards = ensureRange(dateFrom, dateTo);
+    const counts = ensureCounts(lookback.dateFrom, lookback.dateTo).finally(() => {
+      countsReady.current = true;
+    });
+
+    cards.finally(() => {
       // Focus goes through the same request/nonce path as a day click so that
       // it still lands if the fetch resolves after this effect.
       focusNonce.current += 1;
@@ -360,14 +372,31 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
       setFocusDate(dateTo);
     });
 
-    ensureCounts(lookback.dateFrom, lookback.dateTo).finally(() => {
-      countsReady.current = true;
+    // Nothing in the opening days: land on the most recent day inside the
+    // lookback that does have calls, which is what the counts are for. An
+    // empty carousel can't widen its own way out of this — the edge observer
+    // needs a card to observe — so without the fallback a quiet week left the
+    // view showing "nothing needs action in these days" with 100+ waiting a
+    // fortnight back (SBM-26).
+    const settled = Promise.all([cards, counts]).then(([added]) => {
+      if (added !== 0) return undefined;
+      const latest = previousDayWithCalls(
+        dayCountsRef.current,
+        addDaysIso(lookback.dateTo, 1),
+        lookback.dateFrom
+      );
+      return latest ? focusOnDate(latest) : undefined;
     });
 
-    fetchCallsNeedingActionCount(lookback)
+    const total = fetchCallsNeedingActionCount(lookback)
       .then(setLookbackTotal)
       .catch((err) => console.error("[sbm] failed to count calls needing action", err));
-  }, [ensureRange, ensureCounts, lookback]);
+
+    // The empty-state copy waits for all three: which of the two messages is
+    // right depends on the lookback total, and an empty opening window is only
+    // really empty once the fallback above has had its turn.
+    Promise.all([settled, total]).finally(() => setOpening(false));
+  }, [ensureRange, ensureCounts, focusOnDate, lookback]);
 
   // Consumes one focus request. Depends on `items` too, so a request made
   // while the carousel was still empty lands as soon as the cards exist; the
@@ -444,10 +473,18 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
         const idx = Math.max(0, Math.min(Math.round(container.scrollLeft / step), list.length - 1));
         setScrollIndex(idx);
         const inView = list[idx];
-        if (inView) {
-          setFocusDate(callDateIso(inView));
-          anchorId.current = inView.id;
-        }
+        if (!inView) return;
+        // Only hand the highlight to the left-edge card once the anchored one
+        // has actually left the screen. A merge can force the carousel off its
+        // anchor even after re-anchoring — prepend four cards in front of a
+        // card that's fifth from the end and no scroll offset can put it at
+        // the left edge any more — and the clamped scroll that follows would
+        // otherwise read as the reader having moved to a different day.
+        const anchorIdx = list.findIndex((c) => c.id === anchorId.current);
+        const anchorOnScreen = anchorIdx >= idx && anchorIdx <= idx + visibleCount - 1;
+        if (anchorOnScreen) return;
+        setFocusDate(callDateIso(inView));
+        anchorId.current = inView.id;
       });
     };
     container.addEventListener("scroll", onScroll, { passive: true });
@@ -455,7 +492,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     // Keyed on the card count, not mounted once: the carousel isn't rendered
     // until there's at least one card, so a run with an empty list has no
     // element to attach to and has to be redone when the cards arrive.
-  }, [items.length]);
+  }, [items.length, visibleCount]);
 
   // Background widening (display strategy #4): arriving at the oldest or
   // newest loaded card fetches the next day beyond it that has calls, or one
@@ -693,7 +730,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
 
       {!hasLoaded && <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>}
       {error && <p style={{ fontSize: 14, color: t.signal }}>{error}</p>}
-      {hasLoaded && count === 0 && !error && (
+      {hasLoaded && !opening && count === 0 && !error && (
         <p style={{ fontSize: 14, color: t.edge2 }}>
           {lookbackTotal === 0
             ? `Nothing needs action in the last ${CNA_LOOKBACK_DAYS} days.`
