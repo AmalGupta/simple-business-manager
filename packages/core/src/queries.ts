@@ -2285,25 +2285,31 @@ export async function removeSiteContact(db: D1Database, siteId: string, callerId
     .run();
 }
 
-/** Contacts for many sites at once — the sites table renders a column of these. */
+/**
+ * Contacts for many sites at once — the sites table renders a column of these.
+ *
+ * Chunked, because this binds one parameter per site and D1 rejects a query
+ * with more than 100. GET /api/sites passes every site id, so this threw for
+ * two days once UAT crossed 100 sites — the whole endpoint 500'd, which took
+ * the review screen and every save behind it with it (SBM-27). Ordering
+ * survives chunking: a site's contacts are all in the same chunk as its id.
+ */
 export async function getSiteContactsBySiteIds(
   db: D1Database,
   siteIds: string[]
 ): Promise<Map<string, SiteContactRow[]>> {
   const map = new Map<string, SiteContactRow[]>();
-  if (siteIds.length === 0) return map;
-  const placeholders = siteIds.map(() => "?").join(",");
-  const { results } = await db
-    .prepare(
+  const results = await queryAllByIdChunks<SiteContactRow & { site_id: string }>(
+    db,
+    siteIds,
+    (placeholders) =>
       `SELECT caller_sites.site_id AS site_id, callers.id AS caller_id, callers.name AS name,
               callers.phone AS phone, callers.category AS category
        FROM caller_sites
        JOIN callers ON callers.id = caller_sites.caller_id
        WHERE caller_sites.site_id IN (${placeholders})
        ORDER BY callers.name ASC`
-    )
-    .bind(...siteIds)
-    .all<SiteContactRow & { site_id: string }>();
+  );
   for (const row of results ?? []) {
     const list = map.get(row.site_id) ?? [];
     list.push({ caller_id: row.caller_id, name: row.name, phone: row.phone, category: row.category });
