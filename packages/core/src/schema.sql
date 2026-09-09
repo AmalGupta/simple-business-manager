@@ -435,8 +435,10 @@ CREATE INDEX idx_todos_call_id ON todos(call_id);
 -- deleted_at/stt_status filter also had no index at all and reran on every
 -- page fetch, not just the first — idx_calls_deleted_status turns it into
 -- a narrower index-only scan instead of a full table-row scan.
+-- The expression itself was corrected by migration 0030 — see the note at the
+-- bottom of this file.
 CREATE INDEX idx_calls_effective_date
-  ON calls(COALESCE(recording_date, substr(recorded_at, 1, 10)));
+  ON calls(substr(COALESCE(recording_date, recorded_at), 1, 10));
 CREATE INDEX idx_calls_deleted_status ON calls(deleted_at, stt_status);
 
 -- migration 0026: per-user product customization (UI prefs)
@@ -454,8 +456,19 @@ CREATE TABLE user_settings (
 -- oldest LIMIT. closed_today's substr(completed_at,...) filter has the
 -- same index-defeating shape migration 0024 already fixed once for
 -- calls.recording_date.
+-- Expression corrected by migration 0030, as above.
 CREATE INDEX idx_calls_needing_action
-  ON calls(resolved_at, deleted_at, (COALESCE(recording_date, substr(recorded_at, 1, 10))), recorded_at);
+  ON calls(resolved_at, deleted_at, (substr(COALESCE(recording_date, recorded_at), 1, 10)), recorded_at);
 CREATE INDEX idx_todos_status_completed_date
   ON todos(status, (substr(completed_at, 1, 10)));
+
+-- migration 0030: both indexes above originally wrapped the substr around
+-- only the recorded_at branch — COALESCE(recording_date, substr(recorded_at,
+-- 1, 10)) — which returns a timestamp whenever recording_date is set, and it
+-- is set for nearly every call (it's the recorder's filename timestamp, see
+-- the calls.recording_date comment above). Windowed queries therefore dropped
+-- the last day of every window, since no timestamp is <= a bare date, and
+-- GROUP BY on it grouped per second instead of per day. The expression is
+-- shown here in its corrected form; the indexes were rebuilt rather than
+-- edited, since an applied migration is never changed in place.
 

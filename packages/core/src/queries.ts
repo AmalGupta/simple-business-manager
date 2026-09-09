@@ -1049,12 +1049,25 @@ const CALL_LIST_FROM = `
   LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
 `;
 
-/* When a call actually happened: the recorder's filename timestamp, falling
-   back to upload time (migration 0004). Byte-identical to the expression
-   indexed by idx_calls_effective_date and idx_calls_needing_action — SQLite
-   matches expression indexes by shape, so reformatting this string silently
-   turns every date filter back into a table scan. */
-const CALL_EFFECTIVE_DATE = `COALESCE(calls.recording_date, substr(calls.recorded_at, 1, 10))`;
+/* The day a call actually happened: the recorder's filename timestamp,
+   falling back to upload time (migration 0004), truncated to a date.
+   Byte-identical to the expression indexed by idx_calls_effective_date and
+   idx_calls_needing_action — SQLite matches expression indexes by shape, so
+   reformatting this string silently turns every date filter back into a
+   table scan.
+
+   The substr has to wrap the COALESCE, not just the recorded_at branch.
+   `recording_date` is a full timestamp despite the name (see schema.sql and
+   migration 0004: it's the recorder's filename timestamp, e.g.
+   "2026-09-03T04:11:49.000Z", and it's non-NULL on 293 of 305 rows on dev),
+   so truncating only the fallback left this expression returning a timestamp
+   for nearly every call. Two consequences, both fixed by moving one paren
+   (SBM-26): `<= date_to` excluded the whole final day of every window, since
+   no timestamp is ever <= a bare date; and grouping by it produced one group
+   per second, so the Calls Needing Action strip got per-timestamp keys that
+   could never match a yyyy-mm-dd day and showed no dots at all. Migration
+   0030 rebuilds both indexes on the corrected shape. */
+const CALL_EFFECTIVE_DATE = `substr(COALESCE(calls.recording_date, calls.recorded_at), 1, 10)`;
 
 function buildCallListWhere(filters: CallListFilters): { sql: string; binds: unknown[] } {
   const clauses = ["calls.deleted_at IS NULL", "calls.stt_status != 'skipped'"];
