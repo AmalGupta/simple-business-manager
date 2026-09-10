@@ -15,7 +15,6 @@ import {
   SITES_GRID_CSS,
   DateWindowFilter,
   FilterCount,
-  SelectFilter,
   SiteDisplayName,
   TextFilter,
   daysAgo,
@@ -27,32 +26,31 @@ import {
 ModuleRegistry.registerModules([AllCommunityModule]);
 
 /* ------------------------------------------------------------------
-   The unconfirmed-sites review table. Same look and filter vocabulary
-   as the confirmed-sites directory (sitesGridChrome.jsx), but the
-   validity decision is a column — an Is Valid switch — rather than the
-   whole point of a card row, with a mic beside it for a voice note on
-   the sites that survive the decision.
+   The sites review table. Same look and filter vocabulary as the
+   confirmed-sites directory (sitesGridChrome.jsx), but the validity
+   decision is a column — an Is Valid switch — rather than the whole
+   point of a card row, with a mic beside it for a voice note on the
+   sites that survive the decision.
 
-   This screen carries the volume — the pipeline discovers far more site
-   names than get confirmed — so sorting and filtering matter more here
-   than on the directory. The decision filter is the load-bearing one:
-   "Undecided" turns a long backlog into just the rows still needing a
-   judgement.
+   SitesReviewView owns Undecided / Active / Archived tabs; this grid
+   only shows the rows for the active tab. Everything else — toggle,
+   contacts, details, voice note — is unchanged across tabs, so an
+   Archived row can be marked Valid again and pick up contacts the
+   same way an Undecided one can.
 
    Rows are deliberately not clickable. There is nowhere to navigate to
    for a site that may not be a real site, and a stray row click that
    silently marked something Valid would be worse than no affordance.
    ------------------------------------------------------------------ */
 
-/* Filters on the PENDING decision, not the saved one, so a row you just
-   marked leaves the "Undecided" view immediately — the list shortens as
-   you work rather than only after saving. */
-const DECISION_FILTERS = [
-  { id: "any", label: "Any", test: () => true },
-  { id: "undecided", label: "Undecided", test: (d) => d !== "Y" && d !== "N" },
-  { id: "Y", label: "Valid", test: (d) => d === "Y" },
-  { id: "N", label: "Not valid", test: (d) => d === "N" },
-];
+/* Tabs on SitesReviewView segregate by PENDING decision (not the saved
+   one), so a row you just marked leaves Undecided / lands on Active or
+   Archived immediately — same shortening the old Decision filter had. */
+const DECISION_TABS = {
+  undecided: (d) => d !== "Y" && d !== "N",
+  active: (d) => d === "Y",
+  archived: (d) => d === "N",
+};
 
 function callerLabel(site) {
   if (!site.discovered_from_call_id) return "No originating call";
@@ -257,24 +255,28 @@ function FilterBar({ filters, setFilters, shown, total }) {
         placeholder="Search caller…"
       />
       <DateWindowFilter label="Call date" value={filters.callDate} onChange={(v) => set("callDate", v)} />
-      <SelectFilter
-        label="Decision"
-        value={filters.decision}
-        onChange={(v) => set("decision", v)}
-        options={DECISION_FILTERS}
-      />
       <FilterCount shown={shown} total={total} />
     </div>
   );
 }
 
-const EMPTY_FILTERS = { name: "", caller: "", callDate: "any", decision: "any" };
+const EMPTY_FILTERS = { name: "", caller: "", callDate: "any" };
 
 /**
  * `pending` maps site id -> "Y" | "N" | null, owned by SitesReviewView so
  * the save stays batched. `onChoose(id, value)` toggles one row.
+ * `decisionTab` is undecided | active | archived — the page tabs, not a
+ * filter chip.
  */
-export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, onContactsChanged, onDetailsSaved }) {
+export function SitesReviewGrid({
+  sites,
+  pending,
+  decisionTab = "undecided",
+  onChoose,
+  canManage = true,
+  onContactsChanged,
+  onDetailsSaved,
+}) {
   const gridRef = useRef(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   /* The recording modal is owned here rather than by the mic cell: every
@@ -314,20 +316,23 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
     [sites, pending, contactsBySite]
   );
 
+  const tabRows = useMemo(() => {
+    const inTab = DECISION_TABS[decisionTab] ?? DECISION_TABS.undecided;
+    return rows.filter((s) => inTab(s.decision));
+  }, [rows, decisionTab]);
+
   const filtered = useMemo(() => {
     const name = filters.name.trim().toLowerCase();
     const caller = filters.caller.trim().toLowerCase();
     const callDateWindow = windowFor(filters.callDate);
-    const decisionFilter = DECISION_FILTERS.find((d) => d.id === filters.decision) ?? DECISION_FILTERS[0];
 
-    return rows.filter((s) => {
+    return tabRows.filter((s) => {
       if (name && !siteSearchText(s).includes(name)) return false;
       if (caller && !callerLabel(s).toLowerCase().includes(caller)) return false;
       if (!callDateWindow.test(daysAgo(s.discovered_from_call_date))) return false;
-      if (!decisionFilter.test(s.decision)) return false;
       return true;
     });
-  }, [rows, filters]);
+  }, [tabRows, filters]);
 
   const openNote = useCallback((site) => {
     setNoteNotice("");
@@ -535,7 +540,7 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
   return (
     <>
       <style>{SITES_GRID_CSS}</style>
-      <FilterBar filters={filters} setFilters={setFilters} shown={filtered.length} total={rows.length} />
+      <FilterBar filters={filters} setFilters={setFilters} shown={filtered.length} total={tabRows.length} />
       {noteNotice && <p style={{ fontSize: 12, color: t.edge2, margin: "0 0 12px" }}>{noteNotice}</p>}
       <Card
         style={{
