@@ -1666,7 +1666,9 @@ export interface SiteRow {
   /** migration 0028 — the call this name came from, NULL for seeds and manual adds. */
   discovered_from_call_id: string | null;
   /** Joined through discovered_from_call_id, never stored on the site row. */
+  discovered_from_caller_id: string | null;
   discovered_from_caller_name: string | null;
+  discovered_from_caller_phone: string | null;
   discovered_from_call_date: string | null;
   /** Linked Callers Directory rows (caller_sites). Merged in by the handler via getSiteContactsBySiteIds, same as ConfirmedSiteRow. */
   contacts?: SiteContactRow[];
@@ -1703,7 +1705,9 @@ export interface SiteIntakeDetails {
 const SITE_ROW_SELECT = `SELECT sites.id, sites.name, sites.site_name_being_used, sites.is_confirmed, sites.address, sites.poc_name,
   sites.house_no, sites.sector, sites.city, sites.poc_contact_number, sites.assigned_by, sites.referred_by,
   sites.site_location, sites.target_closure_date, sites.discovered_from_call_id,
+  callers.id AS discovered_from_caller_id,
   callers.name AS discovered_from_caller_name,
+  callers.phone AS discovered_from_caller_phone,
   substr(COALESCE(calls.recording_date, calls.recorded_at), 1, 10) AS discovered_from_call_date
   FROM sites
   LEFT JOIN calls ON calls.id = sites.discovered_from_call_id
