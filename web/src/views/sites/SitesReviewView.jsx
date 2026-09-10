@@ -13,22 +13,16 @@ import { SitesReviewGrid } from "./SitesReviewGrid.jsx";
    per-toggle, so reviewing a dozen sites is a dozen taps, not a dozen
    round trips.
 
-   Three tabs segregate the same grid by the pending decision:
-   Undecided (default), Active sites (Valid), Archived (Not valid).
-   Toggling a row moves it between tabs immediately — same behaviour the
-   old Decision filter had, just as the primary navigation.
+   Three index-card tabs (below the search bar on the grid) segregate by
+   pending decision: Undecided (default), Active sites (Valid), Archived
+   (Not valid). Search only runs inside the selected tab. Toggling a row
+   moves it between tabs immediately.
 
    The rows themselves are a sortable, filterable grid (SitesReviewGrid);
    this view owns the pending decisions, the batched save and the scan,
    and shows each site's originating caller and call date so the decision
    is a judgement on evidence rather than on a bare string.
    ------------------------------------------------------------------ */
-
-const REVIEW_TABS = [
-  { id: "undecided", label: "Undecided" },
-  { id: "active", label: "Active sites" },
-  { id: "archived", label: "Archived" },
-];
 
 export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
   const [pending, setPending] = useState(() => Object.fromEntries(sites.map((s) => [s.id, s.is_confirmed])));
@@ -145,41 +139,6 @@ export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
       </div>
       {scanResult && <p style={{ fontSize: 13, color: t.edge2, margin: "0 0 1rem" }}>{scanResult}</p>}
 
-      <div
-        role="tablist"
-        aria-label="Review site status"
-        style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: "0.75rem" }}
-      >
-        {REVIEW_TABS.map((opt) => {
-          const selected = tab === opt.id;
-          const count = tabCounts[opt.id] ?? 0;
-          return (
-            <button
-              key={opt.id}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => setTab(opt.id)}
-              style={{
-                padding: "7px 12px",
-                border: `1px solid ${selected ? t.accent : t.frost}`,
-                borderRadius: t.radiusButton,
-                background: selected ? t.accent : t.white,
-                color: selected ? t.white : t.edge,
-                fontSize: 12,
-                fontWeight: 600,
-                fontFamily: t.body,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {opt.label}
-              <span style={{ marginLeft: 6, opacity: selected ? 0.9 : 0.65 }}>{count}</span>
-            </button>
-          );
-        })}
-      </div>
-
       {sites.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No sites yet.</p>
@@ -189,6 +148,8 @@ export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
           sites={sites}
           pending={pending}
           decisionTab={tab}
+          tabCounts={tabCounts}
+          onDecisionTabChange={setTab}
           onChoose={setChoice}
           canManage={canManage}
           onContactsChanged={onSaved}
