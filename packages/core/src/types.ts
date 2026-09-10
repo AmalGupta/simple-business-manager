@@ -198,8 +198,14 @@ export interface AppRequest {
   status: AppRequestStatus;
   r2_key: string | null;
   stt_job_id: string | null;
+  /** Claude-extracted speaker; falls back to created_by_name when blank. */
+  speaker_name: string | null;
+  title: string | null;
+  summary: string | null;
   jira_issue_key: string | null;
   jira_issue_url: string | null;
+  /** Jira status name at create time (e.g. "To Do"). */
+  jira_status: string | null;
   error: string | null;
   created_at: string;
 }

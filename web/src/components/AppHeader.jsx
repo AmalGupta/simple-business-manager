@@ -16,6 +16,7 @@ export function AppHeader({
   onUpdatePhone,
   customization,
   onCustomizationChange,
+  onRequestReport,
   right,
   children,
   hideAccount = false,
@@ -43,6 +44,7 @@ export function AppHeader({
               onUpdatePhone={onUpdatePhone}
               customization={customization}
               onCustomizationChange={onCustomizationChange}
+              onRequestReport={onRequestReport}
             />
           )}
         </div>
