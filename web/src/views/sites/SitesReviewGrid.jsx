@@ -336,13 +336,24 @@ export function SitesReviewGrid({ sites, pending, onChoose, canManage = true, on
 
   const openContacts = useCallback((site) => setContactsSite(site), []);
 
-  const openDetails = useCallback((site) => setDetailsSite(site), []);
+  const openDetails = useCallback(
+    (site) =>
+      setDetailsSite({
+        ...site,
+        contacts: contactsBySite[site.id] ?? site.contacts ?? [],
+      }),
+    [contactsBySite]
+  );
 
   const saveContacts = async (callerIds) => {
     const contacts = await postSiteContacts(contactsSite.id, callerIds);
     setContactsBySite((current) => ({ ...current, [contactsSite.id]: contacts }));
+    setDetailsSite((current) =>
+      current?.id === contactsSite.id ? { ...current, contacts } : current
+    );
     // Server truth for every other screen reading this list (and for a
     // later remount of this one) — the local override is only the bridge.
+    // Also refreshes site_name_being_used / poc_* rewritten on contact save.
     await onContactsChanged?.();
   };
 

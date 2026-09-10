@@ -15,6 +15,11 @@ import { Modal } from "../../components/Modal.jsx";
    Labels match AddSiteScreen exactly. Two forms over the same columns
    that disagree about what a column is called ("H.No" vs "House
    number") is how a field gets filled in twice.
+
+   Associated Callers Directory contacts (caller_sites) are listed as
+   their own Contact / Contact number rows — one pair per linked caller —
+   rather than stuffed into the single poc_* fields. Those fields stay in
+   the form only when nothing is linked yet.
    ------------------------------------------------------------------ */
 
 const FIELDS = [
@@ -28,6 +33,8 @@ const FIELDS = [
   { key: "referred_by", label: "Referred by", placeholder: "Who referred it" },
 ];
 
+const POC_KEYS = new Set(["poc_name", "poc_contact_number"]);
+
 const labelStyle = {
   fontFamily: t.label,
   fontSize: 11,
@@ -35,6 +42,13 @@ const labelStyle = {
   letterSpacing: "0.06em",
   textTransform: "uppercase",
   color: t.edge2,
+};
+
+const readOnlyInputStyle = {
+  ...TEXT_INPUT_STYLE,
+  background: "color-mix(in srgb, var(--color-line-soft) 55%, white)",
+  color: t.edge,
+  cursor: "default",
 };
 
 function FieldRow({ label, children }) {
@@ -61,6 +75,10 @@ export function SiteDetailsModal({
   extraPatch = null,
   editableName = false,
 }) {
+  const contacts = site?.contacts ?? [];
+  const hasLinkedContacts = contacts.length > 0;
+  const editableFields = hasLinkedContacts ? FIELDS.filter((f) => !POC_KEYS.has(f.key)) : FIELDS;
+
   const [values, setValues] = useState(() => {
     const initial = { target_closure_date: site?.target_closure_date ?? "", name: site?.name ?? "" };
     for (const f of FIELDS) initial[f.key] = site?.[f.key] ?? "";
@@ -91,7 +109,7 @@ export function SiteDetailsModal({
       }
       if (nextName !== (site?.name ?? "").trim()) patch.name = nextName;
     }
-    for (const f of FIELDS) {
+    for (const f of editableFields) {
       const next = values[f.key].trim();
       const current = (site?.[f.key] ?? "").trim();
       if (next !== current) patch[f.key] = next || null;
@@ -132,7 +150,7 @@ export function SiteDetailsModal({
             />
           </FieldRow>
         )}
-        {FIELDS.map((f) => (
+        {editableFields.map((f) => (
           <FieldRow key={f.key} label={f.label}>
             <input
               value={values[f.key]}
@@ -142,6 +160,39 @@ export function SiteDetailsModal({
             />
           </FieldRow>
         ))}
+
+        {hasLinkedContacts && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            <span style={labelStyle}>
+              {contacts.length === 1 ? "Associated contact" : `Associated contacts (${contacts.length})`}
+            </span>
+            {contacts.map((c, index) => {
+              const n = index + 1;
+              const nameLabel = contacts.length === 1 ? "Contact person" : `Contact ${n}`;
+              const phoneLabel = contacts.length === 1 ? "Contact number" : `Contact ${n} number`;
+              return (
+                <div
+                  key={c.caller_id}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 8,
+                    paddingBottom: index < contacts.length - 1 ? 10 : 0,
+                    borderBottom: index < contacts.length - 1 ? `1px solid ${t.frostSoft}` : "none",
+                  }}
+                >
+                  <FieldRow label={nameLabel}>
+                    <input value={c.name ?? ""} readOnly tabIndex={-1} style={readOnlyInputStyle} />
+                  </FieldRow>
+                  <FieldRow label={phoneLabel}>
+                    <input value={c.phone ?? ""} readOnly tabIndex={-1} style={readOnlyInputStyle} />
+                  </FieldRow>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
         <FieldRow label="Target closure date">
           <input
             type="date"
