@@ -243,6 +243,78 @@ function AddNoteButton({ site, decision, onOpen }) {
   );
 }
 
+const REVIEW_TABS = [
+  { id: "undecided", label: "Undecided" },
+  { id: "active", label: "Active sites" },
+  { id: "archived", label: "Archived" },
+];
+
+/* Index-card bookmarks: the selected tab sits flush on the page edge so
+   the card reads as one sheet with a protruding label, not a separate
+   chip row. Inactive tabs sit slightly lower / behind. */
+const INDEX_TABS_CSS = `
+.sbm-review-index {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+.sbm-review-index__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0 2px;
+  margin: 0;
+  position: relative;
+  z-index: 1;
+}
+.sbm-review-index__tab {
+  appearance: none;
+  margin: 0;
+  padding: 8px 14px 9px;
+  border: 1px solid var(--color-line);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: color-mix(in srgb, var(--color-line-soft) 70%, white);
+  color: var(--color-slate);
+  font-family: var(--font-label), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.2;
+  position: relative;
+  top: 1px;
+}
+.sbm-review-index__tab:hover {
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-line-soft) 40%, white);
+}
+.sbm-review-index__tab[aria-selected="true"] {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  top: 0;
+  padding-bottom: 10px;
+  z-index: 2;
+}
+.sbm-review-index__tab-count {
+  margin-left: 6px;
+  font-weight: 600;
+  opacity: 0.7;
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 12px;
+}
+.sbm-review-index__page {
+  border-top-left-radius: 0;
+  position: relative;
+  z-index: 0;
+}
+`;
+
 function FilterBar({ filters, setFilters, shown, total }) {
   const set = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
   return (
@@ -265,13 +337,15 @@ const EMPTY_FILTERS = { name: "", caller: "", callDate: "any" };
 /**
  * `pending` maps site id -> "Y" | "N" | null, owned by SitesReviewView so
  * the save stays batched. `onChoose(id, value)` toggles one row.
- * `decisionTab` is undecided | active | archived — the page tabs, not a
- * filter chip.
+ * Index-card tabs sit under the search bar; search only filters the
+ * selected tab's rows.
  */
 export function SitesReviewGrid({
   sites,
   pending,
   decisionTab = "undecided",
+  tabCounts = {},
+  onDecisionTabChange,
   onChoose,
   canManage = true,
   onContactsChanged,
@@ -301,6 +375,12 @@ export function SitesReviewGrid({
     mq.addEventListener("change", onChange);
     return () => mq.removeEventListener("change", onChange);
   }, []);
+
+  /* Fresh search scope when the bookmark changes — a query typed on
+     Undecided shouldn't silently empty Active sites. */
+  useEffect(() => {
+    setFilters(EMPTY_FILTERS);
+  }, [decisionTab]);
 
   /* The pending decision is folded into row data rather than read from
      grid context, so changing it produces new row objects that AG Grid
@@ -540,36 +620,60 @@ export function SitesReviewGrid({
   return (
     <>
       <style>{SITES_GRID_CSS}</style>
+      <style>{INDEX_TABS_CSS}</style>
       <FilterBar filters={filters} setFilters={setFilters} shown={filtered.length} total={tabRows.length} />
       {noteNotice && <p style={{ fontSize: 12, color: t.edge2, margin: "0 0 12px" }}>{noteNotice}</p>}
-      <Card
-        style={{
-          padding: 0,
-          overflow: "visible",
-          marginBottom: 12,
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        <div className="sbm-sites-grid-wrap">
-          <div className="sbm-sites-grid ag-theme-quartz">
-            <AgGridReact
-              ref={gridRef}
-              rowData={filtered}
-              columnDefs={columnDefs}
-              defaultColDef={defaultColDef}
-              getRowId={getRowId}
-              rowHeight={narrow ? 64 : 56}
-              suppressHorizontalScroll
-              domLayout="autoHeight"
-              animateRows={false}
-              suppressCellFocus
-              enableBrowserTooltips={false}
-              overlayNoRowsTemplate="No sites match these filters."
-            />
-          </div>
+      <div className="sbm-review-index">
+        <div role="tablist" aria-label="Review site status" className="sbm-review-index__tabs">
+          {REVIEW_TABS.map((opt) => {
+            const selected = decisionTab === opt.id;
+            const count = tabCounts[opt.id] ?? 0;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                className="sbm-review-index__tab"
+                onClick={() => onDecisionTabChange?.(opt.id)}
+              >
+                {opt.label}
+                <span className="sbm-review-index__tab-count">{count}</span>
+              </button>
+            );
+          })}
         </div>
-      </Card>
+        <Card
+          className="sbm-review-index__page"
+          style={{
+            padding: 0,
+            overflow: "visible",
+            marginBottom: 0,
+            display: "flex",
+            flexDirection: "column",
+            borderTopLeftRadius: 0,
+          }}
+        >
+          <div className="sbm-sites-grid-wrap">
+            <div className="sbm-sites-grid ag-theme-quartz">
+              <AgGridReact
+                ref={gridRef}
+                rowData={filtered}
+                columnDefs={columnDefs}
+                defaultColDef={defaultColDef}
+                getRowId={getRowId}
+                rowHeight={narrow ? 64 : 56}
+                suppressHorizontalScroll
+                domLayout="autoHeight"
+                animateRows={false}
+                suppressCellFocus
+                enableBrowserTooltips={false}
+                overlayNoRowsTemplate="No sites match these filters."
+              />
+            </div>
+          </div>
+        </Card>
+      </div>
       {noteSite && <VoiceNoteModal onClose={() => setNoteSite(null)} onSave={saveNote} />}
       {contactsSite && (
         <AssociateContactsModal
