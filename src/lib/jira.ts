@@ -1,7 +1,7 @@
-// Jira Cloud REST API v3 — POST /rest/api/3/issue only, for the in-app
-// request form (src/handlers/app-request.ts). Confirmed against Jira's Free
-// plan: issue creation via the REST API is not plan-gated, only permission-
-// gated on the authenticating account (2026-09-10 support-forum check).
+// Jira Cloud REST API v3 — POST /rest/api/3/issue (+ status readback) for the
+// in-app request form. Confirmed against Jira's Free plan: issue creation via
+// the REST API is not plan-gated, only permission-gated on the authenticating
+ // account (2026-09-10 support-forum check).
 //
 // Auth is Basic base64(email:token) with an Atlassian API token — see
 // docs/LOCAL_PROFILE.md and .dev.vars.example for where JIRA_EMAIL /
@@ -16,6 +16,8 @@ import type { Env } from "../index";
 export interface JiraIssueResult {
   key: string;
   url: string;
+  /** Status name at create time (e.g. "To Do"), or null if the follow-up GET failed. */
+  status: string | null;
 }
 
 /** Minimal Atlassian Document Format wrapper — v3 rejects a plain string description. */
@@ -28,6 +30,22 @@ function toAdf(text: string) {
       content: line.length > 0 ? [{ type: "text", text: line }] : [],
     })),
   };
+}
+
+async function fetchIssueStatus(env: Env, auth: string, key: string): Promise<string | null> {
+  try {
+    const res = await fetch(`https://${env.JIRA_BASE_URL}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`, {
+      headers: {
+        Authorization: `Basic ${auth}`,
+        accept: "application/json",
+      },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { fields?: { status?: { name?: string } } };
+    return data.fields?.status?.name?.trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 export async function createJiraIssue(
@@ -65,5 +83,6 @@ export async function createJiraIssue(
   }
 
   const data = (await res.json()) as { key: string };
-  return { key: data.key, url: `https://${env.JIRA_BASE_URL}/browse/${data.key}` };
+  const status = await fetchIssueStatus(env, auth, data.key);
+  return { key: data.key, url: `https://${env.JIRA_BASE_URL}/browse/${data.key}`, status };
 }
