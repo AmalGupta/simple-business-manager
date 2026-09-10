@@ -30,19 +30,25 @@ export interface SubmitResult {
   jobId: string;
 }
 
+export interface SubmitRecordingOptions {
+  /** False for a single-speaker recording (e.g. the app-request voice note) — skips diarization and num_speakers entirely. Defaults to true (two-party call). */
+  diarize?: boolean;
+}
+
 /**
  * job_parameters is echoed at both job creation and job start — confirmed
  * against a live working call (2026-08-21). model bumped to saaras:v4 (was
  * v3) and with_timestamps added per that same verified call.
  */
-function jobParameters(env: Env) {
+function jobParameters(env: Env, opts: SubmitRecordingOptions) {
+  const diarize = opts.diarize ?? true;
   return {
     model: "saaras:v4",
     mode: env.SARVAM_STT_MODE,
     language_code: env.SARVAM_LANGUAGE_CODE,
-    with_diarization: true,
+    with_diarization: diarize,
     with_timestamps: true,
-    num_speakers: 2,
+    ...(diarize ? { num_speakers: 2 } : {}),
   };
 }
 
@@ -50,7 +56,8 @@ function jobParameters(env: Env) {
 export async function submitRecording(
   env: Env,
   r2Key: string,
-  callbackUrl: string
+  callbackUrl: string,
+  opts: SubmitRecordingOptions = {}
 ): Promise<SubmitResult> {
   if (!env.SARVAM_API_KEY) throw new Error("SARVAM_API_KEY not configured");
   if (!env.SARVAM_WEBHOOK_TOKEN) throw new Error("SARVAM_WEBHOOK_TOKEN not configured");
@@ -61,7 +68,7 @@ export async function submitRecording(
     method: "POST",
     headers: headers(env),
     body: JSON.stringify({
-      job_parameters: jobParameters(env),
+      job_parameters: jobParameters(env, opts),
       callback: {
         url: callbackUrl,
         auth_token: env.SARVAM_WEBHOOK_TOKEN,
@@ -107,7 +114,7 @@ export async function submitRecording(
   const startRes = await fetch(`${BASE}/speech-to-text/job/v1/${job.job_id}/start`, {
     method: "POST",
     headers: headers(env),
-    body: JSON.stringify({ job_parameters: jobParameters(env) }),
+    body: JSON.stringify({ job_parameters: jobParameters(env, opts) }),
   });
   if (!startRes.ok) throw new Error(`Sarvam job start failed: ${startRes.status} ${await startRes.text()}`);
 
