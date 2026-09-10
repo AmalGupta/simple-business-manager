@@ -2327,6 +2327,23 @@ export async function listSiteContacts(db: D1Database, siteId: string): Promise<
 }
 
 /**
+ * Push linked callers into the site's intake POC fields and rebuild
+ * site_name_being_used ("… | CL. Name1, Name2"). The review screen's site
+ * details dialog reads those fields, and the grid shows the composed name —
+ * both would stay stale if we only wrote caller_sites.
+ */
+async function syncSitePocFromContacts(
+  db: D1Database,
+  siteId: string,
+  contacts: SiteContactRow[]
+): Promise<void> {
+  const poc_name = contacts.map((c) => c.name?.trim()).filter(Boolean).join(", ") || null;
+  const poc_contact_number =
+    contacts.map((c) => c.phone?.trim()).filter(Boolean).join(", ") || null;
+  await updateSite(db, siteId, { poc_name, poc_contact_number });
+}
+
+/**
  * Idempotent by primary key — `caller_sites` is PRIMARY KEY (caller_id,
  * site_id), so INSERT OR IGNORE makes re-adding an already-linked contact a
  * no-op rather than an error. Returns the resulting full list so the caller
@@ -2347,7 +2364,9 @@ export async function addSiteContacts(
       )
     );
   }
-  return listSiteContacts(db, siteId);
+  const contacts = await listSiteContacts(db, siteId);
+  await syncSitePocFromContacts(db, siteId, contacts);
+  return contacts;
 }
 
 export async function removeSiteContact(db: D1Database, siteId: string, callerId: string): Promise<void> {
@@ -2355,6 +2374,8 @@ export async function removeSiteContact(db: D1Database, siteId: string, callerId
     .prepare(`DELETE FROM caller_sites WHERE site_id = ? AND caller_id = ?`)
     .bind(siteId, callerId)
     .run();
+  const contacts = await listSiteContacts(db, siteId);
+  await syncSitePocFromContacts(db, siteId, contacts);
 }
 
 /**

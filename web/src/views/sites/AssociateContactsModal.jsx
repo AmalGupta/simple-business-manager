@@ -375,6 +375,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
       title={`Associate contacts — ${site.name}`}
       onClose={onClose}
       width={720}
+      scroll
     >
       <style>{CONTACTS_GRID_CSS}</style>
 
@@ -574,7 +575,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <h3 style={sectionLabelStyle}>Callers directory</h3>
+        <h3 style={sectionLabelStyle}>Select existing contacts</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <input
             value={query}
