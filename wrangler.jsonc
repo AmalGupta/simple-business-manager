@@ -17,7 +17,13 @@
     // Callers Directory (migration 0021): "Spam" subfolder inside Calls —
     // confirmed-spam Drive files move here instead of Archive.
     "GOOGLE_DRIVE_SPAM_FOLDER_ID": "130Xhaxx3Z0G5FgjxFOBIQ5e5FBaoute8",
-    "PUBLIC_BASE_URL": "https://sbm-pipeline.gupta-amal01.workers.dev"
+    "PUBLIC_BASE_URL": "https://sbm-pipeline.gupta-amal01.workers.dev",
+
+    // In-app request form → Jira (migration 0033). Not secret — the site
+    // hostname and project key alone can't do anything without JIRA_EMAIL /
+    // JIRA_API_TOKEN, which are wrangler secrets (see .dev.vars.example).
+    "JIRA_BASE_URL": "sbm-pipeline.atlassian.net",
+    "JIRA_PROJECT_KEY": "SBM"
   },
 
   "assets": {
@@ -93,7 +99,9 @@
         "PUBLIC_BASE_URL": "https://sbm-pipeline-uat.gupta-amal01.workers.dev",
         // Batch size for UAT backfill; cron schedule inherits top-level */5 (same as dest/dev).
         "DRIVE_POLL_BATCH_SIZE": "10",
-        "DRIVE_POLL_SUBREQUEST_BUDGET": "100"
+        "DRIVE_POLL_SUBREQUEST_BUDGET": "100",
+        "JIRA_BASE_URL": "sbm-pipeline.atlassian.net",
+        "JIRA_PROJECT_KEY": "SBM"
       },
       "r2_buckets": [
         { "binding": "RECORDINGS", "bucket_name": "sbm-recordings-uat" },
