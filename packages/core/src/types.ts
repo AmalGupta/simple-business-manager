@@ -184,6 +184,26 @@ export interface Escalation {
   assigned_at: string | null;
 }
 
+/** migration 0033/0034: an in-app "request/report an issue" form — voice only, filed directly into Jira. */
+export type AppRequestStatus = "pending" | "transcribing" | "submitted" | "failed";
+
+export interface AppRequest {
+  id: string;
+  /** Sarvam transcript once transcribed; '' while pending/transcribing. */
+  text: string;
+  created_by_user_id: string;
+  created_by_name: string;
+  /** Snapshot of the submitter's role — titles the Jira issue [Staff-Request]/[Admin-Request]. */
+  created_by_role: string;
+  status: AppRequestStatus;
+  r2_key: string | null;
+  stt_job_id: string | null;
+  jira_issue_key: string | null;
+  jira_issue_url: string | null;
+  error: string | null;
+  created_at: string;
+}
+
 export interface Todo {
   id: string;
   call_id: string;

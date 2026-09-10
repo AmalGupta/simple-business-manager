@@ -71,6 +71,7 @@ import { handleCreateCaller, handleListCallers, handleUpdateCaller } from "./han
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
+import { handleGetAppRequests, handlePostAppRequestVoiceNote } from "./handlers/app-request";
 import {
   handleGetDrivePollSettings,
   handlePatchDrivePollSettings,
@@ -128,6 +129,14 @@ export interface Env {
   DRIVE_POLL_SUBREQUEST_BUDGET?: string;
   /** Max files per poll invocation before the subrequest budget cap (default 20). */
   DRIVE_POLL_BATCH_SIZE?: string;
+
+  /** Jira Cloud site hostname, e.g. "sbm-pipeline.atlassian.net" — see src/lib/jira.ts. */
+  JIRA_BASE_URL?: string;
+  /** Project key the in-app request form files issues under (e.g. "SBM"). */
+  JIRA_PROJECT_KEY?: string;
+  /** Atlassian account email whose API token authenticates issue creation (becomes the Jira reporter). */
+  JIRA_EMAIL?: string;
+  JIRA_API_TOKEN?: string;
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
@@ -561,6 +570,15 @@ export default {
     const complaintMatch = url.pathname.match(/^\/api\/complaints\/([^/]+)$/);
     if (complaintMatch && request.method === "PATCH") {
       return handlePatchComplaint(request, env, complaintMatch[1]);
+    }
+
+    // In-app "request/report an issue" form → Jira (migration 0033/0034,
+    // voice only — src/lib/jira.ts). Session-cookie gated only, any role.
+    if (url.pathname === "/api/app-requests" && request.method === "GET") {
+      return handleGetAppRequests(request, env);
+    }
+    if (url.pathname === "/api/app-requests" && request.method === "POST") {
+      return handlePostAppRequestVoiceNote(request, env, ctx);
     }
 
     if (url.pathname === "/api/material-shortages" && request.method === "GET") {

@@ -3,6 +3,7 @@
 import { matchStaffByOwner } from "./assignment";
 import { normalizeCallerPhone } from "./caller-category";
 import type {
+  AppRequest,
   Call,
   Caller,
   CallerCategory,
@@ -2823,6 +2824,96 @@ export async function closeEscalation(db: D1Database, id: string): Promise<Escal
     .bind(id)
     .run();
   return db.prepare(`SELECT * FROM escalations WHERE id = ?`).bind(id).first<Escalation>();
+}
+
+// ---------------------------------------------------------------------------
+// App requests — migration 0033/0034. An in-app "request/report an issue"
+// form, voice only: any logged-in staff or admin session records a spoken
+// request, which is transcribed through the same Sarvam batch pipeline as a
+// site voice note (src/lib/sarvam.ts), then formatted with Claude and filed
+// into Jira once the transcript lands (src/handlers/stt-webhook.ts,
+// src/lib/jira.ts). The row is created before the Sarvam submit and updated
+// at each step, so a submission is never lost even if a later step fails.
+// ---------------------------------------------------------------------------
+
+export interface NewAppRequestInput {
+  id: string;
+  createdByUserId: string;
+  createdByName: string;
+  createdByRole: string;
+  r2Key: string;
+}
+
+export async function createAppRequest(db: D1Database, input: NewAppRequestInput): Promise<AppRequest> {
+  await db
+    .prepare(
+      `INSERT INTO app_requests (id, text, created_by_user_id, created_by_name, created_by_role, status, r2_key)
+       VALUES (?, '', ?, ?, ?, 'pending', ?)`
+    )
+    .bind(input.id, input.createdByUserId, input.createdByName, input.createdByRole, input.r2Key)
+    .run();
+  const row = await db.prepare(`SELECT * FROM app_requests WHERE id = ?`).bind(input.id).first<AppRequest>();
+  return row!;
+}
+
+export async function getAppRequestByJobId(db: D1Database, jobId: string): Promise<AppRequest | null> {
+  const row = await db.prepare(`SELECT * FROM app_requests WHERE stt_job_id = ?`).bind(jobId).first<AppRequest>();
+  return row ?? null;
+}
+
+/** Sarvam job accepted and transcribing — mirrors setCallSubmitted. */
+export async function setAppRequestSubmittedToStt(db: D1Database, id: string, jobId: string): Promise<void> {
+  await db
+    .prepare(`UPDATE app_requests SET status = 'transcribing', stt_job_id = ? WHERE id = ?`)
+    .bind(jobId, id)
+    .run();
+}
+
+export async function markAppRequestSubmitted(
+  db: D1Database,
+  id: string,
+  input: { transcript: string; jiraIssueKey: string; jiraIssueUrl: string }
+): Promise<AppRequest> {
+  await db
+    .prepare(
+      `UPDATE app_requests SET status = 'submitted', text = ?, jira_issue_key = ?, jira_issue_url = ?, error = NULL WHERE id = ?`
+    )
+    .bind(input.transcript, input.jiraIssueKey, input.jiraIssueUrl, id)
+    .run();
+  const row = await db.prepare(`SELECT * FROM app_requests WHERE id = ?`).bind(id).first<AppRequest>();
+  return row!;
+}
+
+/** `transcript` is only known once Sarvam has actually returned one — omit it for an earlier-stage failure (e.g. the Sarvam submit itself). */
+export async function markAppRequestFailed(
+  db: D1Database,
+  id: string,
+  error: string,
+  transcript?: string
+): Promise<AppRequest> {
+  if (transcript !== undefined) {
+    await db
+      .prepare(`UPDATE app_requests SET status = 'failed', error = ?, text = ? WHERE id = ?`)
+      .bind(error, transcript, id)
+      .run();
+  } else {
+    await db.prepare(`UPDATE app_requests SET status = 'failed', error = ? WHERE id = ?`).bind(error, id).run();
+  }
+  const row = await db.prepare(`SELECT * FROM app_requests WHERE id = ?`).bind(id).first<AppRequest>();
+  return row!;
+}
+
+/** Staff see only their own submissions; admin/superadmin (forUserId = null) see everyone's. */
+export async function listAppRequests(db: D1Database, forUserId: string | null): Promise<AppRequest[]> {
+  if (forUserId) {
+    const { results } = await db
+      .prepare(`SELECT * FROM app_requests WHERE created_by_user_id = ? ORDER BY created_at DESC`)
+      .bind(forUserId)
+      .all<AppRequest>();
+    return results ?? [];
+  }
+  const { results } = await db.prepare(`SELECT * FROM app_requests ORDER BY created_at DESC`).all<AppRequest>();
+  return results ?? [];
 }
 
 // ---------------------------------------------------------------------------

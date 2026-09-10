@@ -19,12 +19,17 @@
 
 import { ACTIVE } from "../../packages/core/prompts";
 import { extractCall } from "../../packages/core/prompts/extract";
+import { formatSpokenRequest } from "../../packages/core/prompts/app-request-format";
 import { scanCallForSites } from "../../packages/core/prompts/site-scan";
 import { scanCallForSpam } from "../../packages/core/prompts/spam-scan";
 import {
+  getAppRequestByJobId,
   getCallByJobId,
+  type AppRequest,
   getCallerById,
   linkCallToSites,
+  markAppRequestFailed,
+  markAppRequestSubmitted,
   markCallerSpam,
   saveExtraction,
   setCallFailed,
@@ -34,6 +39,7 @@ import {
   type DiarizedEntry,
 } from "@sbm/core";
 import { fetchResult } from "../lib/sarvam";
+import { createJiraIssue } from "../lib/jira";
 import { moveDriveFile } from "../lib/google-drive";
 import type { Env } from "../index";
 
@@ -111,6 +117,38 @@ async function handleSpamVerdict(env: Env, ctx: ExecutionContext, call: Call, ca
   }
 }
 
+/**
+ * The in-app "request/report an issue" branch — a spoken staff/admin
+ * request, not a call. Format with a cheap Haiku pass, then file straight
+ * into Jira with a title prefixed by who filed it. Any failure here (Claude
+ * or Jira) lands the row at status 'failed' with the transcript preserved,
+ * same as the call branch never losing a transcript to an extraction error.
+ */
+async function processAppRequest(env: Env, appRequest: AppRequest, transcript: string): Promise<void> {
+  try {
+    if (!env.ANTHROPIC_API_KEY) throw new Error("ANTHROPIC_API_KEY not configured");
+    const formatted = await formatSpokenRequest({
+      apiKey: env.ANTHROPIC_API_KEY,
+      model: env.ANTHROPIC_HAIKU_MODEL,
+      transcript,
+    });
+    const prefix = appRequest.created_by_role === "staff" ? "[Staff-Request]" : "[Admin-Request]";
+    const issue = await createJiraIssue(env, {
+      summary: `${prefix} ${formatted.title}`,
+      description: `${formatted.description}\n\n---\nTranscript:\n${transcript}`,
+      reporterName: `${appRequest.created_by_name} (${appRequest.created_by_role})`,
+    });
+    await markAppRequestSubmitted(env.DB, appRequest.id, {
+      transcript,
+      jiraIssueKey: issue.key,
+      jiraIssueUrl: issue.url,
+    });
+  } catch (err) {
+    console.error("[app-request] processing failed for", appRequest.id, err);
+    await markAppRequestFailed(env.DB, appRequest.id, err instanceof Error ? err.message : String(err), transcript);
+  }
+}
+
 export async function handleSarvamWebhook(
   request: Request,
   env: Env,
@@ -133,17 +171,33 @@ export async function handleSarvamWebhook(
     return new Response("Invalid JSON body", { status: 400 });
   }
 
+  // App-request voice notes (migration 0033/0034) share this same job_id
+  // space but never appear in `calls` — check there first so a spoken
+  // request doesn't 404.
+  const call = await getCallByJobId(env.DB, body.job_id);
+  const appRequest = call ? null : await getAppRequestByJobId(env.DB, body.job_id);
+  if (!call && !appRequest) return new Response("Unknown job_id", { status: 404 });
+
   if (body.status !== "Completed") {
     // Acknowledge intermediate/failed states without processing.
     if (body.status === "Failed") {
-      const call = await getCallByJobId(env.DB, body.job_id);
-      if (call) await setCallFailed(env.DB, call.id, `Sarvam status: ${body.status}${body.error ? ` — ${body.error}` : ""}`);
+      const message = `Sarvam status: ${body.status}${body.error ? ` — ${body.error}` : ""}`;
+      if (call) await setCallFailed(env.DB, call.id, message);
+      if (appRequest) await markAppRequestFailed(env.DB, appRequest.id, message);
     }
     return new Response("ok", { status: 200 });
   }
 
-  const call = await getCallByJobId(env.DB, body.job_id);
-  if (!call) return new Response("Unknown job_id", { status: 404 });
+  if (appRequest) {
+    try {
+      const result = await fetchResult(env, body.job_id);
+      await processAppRequest(env, appRequest, result.transcript ?? "");
+    } catch (err) {
+      await markAppRequestFailed(env.DB, appRequest.id, `webhook: ${String(err)}`);
+    }
+    return new Response("ok", { status: 200 });
+  }
+  if (!call) return new Response("Unknown job_id", { status: 404 }); // unreachable — narrows the type below
 
   try {
     const result = await fetchResult(env, body.job_id);

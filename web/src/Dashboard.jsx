@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { MapPin } from "lucide-react";
+import { MapPin, MessageSquarePlus } from "lucide-react";
 import { t } from "./theme.js";
 import { today, dayKey, isoDate, fmtDate } from "./lib/dates.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./lib/constants.js";
@@ -43,6 +43,7 @@ import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.js
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
 import { CallsNeedingActionTile } from "./views/home/CallsNeedingActionTile.jsx";
 import { CallsNeedingActionView } from "./views/calls/CallsNeedingActionView.jsx";
+import { RequestForm } from "./views/requests/RequestForm.jsx";
 import {
   fetchCall,
   fetchCallsCalendar,
@@ -818,6 +819,16 @@ export default function SimpleBusinessManager() {
             onOpen={() => setView({ name: "complaints-home", from: { name: "staff-home" } })}
           />
 
+          <button
+            onClick={() => setView({ name: "app-request", from: { name: "staff-home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label="Request or report an issue"
+          >
+            <Card tile style={{ display: "flex", alignItems: "center" }}>
+              <TileLabel action={<MessageSquarePlus size={14} color={t.edge2} />}>Request / Report</TileLabel>
+            </Card>
+          </button>
+
           {myOpenTodos.length > 0 && (
             <button
               onClick={() => setView({ name: "my-open-todos", from: { name: "staff-home" } })}
@@ -963,6 +974,8 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "material-shortages") return shell(<MaterialShortagesView onBack={() => setView(homeView)} />);
 
+  if (view.name === "app-request") return shell(<RequestForm onBack={() => setView(view.from ?? homeView)} />);
+
   return shell(
     <>
       <AppHeader
@@ -1069,6 +1082,15 @@ export default function SimpleBusinessManager() {
           refreshKey={complaintsRefreshKey}
           onOpen={() => setView({ name: "complaints-home", from: { name: "home" } })}
         />
+        <button
+          onClick={() => setView({ name: "app-request", from: { name: "home" } })}
+          style={{ all: "unset", cursor: "pointer", display: "block" }}
+          aria-label="Request or report an issue"
+        >
+          <Card tile style={{ display: "flex", alignItems: "center" }}>
+            <TileLabel action={<MessageSquarePlus size={14} color={t.edge2} />}>Request / Report</TileLabel>
+          </Card>
+        </button>
         <WorkflowTilesRow
           tasks={openSiteTasks}
           onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}

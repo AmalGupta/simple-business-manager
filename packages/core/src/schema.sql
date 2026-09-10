@@ -484,3 +484,25 @@ CREATE INDEX idx_todos_status_completed_date
 -- shown here in its corrected form; the indexes were rebuilt rather than
 -- edited, since an applied migration is never changed in place.
 
+-- migration 0033/0034: in-app "request/report an issue" form → Jira
+-- (src/lib/jira.ts). Voice-only (0034) — `text` holds the Sarvam transcript
+-- once it lands, not free-typed input; it's inserted as '' and filled in by
+-- the Sarvam webhook (src/handlers/stt-webhook.ts) alongside the Jira
+-- create, same pipeline as a site voice note.
+CREATE TABLE app_requests (
+  id                 TEXT PRIMARY KEY,
+  text               TEXT NOT NULL,                    -- transcript, once transcribed; '' while pending/transcribing
+  created_by_user_id TEXT NOT NULL REFERENCES users(id),
+  created_by_name    TEXT NOT NULL,
+  created_by_role    TEXT NOT NULL DEFAULT 'staff',     -- snapshot at submit time — titles the Jira issue [Staff-Request]/[Admin-Request]
+  status             TEXT NOT NULL DEFAULT 'pending',   -- pending | transcribing | submitted | failed
+  r2_key             TEXT,                              -- VOICE_NOTES object holding the spoken request
+  stt_job_id         TEXT,                              -- Sarvam batch job id — webhook dispatch key
+  jira_issue_key     TEXT,
+  jira_issue_url     TEXT,
+  error              TEXT,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_app_requests_created_by ON app_requests(created_by_user_id, created_at);
+CREATE INDEX idx_app_requests_stt_job_id ON app_requests(stt_job_id);
+

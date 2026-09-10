@@ -785,6 +785,26 @@ export async function patchMaterialShortage(id) {
   return res.json();
 }
 
+/* In-app "request/report an issue" form → Jira (migration 0033/0034) — voice
+   only. Any role, session-cookie only, no X-SBM-Key. */
+
+/** Uploads the recording; returns the row at status "pending" — poll fetchAppRequests() for it to move to "transcribing" then "submitted"/"failed". */
+export async function postAppRequestVoiceNote(blob, fileName) {
+  const fd = new FormData();
+  fd.append("recording", blob, fileName);
+  const res = await fetch("/api/app-requests", { method: "POST", body: fd, credentials: "same-origin" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `POST /api/app-requests → ${res.status}`);
+  return body;
+}
+
+/** Own submissions for staff; everyone's for admin/superadmin — scoped server-side. */
+export async function fetchAppRequests() {
+  const res = await fetch("/api/app-requests", { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`GET /api/app-requests → ${res.status}`);
+  return res.json();
+}
+
 /** Drive Calls-folder poller — admin Calls page controls. */
 export async function fetchDrivePollSettings() {
   return fetchJSON("/api/admin/drive-poll");
