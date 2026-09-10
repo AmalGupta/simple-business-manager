@@ -498,8 +498,12 @@ CREATE TABLE app_requests (
   status             TEXT NOT NULL DEFAULT 'pending',   -- pending | transcribing | submitted | failed
   r2_key             TEXT,                              -- VOICE_NOTES object holding the spoken request
   stt_job_id         TEXT,                              -- Sarvam batch job id — webhook dispatch key
+  speaker_name       TEXT,                              -- Claude-extracted (defaults to created_by_name)
+  title              TEXT,                              -- Claude request title
+  summary            TEXT,                              -- Claude request summary
   jira_issue_key     TEXT,
   jira_issue_url     TEXT,
+  jira_status        TEXT,                              -- status name at create time (e.g. To Do)
   error              TEXT,
   created_at         TEXT NOT NULL DEFAULT (datetime('now'))
 );

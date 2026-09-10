@@ -8,7 +8,15 @@ import { patchMyCustomization } from "../../lib/api.js";
 /* Account menu — top-right "my account" in the blue header.
    Update phone, then (admin/superadmin) Settings → Site customization
    with Vertical / Horizontal scroll toggles, then Reset PIN / Log out. */
-export function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone, customization, onCustomizationChange }) {
+export function AccountMenu({
+  me,
+  onLogout,
+  onResetPin,
+  onUpdatePhone,
+  customization,
+  onCustomizationChange,
+  onRequestReport,
+}) {
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState("root"); // root | settings | site-customization
   const [showResetModal, setShowResetModal] = useState(false);
@@ -103,6 +111,18 @@ export function AccountMenu({ me, onLogout, onResetPin, onUpdatePhone, customiza
       >
         Update phone
       </button>
+      {onRequestReport && (
+        <button
+          role="menuitem"
+          onClick={() => {
+            setOpen(false);
+            onRequestReport();
+          }}
+          style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+        >
+          Request / Report
+        </button>
+      )}
       {canCustomize && (
         <button
           role="menuitem"

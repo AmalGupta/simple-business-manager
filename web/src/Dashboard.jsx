@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { MapPin, MessageSquarePlus } from "lucide-react";
+import { MapPin } from "lucide-react";
 import { t } from "./theme.js";
 import { today, dayKey, isoDate, fmtDate } from "./lib/dates.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./lib/constants.js";
@@ -718,6 +718,7 @@ export default function SimpleBusinessManager() {
             onUpdatePhone={onUpdatePhone}
             customization={customization}
             onCustomizationChange={onCustomizationChange}
+            onRequestReport={() => setView({ name: "app-request", from: view })}
           />
         )}
         <SitesDirectoryView
@@ -782,6 +783,7 @@ export default function SimpleBusinessManager() {
           onUpdatePhone={onUpdatePhone}
           customization={customization}
           onCustomizationChange={onCustomizationChange}
+          onRequestReport={() => setView({ name: "app-request", from: { name: "staff-home" } })}
         />
 
         {/* Staff home tiles: Pending Work, To-Do / Calendar, Site Visit,
@@ -818,16 +820,6 @@ export default function SimpleBusinessManager() {
             refreshKey={complaintsRefreshKey}
             onOpen={() => setView({ name: "complaints-home", from: { name: "staff-home" } })}
           />
-
-          <button
-            onClick={() => setView({ name: "app-request", from: { name: "staff-home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label="Request or report an issue"
-          >
-            <Card tile style={{ display: "flex", alignItems: "center" }}>
-              <TileLabel action={<MessageSquarePlus size={14} color={t.edge2} />}>Request / Report</TileLabel>
-            </Card>
-          </button>
 
           {myOpenTodos.length > 0 && (
             <button
@@ -985,6 +977,7 @@ export default function SimpleBusinessManager() {
         onUpdatePhone={onUpdatePhone}
         customization={customization}
         onCustomizationChange={onCustomizationChange}
+        onRequestReport={() => setView({ name: "app-request", from: { name: "home" } })}
         right={<span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>}
       >
         <StreakWall
@@ -1082,15 +1075,6 @@ export default function SimpleBusinessManager() {
           refreshKey={complaintsRefreshKey}
           onOpen={() => setView({ name: "complaints-home", from: { name: "home" } })}
         />
-        <button
-          onClick={() => setView({ name: "app-request", from: { name: "home" } })}
-          style={{ all: "unset", cursor: "pointer", display: "block" }}
-          aria-label="Request or report an issue"
-        >
-          <Card tile style={{ display: "flex", alignItems: "center" }}>
-            <TileLabel action={<MessageSquarePlus size={14} color={t.edge2} />}>Request / Report</TileLabel>
-          </Card>
-        </button>
         <WorkflowTilesRow
           tasks={openSiteTasks}
           onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}

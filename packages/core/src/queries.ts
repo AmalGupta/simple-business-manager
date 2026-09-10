@@ -2872,13 +2872,31 @@ export async function setAppRequestSubmittedToStt(db: D1Database, id: string, jo
 export async function markAppRequestSubmitted(
   db: D1Database,
   id: string,
-  input: { transcript: string; jiraIssueKey: string; jiraIssueUrl: string }
+  input: {
+    transcript: string;
+    speakerName: string;
+    title: string;
+    summary: string;
+    jiraIssueKey: string;
+    jiraIssueUrl: string;
+    jiraStatus: string | null;
+  }
 ): Promise<AppRequest> {
   await db
     .prepare(
-      `UPDATE app_requests SET status = 'submitted', text = ?, jira_issue_key = ?, jira_issue_url = ?, error = NULL WHERE id = ?`
+      `UPDATE app_requests SET status = 'submitted', text = ?, speaker_name = ?, title = ?, summary = ?,
+       jira_issue_key = ?, jira_issue_url = ?, jira_status = ?, error = NULL WHERE id = ?`
     )
-    .bind(input.transcript, input.jiraIssueKey, input.jiraIssueUrl, id)
+    .bind(
+      input.transcript,
+      input.speakerName,
+      input.title,
+      input.summary,
+      input.jiraIssueKey,
+      input.jiraIssueUrl,
+      input.jiraStatus,
+      id
+    )
     .run();
   const row = await db.prepare(`SELECT * FROM app_requests WHERE id = ?`).bind(id).first<AppRequest>();
   return row!;

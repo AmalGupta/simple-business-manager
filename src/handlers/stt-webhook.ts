@@ -131,17 +131,22 @@ async function processAppRequest(env: Env, appRequest: AppRequest, transcript: s
       apiKey: env.ANTHROPIC_API_KEY,
       model: env.ANTHROPIC_HAIKU_MODEL,
       transcript,
+      knownSubmitterName: appRequest.created_by_name,
     });
     const prefix = appRequest.created_by_role === "staff" ? "[Staff-Request]" : "[Admin-Request]";
     const issue = await createJiraIssue(env, {
       summary: `${prefix} ${formatted.title}`,
-      description: `${formatted.description}\n\n---\nTranscript:\n${transcript}`,
-      reporterName: `${appRequest.created_by_name} (${appRequest.created_by_role})`,
+      description: `${formatted.summary}\n\n---\nTranscript:\n${transcript}`,
+      reporterName: `${formatted.speakerName} (${appRequest.created_by_role})`,
     });
     await markAppRequestSubmitted(env.DB, appRequest.id, {
       transcript,
+      speakerName: formatted.speakerName,
+      title: formatted.title,
+      summary: formatted.summary,
       jiraIssueKey: issue.key,
       jiraIssueUrl: issue.url,
+      jiraStatus: issue.status,
     });
   } catch (err) {
     console.error("[app-request] processing failed for", appRequest.id, err);
