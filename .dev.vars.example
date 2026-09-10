@@ -40,3 +40,11 @@ GOOGLE_DRIVE_ARCHIVE_FOLDER_ID=12v7xURXHMtL20fjOVLEzmMmXdmcCYhXg
 # instead of Archive. "Spam" subfolder inside Calls.
 GOOGLE_DRIVE_SPAM_FOLDER_ID=130Xhaxx3Z0G5FgjxFOBIQ5e5FBaoute8
 PUBLIC_BASE_URL=http://localhost:8787
+
+# In-app "request/report an issue" form → Jira (migration 0033, src/lib/jira.ts).
+# JIRA_BASE_URL / JIRA_PROJECT_KEY are non-secret and live in wrangler.jsonc vars
+# instead — only the account credentials below need to be secret. Create a
+# token at https://id.atlassian.com/manage-profile/security/api-tokens; the
+# account becomes the Jira reporter on every filed issue.
+JIRA_EMAIL=you@example.com
+JIRA_API_TOKEN=replace-with-a-fresh-atlassian-api-token
