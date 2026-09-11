@@ -798,11 +798,24 @@ export async function postAppRequestVoiceNote(blob, fileName) {
   return body;
 }
 
-/** Own submissions for staff; everyone's for admin/superadmin — scoped server-side. */
+/** Own submissions only — scoped server-side. Refreshes Jira statuses on each call. */
 export async function fetchAppRequests() {
   const res = await fetch("/api/app-requests", { credentials: "same-origin" });
   if (!res.ok) throw new Error(`GET /api/app-requests → ${res.status}`);
   return res.json();
+}
+
+/** Deletes own row; pass closeJira:true to transition the linked ticket to Done first. */
+export async function deleteAppRequest(id, { closeJira = false } = {}) {
+  const res = await fetch(`/api/app-requests/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ closeJira: Boolean(closeJira) }),
+  });
+  if (res.status === 204) return;
+  const body = await res.json().catch(() => ({}));
+  throw new Error(body.error || `DELETE /api/app-requests/${id} → ${res.status}`);
 }
 
 /** Drive Calls-folder poller — admin Calls page controls. */
