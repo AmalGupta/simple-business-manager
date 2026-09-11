@@ -71,7 +71,11 @@ import { handleCreateCaller, handleListCallers, handleUpdateCaller } from "./han
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
-import { handleGetAppRequests, handlePostAppRequestVoiceNote } from "./handlers/app-request";
+import {
+  handleDeleteAppRequest,
+  handleGetAppRequests,
+  handlePostAppRequestVoiceNote,
+} from "./handlers/app-request";
 import {
   handleGetDrivePollSettings,
   handlePatchDrivePollSettings,
@@ -579,6 +583,10 @@ export default {
     }
     if (url.pathname === "/api/app-requests" && request.method === "POST") {
       return handlePostAppRequestVoiceNote(request, env, ctx);
+    }
+    const appRequestMatch = url.pathname.match(/^\/api\/app-requests\/([^/]+)$/);
+    if (appRequestMatch && request.method === "DELETE") {
+      return handleDeleteAppRequest(request, env, appRequestMatch[1]);
     }
 
     if (url.pathname === "/api/material-shortages" && request.method === "GET") {
