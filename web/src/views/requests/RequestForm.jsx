@@ -3,12 +3,12 @@ import { AgGridReact } from "ag-grid-react";
 import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
-import { Mic } from "lucide-react";
+import { Mic, Trash2 } from "lucide-react";
 import { t } from "../../theme.js";
 import { PRIMARY_BUTTON_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
-import { fetchAppRequests, postAppRequestVoiceNote } from "../../lib/api.js";
+import { deleteAppRequest, fetchAppRequests, postAppRequestVoiceNote } from "../../lib/api.js";
 import { VoiceNoteModal } from "../sites/VoiceNoteModal.jsx";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -56,6 +56,26 @@ const REQUESTS_GRID_CSS = `
 .sbm-requests-grid .ag-popup .ag-tooltip {
   display: none !important;
 }
+.sbm-requests-grid .sbm-req-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-slate);
+  cursor: pointer;
+}
+.sbm-requests-grid .sbm-req-delete:hover:not(:disabled) {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, white);
+}
+.sbm-requests-grid .sbm-req-delete:disabled {
+  opacity: 0.45;
+  cursor: wait;
+}
 `;
 
 function StatusBadge({ status }) {
@@ -96,27 +116,28 @@ function JiraCell({ data }) {
 
 /* "Request or report an issue" — voice only, opened from the account menu.
    Spoken request → Sarvam → Claude (speaker / title / summary) → Jira.
-   My requests is an AG Grid of those structured fields. */
+   My requests is an AG Grid of the caller's own filings only. */
 export function RequestForm({ onBack }) {
   const gridRef = useRef(null);
   const [requests, setRequests] = useState(null);
   const [showRecorder, setShowRecorder] = useState(false);
   const [error, setError] = useState("");
+  const [deletingId, setDeletingId] = useState(null);
 
-  const refresh = () => {
+  const refresh = useCallback(() => {
     fetchAppRequests()
       .then(setRequests)
       .catch((err) => console.error("[sbm] failed to load requests", err));
-  };
+  }, []);
 
-  useEffect(refresh, []);
+  useEffect(refresh, [refresh]);
 
   useEffect(() => {
     const inFlight = requests?.some((r) => r.status === "pending" || r.status === "transcribing");
     if (!inFlight) return;
     const id = setInterval(refresh, 4000);
     return () => clearInterval(id);
-  }, [requests]);
+  }, [requests, refresh]);
 
   const handleSave = async (blob, fileName) => {
     setError("");
@@ -128,6 +149,32 @@ export function RequestForm({ onBack }) {
       throw err;
     }
   };
+
+  const handleDelete = useCallback(
+    async (row) => {
+      if (!row?.id || deletingId) return;
+      if (!window.confirm("Remove this request from My requests?")) return;
+
+      let closeJira = false;
+      if (row.jira_issue_key) {
+        closeJira = window.confirm(
+          `Also mark Jira ${row.jira_issue_key} as Done?\n\nA comment will note it was deleted from the table by you.`
+        );
+      }
+
+      setDeletingId(row.id);
+      setError("");
+      try {
+        await deleteAppRequest(row.id, { closeJira });
+        refresh();
+      } catch (err) {
+        setError(err.message || "Couldn't delete that request.");
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [deletingId, refresh]
+  );
 
   const columnDefs = useMemo(
     () => [
@@ -177,8 +224,30 @@ export function RequestForm({ onBack }) {
         sortable: false,
         cellRenderer: (p) => (p.data?.status ? <StatusBadge status={p.data.status} /> : null),
       },
+      {
+        headerName: "",
+        colId: "actions",
+        width: 56,
+        sortable: false,
+        resizable: false,
+        cellRenderer: (p) => {
+          if (!p.data) return null;
+          return (
+            <button
+              type="button"
+              className="sbm-req-delete"
+              aria-label="Delete request"
+              disabled={Boolean(deletingId)}
+              onClick={() => handleDelete(p.data)}
+              title="Delete"
+            >
+              <Trash2 size={15} strokeWidth={2} />
+            </button>
+          );
+        },
+      },
     ],
-    []
+    [deletingId, handleDelete]
   );
 
   const defaultColDef = useMemo(
@@ -216,15 +285,42 @@ export function RequestForm({ onBack }) {
         {error && <p style={{ fontSize: 12, color: t.signal, margin: "10px 0 0" }}>{error}</p>}
       </Card>
 
-      <h2 style={{ fontFamily: t.display, fontSize: 16, fontWeight: 600, color: t.edge, margin: "1.5rem 0 0.75rem" }}>
-        My requests
-      </h2>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: 12,
+          margin: "1.5rem 0 0.75rem",
+        }}
+      >
+        <h2 style={{ fontFamily: t.display, fontSize: 16, fontWeight: 600, color: t.edge, margin: 0 }}>My requests</h2>
+        <button
+          type="button"
+          onClick={refresh}
+          style={{
+            border: 0,
+            background: "transparent",
+            color: t.accent,
+            fontSize: 13,
+            fontWeight: 600,
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          Refresh
+        </button>
+      </div>
       {requests === null ? (
         <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
       ) : (
-        <div className="sbm-requests-grid ag-theme-quartz" style={{ height: Math.max(220, Math.min(520, 48 + requests.length * 48 + 8)) }}>
+        <div
+          className="sbm-requests-grid ag-theme-quartz"
+          style={{ height: Math.max(220, Math.min(520, 48 + requests.length * 48 + 8)) }}
+        >
           <AgGridReact
             ref={gridRef}
+            theme="legacy"
             rowData={requests}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}

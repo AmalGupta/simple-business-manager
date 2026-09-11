@@ -32,6 +32,13 @@ function toAdf(text: string) {
   };
 }
 
+function jiraAuth(env: Env): string {
+  if (!env.JIRA_BASE_URL || !env.JIRA_EMAIL || !env.JIRA_API_TOKEN) {
+    throw new Error("Jira is not configured (JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN)");
+  }
+  return btoa(`${env.JIRA_EMAIL}:${env.JIRA_API_TOKEN}`);
+}
+
 async function fetchIssueStatus(env: Env, auth: string, key: string): Promise<string | null> {
   try {
     const res = await fetch(`https://${env.JIRA_BASE_URL}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`, {
@@ -46,6 +53,105 @@ async function fetchIssueStatus(env: Env, auth: string, key: string): Promise<st
   } catch {
     return null;
   }
+}
+
+/** Latest status name per issue key — skips failures so a stale list still loads. */
+export async function fetchJiraIssueStatuses(env: Env, keys: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const unique = [...new Set(keys.filter(Boolean))];
+  if (unique.length === 0) return out;
+  if (!env.JIRA_BASE_URL || !env.JIRA_EMAIL || !env.JIRA_API_TOKEN) return out;
+
+  const auth = jiraAuth(env);
+  await Promise.all(
+    unique.map(async (key) => {
+      const status = await fetchIssueStatus(env, auth, key);
+      if (status) out.set(key, status);
+    })
+  );
+  return out;
+}
+
+async function addIssueComment(env: Env, auth: string, key: string, text: string): Promise<void> {
+  const res = await fetch(`https://${env.JIRA_BASE_URL}/rest/api/3/issue/${encodeURIComponent(key)}/comment`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${auth}`,
+      "content-type": "application/json",
+      accept: "application/json",
+    },
+    body: JSON.stringify({ body: toAdf(text) }),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    throw new Error(`Jira comment failed (${res.status}): ${body.slice(0, 500)}`);
+  }
+}
+
+/**
+ * Transitions the issue to a Done-category (or name "Done") status, then
+ * adds the comment. Looks up available transitions so we don't hard-code ids.
+ */
+export async function closeJiraIssue(env: Env, key: string, comment: string): Promise<void> {
+  if (!env.JIRA_BASE_URL || !env.JIRA_EMAIL || !env.JIRA_API_TOKEN) {
+    throw new Error("Jira is not configured (JIRA_BASE_URL / JIRA_EMAIL / JIRA_API_TOKEN)");
+  }
+  const auth = jiraAuth(env);
+  const transitionsRes = await fetch(
+    `https://${env.JIRA_BASE_URL}/rest/api/3/issue/${encodeURIComponent(key)}/transitions`,
+    { headers: { Authorization: `Basic ${auth}`, accept: "application/json" } }
+  );
+  if (!transitionsRes.ok) {
+    const body = await transitionsRes.text().catch(() => "");
+    throw new Error(`Jira transitions failed (${transitionsRes.status}): ${body.slice(0, 500)}`);
+  }
+
+  type Transition = {
+    id: string;
+    name?: string;
+    to?: { name?: string; statusCategory?: { key?: string } };
+  };
+  const data = (await transitionsRes.json()) as { transitions?: Transition[] };
+  const transitions = data.transitions ?? [];
+  const done =
+    transitions.find((t) => (t.to?.name || "").toLowerCase() === "done") ||
+    transitions.find((t) => (t.to?.statusCategory?.key || "").toLowerCase() === "done") ||
+    transitions.find((t) => (t.name || "").toLowerCase() === "done");
+
+  if (done) {
+    const res = await fetch(`https://${env.JIRA_BASE_URL}/rest/api/3/issue/${encodeURIComponent(key)}/transitions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${auth}`,
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({ transition: { id: done.id } }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`Jira close failed (${res.status}): ${body.slice(0, 500)}`);
+    }
+  } else {
+    // Already closed → no Done transition left; still leave the delete comment.
+    const res = await fetch(
+      `https://${env.JIRA_BASE_URL}/rest/api/3/issue/${encodeURIComponent(key)}?fields=status`,
+      { headers: { Authorization: `Basic ${auth}`, accept: "application/json" } }
+    );
+    if (!res.ok) {
+      throw new Error(`No Done transition available for ${key}`);
+    }
+    const issue = (await res.json()) as {
+      fields?: { status?: { name?: string; statusCategory?: { key?: string } } };
+    };
+    const category = (issue.fields?.status?.statusCategory?.key || "").toLowerCase();
+    const name = (issue.fields?.status?.name || "").toLowerCase();
+    if (category !== "done" && name !== "done") {
+      throw new Error(`No Done transition available for ${key} (status: ${issue.fields?.status?.name ?? "unknown"})`);
+    }
+  }
+
+  await addIssueComment(env, auth, key, comment);
 }
 
 export async function createJiraIssue(

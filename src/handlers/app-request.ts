@@ -7,8 +7,18 @@
 // X-SBM-Key, since this is a page a staff member fills out on their own
 // phone, not a request the admin dashboard makes on Amal's behalf.
 
-import { createAppRequest, listAppRequests, markAppRequestFailed, setAppRequestSubmittedToStt } from "@sbm/core";
+import {
+  createAppRequest,
+  deleteAppRequest,
+  getAppRequestById,
+  listAppRequests,
+  markAppRequestFailed,
+  setAppRequestSubmittedToStt,
+  updateAppRequestJiraStatus,
+  type AppRequest,
+} from "@sbm/core";
 import { requireSession } from "../lib/auth";
+import { closeJiraIssue, fetchJiraIssueStatuses } from "../lib/jira";
 import { normalizeAudioContentType, submitRecording } from "../lib/sarvam";
 import { buildVoiceNoteKey } from "../lib/voice-note-key";
 import type { Env } from "../index";
@@ -64,10 +74,79 @@ export async function handlePostAppRequestVoiceNote(request: Request, env: Env, 
   return json(created, 202);
 }
 
-/** Staff see only their own past submissions; admin/superadmin see everyone's. */
+/** Pull fresh Jira statuses for every filed ticket and persist any changes. */
+async function syncJiraStatuses(env: Env, rows: AppRequest[]): Promise<AppRequest[]> {
+  const keyed = rows.filter((r) => r.jira_issue_key);
+  if (keyed.length === 0) return rows;
+
+  const statuses = await fetchJiraIssueStatuses(
+    env,
+    keyed.map((r) => r.jira_issue_key!)
+  );
+  if (statuses.size === 0) return rows;
+
+  const updates: Promise<void>[] = [];
+  const next = rows.map((row) => {
+    const key = row.jira_issue_key;
+    if (!key) return row;
+    const status = statuses.get(key);
+    if (!status || status === row.jira_status) return row;
+    updates.push(updateAppRequestJiraStatus(env.DB, row.id, status));
+    return { ...row, jira_status: status };
+  });
+  if (updates.length > 0) await Promise.all(updates);
+  return next;
+}
+
+/** Each user only sees their own past submissions; statuses refreshed from Jira. */
 export async function handleGetAppRequests(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const forUserId = session.user_role === "staff" ? session.user_id : null;
-  return json(await listAppRequests(env.DB, forUserId));
+  const rows = await listAppRequests(env.DB, session.user_id);
+  return json(await syncJiraStatuses(env, rows));
+}
+
+/**
+ * Deletes the caller's own row. Body `{ closeJira?: boolean }` — when true and
+ * the row has a Jira key, transitions that issue to Done and comments
+ * "deleted from the table by the user - <name>" before removing the row.
+ */
+export async function handleDeleteAppRequest(request: Request, env: Env, id: string): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+
+  const row = await getAppRequestById(env.DB, id);
+  if (!row) return json({ error: "not found" }, 404);
+  if (row.created_by_user_id !== session.user_id) return json({ error: "forbidden" }, 403);
+
+  let closeJira = false;
+  try {
+    const body = (await request.json()) as { closeJira?: unknown };
+    closeJira = Boolean(body?.closeJira);
+  } catch {
+    // empty body is fine — delete without closing
+  }
+
+  if (closeJira && row.jira_issue_key) {
+    try {
+      await closeJiraIssue(
+        env,
+        row.jira_issue_key,
+        `deleted from the table by the user - ${session.user_name}`
+      );
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : String(err) }, 502);
+    }
+  }
+
+  if (row.r2_key) {
+    try {
+      await env.VOICE_NOTES.delete(row.r2_key);
+    } catch {
+      // best-effort; row delete still proceeds
+    }
+  }
+
+  await deleteAppRequest(env.DB, id);
+  return new Response(null, { status: 204 });
 }
