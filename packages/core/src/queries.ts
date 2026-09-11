@@ -2921,17 +2921,26 @@ export async function markAppRequestFailed(
   return row!;
 }
 
-/** Staff see only their own submissions; admin/superadmin (forUserId = null) see everyone's. */
-export async function listAppRequests(db: D1Database, forUserId: string | null): Promise<AppRequest[]> {
-  if (forUserId) {
-    const { results } = await db
-      .prepare(`SELECT * FROM app_requests WHERE created_by_user_id = ? ORDER BY created_at DESC`)
-      .bind(forUserId)
-      .all<AppRequest>();
-    return results ?? [];
-  }
-  const { results } = await db.prepare(`SELECT * FROM app_requests ORDER BY created_at DESC`).all<AppRequest>();
+/** Always scoped to the logged-in user — each person only sees their own filings. */
+export async function listAppRequests(db: D1Database, forUserId: string): Promise<AppRequest[]> {
+  const { results } = await db
+    .prepare(`SELECT * FROM app_requests WHERE created_by_user_id = ? ORDER BY created_at DESC`)
+    .bind(forUserId)
+    .all<AppRequest>();
   return results ?? [];
+}
+
+export async function getAppRequestById(db: D1Database, id: string): Promise<AppRequest | null> {
+  const row = await db.prepare(`SELECT * FROM app_requests WHERE id = ?`).bind(id).first<AppRequest>();
+  return row ?? null;
+}
+
+export async function updateAppRequestJiraStatus(db: D1Database, id: string, jiraStatus: string): Promise<void> {
+  await db.prepare(`UPDATE app_requests SET jira_status = ? WHERE id = ?`).bind(jiraStatus, id).run();
+}
+
+export async function deleteAppRequest(db: D1Database, id: string): Promise<void> {
+  await db.prepare(`DELETE FROM app_requests WHERE id = ?`).bind(id).run();
 }
 
 // ---------------------------------------------------------------------------
