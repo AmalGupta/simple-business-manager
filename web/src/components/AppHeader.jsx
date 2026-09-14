@@ -17,6 +17,7 @@ export function AppHeader({
   customization,
   onCustomizationChange,
   onRequestReport,
+  onOpenMaintenanceSiteContact,
   right,
   children,
   hideAccount = false,
@@ -45,6 +46,7 @@ export function AppHeader({
               customization={customization}
               onCustomizationChange={onCustomizationChange}
               onRequestReport={onRequestReport}
+              onOpenMaintenanceSiteContact={onOpenMaintenanceSiteContact}
             />
           )}
         </div>

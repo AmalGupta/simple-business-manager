@@ -2,6 +2,7 @@ node_modules/
 .pnpm-store/
 dist/
 .wrangler/
+.tmp/
 .dev.vars
 web/.env
 web/dist/

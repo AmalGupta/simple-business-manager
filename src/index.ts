@@ -68,6 +68,7 @@ import {
 } from "./handlers/auth";
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
 import { handleCreateCaller, handleListCallers, handleUpdateCaller } from "./handlers/callers";
+import { handleGetSiteContactProposals, handlePostSiteContactMappings } from "./handlers/maintenance";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
@@ -449,6 +450,13 @@ export default {
     const callerMatch = url.pathname.match(/^\/api\/callers\/([^/]+)$/);
     if (callerMatch && request.method === "PATCH") {
       return handleUpdateCaller(request, env, callerMatch[1]);
+    }
+
+    if (url.pathname === "/api/maintenance/site-contact-proposals" && request.method === "GET") {
+      return handleGetSiteContactProposals(request, env);
+    }
+    if (url.pathname === "/api/maintenance/site-contact-mappings" && request.method === "POST") {
+      return handlePostSiteContactMappings(request, env);
     }
 
     // --- Site media, voice notes, and the unified timeline — session-cookie
