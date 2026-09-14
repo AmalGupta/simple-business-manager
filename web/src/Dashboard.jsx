@@ -1,5 +1,4 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { MapPin } from "lucide-react";
 import { t } from "./theme.js";
 import { today, dayKey, isoDate, fmtDate } from "./lib/dates.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./lib/constants.js";
@@ -32,6 +31,7 @@ import { PendingWorkView } from "./views/home/PendingWorkView.jsx";
 import { PendingWorkTile } from "./views/home/PendingWorkTile.jsx";
 import { MyScheduleView } from "./views/home/MyScheduleView.jsx";
 import { StaffScheduleTile } from "./views/home/StaffScheduleTile.jsx";
+import { SiteVisitTile } from "./views/site-visit/SiteVisitTile.jsx";
 import { SiteVisitSiteList } from "./views/site-visit/SiteVisitSiteList.jsx";
 import { SiteVisitCategoryGrid } from "./views/site-visit/SiteVisitCategoryGrid.jsx";
 import { InstallationScreen } from "./views/site-visit/InstallationScreen.jsx";
@@ -818,15 +818,10 @@ export default function SimpleBusinessManager() {
             onOpen={() => setView({ name: "my-schedule", from: { name: "staff-home" } })}
           />
 
-          <button
-            onClick={() => setView({ name: "site-visit-sites", from: { name: "staff-home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label="Site Visit"
-          >
-            <Card tile style={{ display: "flex", alignItems: "center" }}>
-              <TileLabel action={<MapPin size={14} color={t.edge2} />}>Site Visit</TileLabel>
-            </Card>
-          </button>
+          <SiteVisitTile
+            count={allSites.filter((s) => s.is_confirmed !== "N").length}
+            onOpen={() => setView({ name: "site-visit-sites", from: { name: "staff-home" } })}
+          />
 
           <ComplaintsTile
             refreshKey={complaintsRefreshKey}
