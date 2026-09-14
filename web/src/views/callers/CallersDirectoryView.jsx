@@ -56,6 +56,7 @@ const GRID_CSS = `
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   overflow: hidden;
 }
 .sbm-contacts-grid.ag-theme-quartz {
@@ -77,10 +78,22 @@ const GRID_CSS = `
   --ag-row-height: 48px;
   width: 100%;
   flex: 1 1 auto;
-  min-height: 280px;
+  min-height: 0;
+  height: 100%;
 }
-[data-inner-scrolls="0"] .sbm-contacts-grid {
-  min-height: 400px;
+.sbm-contacts-grid .ag-root-wrapper {
+  border: none;
+  height: 100%;
+  background: var(--color-surface);
+}
+[data-inner-scrolls="0"] .sbm-contacts-grid-wrap {
+  overflow: visible;
+  flex: 0 0 auto;
+  height: auto;
+}
+[data-inner-scrolls="0"] .sbm-contacts-grid.ag-theme-quartz {
+  height: auto !important;
+  min-height: 280px;
 }
 .sbm-contacts-grid .ag-header-cell-text {
   font-family: var(--font-label);
@@ -92,6 +105,12 @@ const GRID_CSS = `
 .sbm-contacts-grid .ag-cell {
   display: flex;
   align-items: center;
+  font-weight: 600;
+  color: var(--color-ink-emphasis);
+}
+.sbm-contacts-grid .ag-cell-value {
+  font-weight: inherit;
+  color: inherit;
 }
 .sbm-contacts-site-link {
   border: 0;
@@ -108,6 +127,30 @@ const GRID_CSS = `
   text-decoration: underline;
 }
 `;
+
+function TypeCell({ data, bucket, busyId, onChangeCategory }) {
+  if (!data) return null;
+  if (bucket === "spam") {
+    return <span style={{ fontSize: 13, color: t.edge2 }}>Spam</span>;
+  }
+  const busy = busyId === data.id;
+  const category = TYPE_OPTIONS.some((o) => o.value === data.category) ? data.category : "client";
+  return (
+    <select
+      value={category}
+      disabled={busy}
+      aria-label={`Type for ${data.name}`}
+      onChange={(e) => onChangeCategory(data.id, e.target.value)}
+      style={{ ...CATEGORY_SELECT_STYLE, opacity: busy ? 0.6 : 1 }}
+    >
+      {TYPE_OPTIONS.map((opt) => (
+        <option key={opt.value} value={opt.value}>
+          {opt.label}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 function LinkedSitesCell({ sites, bucket, onSiteClick }) {
   if (!sites?.length) return <span style={{ color: t.edge2 }}>—</span>;
@@ -132,10 +175,11 @@ function LinkedSitesCell({ sites, bucket, onSiteClick }) {
   );
 }
 
-function listQueryOpts({ bucket, siteFilter, q, pageIndex }) {
+function listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }) {
   return {
     bucket,
     siteId: bucket === "saved" && siteFilter ? siteFilter.id : undefined,
+    linkedSitesOnly: bucket === "saved" && linkedSitesOnly && !siteFilter ? true : undefined,
     q: q.trim() || undefined,
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
@@ -147,6 +191,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const gridRef = useRef(null);
   const [bucket, setBucket] = useState("saved");
   const [siteFilter, setSiteFilter] = useState(null);
+  const [linkedSitesOnly, setLinkedSitesOnly] = useState(false);
   const [q, setQ] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
   const [rows, setRows] = useState(null);
@@ -157,8 +202,8 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const [error, setError] = useState("");
 
   const queryOpts = useMemo(
-    () => listQueryOpts({ bucket, siteFilter, q, pageIndex }),
-    [bucket, siteFilter, q, pageIndex]
+    () => listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }),
+    [bucket, siteFilter, linkedSitesOnly, q, pageIndex]
   );
 
   const applyData = useCallback((data) => {
@@ -229,28 +274,15 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
         headerName: "Type",
         colId: "type",
         width: 130,
-        cellRenderer: (p) => {
-          if (!p.data) return null;
-          if (bucket === "spam") {
-            return <span style={{ fontSize: 13, color: t.edge2 }}>Spam</span>;
-          }
-          const busy = busyId === p.data.id;
-          return (
-            <select
-              value={p.data.category}
-              disabled={busy}
-              aria-label={`Type for ${p.data.name}`}
-              onChange={(e) => changeCategory(p.data.id, e.target.value)}
-              style={{ ...CATEGORY_SELECT_STYLE, opacity: busy ? 0.6 : 1 }}
-            >
-              {TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          );
-        },
+        cellRenderer: (p) =>
+          p.data ? (
+            <TypeCell
+              data={p.data}
+              bucket={bucket}
+              busyId={busyId}
+              onChangeCategory={changeCategory}
+            />
+          ) : null,
       },
       {
         headerName: "Linked site",
@@ -273,13 +305,36 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   );
   const getRowId = useCallback((p) => p.data.id, []);
 
+  const onGridReady = useCallback(() => {
+    gridRef.current?.api?.sizeColumnsToFit?.();
+  }, []);
+
+  useEffect(() => {
+    if (!rows?.length) return;
+    const id = requestAnimationFrame(() => {
+      gridRef.current?.api?.sizeColumnsToFit?.();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [rows, bucket, innerScrolls]);
+
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : pageIndex * PAGE_SIZE + 1;
   const rangeEnd = Math.min(total, (pageIndex + 1) * PAGE_SIZE);
 
   return (
-    <div className="sbm-callers-page" style={innerScrolls ? { height: "100%" } : undefined}>
+    <div
+      className="sbm-callers-page"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        height: innerScrolls ? "100%" : undefined,
+        minHeight: innerScrolls ? 0 : undefined,
+        overflow: innerScrolls ? "hidden" : undefined,
+        gap: 10,
+      }}
+    >
       <style>{GRID_CSS}</style>
+
       <div style={{ flexShrink: 0 }}>
         <BackLink onClick={onBack}>Back</BackLink>
 
@@ -306,8 +361,18 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
             <Plus size={14} /> Add contact
           </button>
         </div>
+      </div>
 
-        <div className="sbm-contacts-index">
+      <div
+        className="sbm-contacts-index"
+        style={{
+          flex: innerScrolls ? "1 1 auto" : undefined,
+          minHeight: innerScrolls ? 0 : undefined,
+          display: "flex",
+          flexDirection: "column",
+          overflow: innerScrolls ? "hidden" : undefined,
+        }}
+      >
           <div className="sbm-contacts-index__tabs" role="tablist" aria-label="Contact lists">
             {BUCKETS.map((tab) => {
               const selected = bucket === tab.id;
@@ -322,6 +387,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
                   onClick={() => {
                     setBucket(tab.id);
                     setSiteFilter(null);
+                    setLinkedSitesOnly(false);
                     setPageIndex(0);
                     setQ("");
                   }}
@@ -333,7 +399,18 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
             })}
           </div>
 
-          <Card className="sbm-contacts-index__page" style={{ padding: "12px 14px", marginBottom: 0 }}>
+          <Card
+            className="sbm-contacts-index__page"
+            style={{
+              padding: "12px 14px",
+              marginBottom: 0,
+              flex: innerScrolls ? "1 1 auto" : undefined,
+              minHeight: innerScrolls ? 0 : undefined,
+              display: "flex",
+              flexDirection: "column",
+              overflow: innerScrolls ? "hidden" : undefined,
+            }}
+          >
             {bucket === "saved" && siteFilter && (
               <div
                 style={{
@@ -369,9 +446,35 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
               </div>
             )}
 
+            {bucket === "saved" && (
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 12,
+                  fontSize: 13,
+                  color: t.edge,
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={linkedSitesOnly}
+                  onChange={(e) => {
+                    setLinkedSitesOnly(e.target.checked);
+                    setPageIndex(0);
+                  }}
+                  style={{ width: 16, height: 16, accentColor: "var(--color-accent)" }}
+                />
+                Show contacts with linked sites only
+              </label>
+            )}
+
             <label style={{ display: "block", marginBottom: 12 }}>
               <span style={{ fontFamily: t.label, fontSize: 11, fontWeight: 700, color: t.edge2, textTransform: "uppercase" }}>
-                Search
+                Search contacts
               </span>
               <input
                 value={q}
@@ -391,22 +494,33 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
             ) : rows.length === 0 ? (
               <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No contacts in this list.</p>
             ) : (
-              <div className="sbm-contacts-grid-wrap">
-                <div className="sbm-contacts-grid ag-theme-quartz">
+              <div
+                className="sbm-contacts-grid-wrap"
+                style={{ flex: innerScrolls ? "1 1 auto" : undefined, minHeight: innerScrolls ? 0 : undefined }}
+              >
+                <div
+                  className="sbm-contacts-grid ag-theme-quartz"
+                  style={
+                    innerScrolls
+                      ? { flex: "1 1 auto", minHeight: 0, height: "100%" }
+                      : { minHeight: Math.max(280, 48 + rows.length * 48 + 50) }
+                  }
+                >
                   <AgGridReact
                     ref={gridRef}
-                    theme="legacy"
                     rowData={rows}
                     columnDefs={columnDefs}
                     defaultColDef={defaultColDef}
                     getRowId={getRowId}
+                    onGridReady={onGridReady}
                     rowHeight={48}
                     animateRows={false}
                     suppressCellFocus
                     domLayout={innerScrolls ? "normal" : "autoHeight"}
+                    overlayNoRowsTemplate="No contacts in this list."
                   />
                 </div>
-                {total > PAGE_SIZE && (
+                {total > 0 && (
                   <div
                     style={{
                       display: "flex",
@@ -416,49 +530,52 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
                       marginTop: 12,
                       fontSize: 13,
                       color: t.edge2,
+                      flexShrink: 0,
                     }}
                   >
                     <span>
                       {rangeStart}–{rangeEnd} of {total}
+                      {total > PAGE_SIZE ? ` · page ${pageIndex + 1} of ${pageCount}` : ""}
                     </span>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        type="button"
-                        disabled={pageIndex <= 0}
-                        onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-                        style={{
-                          padding: "6px 12px",
-                          border: `1px solid ${t.frost}`,
-                          borderRadius: t.radiusButton,
-                          background: t.white,
-                          cursor: pageIndex <= 0 ? "not-allowed" : "pointer",
-                          opacity: pageIndex <= 0 ? 0.5 : 1,
-                        }}
-                      >
-                        Previous
-                      </button>
-                      <button
-                        type="button"
-                        disabled={pageIndex >= pageCount - 1}
-                        onClick={() => setPageIndex((p) => p + 1)}
-                        style={{
-                          padding: "6px 12px",
-                          border: `1px solid ${t.frost}`,
-                          borderRadius: t.radiusButton,
-                          background: t.white,
-                          cursor: pageIndex >= pageCount - 1 ? "not-allowed" : "pointer",
-                          opacity: pageIndex >= pageCount - 1 ? 0.5 : 1,
-                        }}
-                      >
-                        Next
-                      </button>
-                    </div>
+                    {total > PAGE_SIZE ? (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          disabled={pageIndex <= 0}
+                          onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
+                          style={{
+                            padding: "6px 12px",
+                            border: `1px solid ${t.frost}`,
+                            borderRadius: t.radiusButton,
+                            background: t.white,
+                            cursor: pageIndex <= 0 ? "not-allowed" : "pointer",
+                            opacity: pageIndex <= 0 ? 0.5 : 1,
+                          }}
+                        >
+                          Previous
+                        </button>
+                        <button
+                          type="button"
+                          disabled={pageIndex >= pageCount - 1}
+                          onClick={() => setPageIndex((p) => p + 1)}
+                          style={{
+                            padding: "6px 12px",
+                            border: `1px solid ${t.frost}`,
+                            borderRadius: t.radiusButton,
+                            background: t.white,
+                            cursor: pageIndex >= pageCount - 1 ? "not-allowed" : "pointer",
+                            opacity: pageIndex >= pageCount - 1 ? 0.5 : 1,
+                          }}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
             )}
           </Card>
-        </div>
       </div>
 
       {showAddModal && (
