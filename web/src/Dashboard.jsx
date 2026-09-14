@@ -139,7 +139,10 @@ export default function SimpleBusinessManager() {
 
   /* Home paints as soon as `me` is known. Tile data comes from one summary
      request; lean calls (+ transcript hydrate) load in the background for
-     admin drilldowns and never block first paint. */
+     admin drilldowns and never block first paint.
+     Reset to home only when the logged-in user changes — not when `me` is
+     patched in place (phone / customization), which would yank staff off
+     mid site-visit (e.g. right after Add on a measurement). */
   useEffect(() => {
     if (!me) return;
     let cancelled = false;
@@ -214,7 +217,7 @@ export default function SimpleBusinessManager() {
     return () => {
       cancelled = true;
     };
-  }, [me]);
+  }, [me?.id, me?.role]);
 
   const refreshOpenSiteTasks = useCallback(async () => {
     const tasksData = await fetchOpenSiteTasks();
@@ -939,7 +942,18 @@ export default function SimpleBusinessManager() {
         site={view.site}
         category={view.category}
         onBack={() => setView(view.from ?? homeView)}
-        onOpenInstallation={(installation) => setView({ name: "installation", installation, from: view })}
+        onOpenInstallation={(installation) =>
+          setView({
+            name: "installation",
+            installation,
+            from: {
+              name: "site-visit-installations",
+              site: view.site,
+              category: view.category,
+              from: view.from,
+            },
+          })
+        }
       />
     );
 
