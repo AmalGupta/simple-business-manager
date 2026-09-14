@@ -507,6 +507,27 @@ export async function postCreateCaller(input) {
   return res.json();
 }
 
+/* Maintenance — session-cookie only, admin/superadmin. */
+export async function fetchSiteContactProposals() {
+  const res = await fetch("/api/maintenance/site-contact-proposals", { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`GET /api/maintenance/site-contact-proposals → ${res.status}`);
+  return res.json();
+}
+
+export async function postSiteContactMappings(mappings) {
+  const res = await fetch("/api/maintenance/site-contact-mappings", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ mappings }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/maintenance/site-contact-mappings → ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function patchCaller(id, patch) {
   const res = await fetch(`/api/callers/${id}`, {
     method: "PATCH",
