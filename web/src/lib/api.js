@@ -444,9 +444,11 @@ export async function postResetStaffPin(id) {
    is a ~3.3k-row phone-contacts import, too big to load whole. Omitting them
    keeps the original full-category behaviour the Callers Directory relies on.
    Response is { items, total, counts }, where `total` ignores the page window. */
-export async function fetchCallers({ category, q, limit, offset } = {}) {
+export async function fetchCallers({ category, bucket, siteId, q, limit, offset } = {}) {
   const params = new URLSearchParams();
   if (category) params.set("category", category);
+  if (bucket) params.set("bucket", bucket);
+  if (siteId) params.set("siteId", siteId);
   if (q) params.set("q", q);
   if (limit !== undefined) params.set("limit", String(limit));
   if (offset !== undefined) params.set("offset", String(offset));
@@ -456,10 +458,17 @@ export async function fetchCallers({ category, q, limit, offset } = {}) {
   return res.json();
 }
 
-/* Callers Directory ("Clients" etc.) cached by category — only the
-   unfiltered, no-search browse view is cached; a live `q` search always
-   hits the network fresh since results are per-keystroke and shouldn't
-   linger in a shared cache. */
+function contactsDirectoryCacheKey(opts) {
+  return JSON.stringify({
+    bucket: opts.bucket ?? "",
+    siteId: opts.siteId ?? "",
+    q: opts.q ?? "",
+    limit: opts.limit ?? "",
+    offset: opts.offset ?? "",
+  });
+}
+
+/* Site-contacts picker — cached by category (unchanged). */
 const callersByCategoryCache = createSwrCache((category) => fetchCallers({ category }));
 export function getCachedCallersByCategory(category) {
   return callersByCategoryCache.get(category);
@@ -469,6 +478,20 @@ export function loadCallersByCategory(category) {
 }
 export function refreshCallersByCategory(category) {
   return callersByCategoryCache.refresh(category, category);
+}
+
+/* Contacts directory — cached per bucket/page/filter window; live search bypasses cache. */
+const contactsDirectoryCache = createSwrCache((key) => fetchCallers(JSON.parse(key)));
+export function loadContactsDirectory(opts) {
+  const key = contactsDirectoryCacheKey(opts);
+  return contactsDirectoryCache.load(key, key);
+}
+export function refreshContactsDirectory(opts) {
+  const key = contactsDirectoryCacheKey(opts);
+  return contactsDirectoryCache.refresh(key, key);
+}
+export function getCachedContactsDirectory(opts) {
+  return contactsDirectoryCache.get(contactsDirectoryCacheKey(opts));
 }
 
 export async function postCreateCaller(input) {

@@ -770,6 +770,7 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "callers-directory")
     return shell(<CallersDirectoryView onBack={() => setView(homeView)} innerScrolls={innerScrolls} />, {
+      wide: true,
       fillViewport: innerScrolls,
     });
 
