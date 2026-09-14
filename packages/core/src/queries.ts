@@ -205,6 +205,8 @@ export interface CallerListOpts {
   bucket?: CallerBucket;
   /** Saved tab: restrict to contacts linked to this site. */
   siteId?: string;
+  /** Contacts directory: only rows with at least one caller_sites link. */
+  linkedSitesOnly?: boolean;
   /** Case-insensitive substring match on name or phone. */
   q?: string;
   limit?: number;
@@ -224,6 +226,8 @@ export interface CallerListOpts {
  * Saved / unsaved buckets: named contacts vs phone-only labels (see
  * packages/core/src/caller-name.ts), not caller_sites linkage.
  */
+const CALLER_HAS_LINKED_SITE = `EXISTS (SELECT 1 FROM caller_sites cs WHERE cs.caller_id = callers.id)`;
+
 function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (string | number)[] } {
   const where: string[] = [];
   const binds: (string | number)[] = [];
@@ -244,6 +248,8 @@ function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (strin
       `EXISTS (SELECT 1 FROM caller_sites cs WHERE cs.caller_id = callers.id AND cs.site_id = ?)`
     );
     binds.push(opts.siteId);
+  } else if (opts?.linkedSitesOnly) {
+    where.push(CALLER_HAS_LINKED_SITE);
   }
   const q = opts?.q?.trim();
   if (q) {
