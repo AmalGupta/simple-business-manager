@@ -23,45 +23,13 @@ const SOURCE_LABELS = {
   discovered_from_caller_phone: "Call discovery (phone)",
 };
 
-const STATUS_LABELS = {
-  proposed: "Proposed",
-  already_linked: "Already linked",
-  no_match: "No match",
-};
-
-function MapCell({ data, onMap, mappingBusy }) {
-  if (!data || data.status !== "proposed" || !data.caller_id) {
-    return <span style={{ color: t.edge2, fontSize: 12 }}>—</span>;
-  }
-  const busy = mappingBusy === data.site_id;
-  return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={() => onMap(data)}
-      style={{
-        padding: "4px 10px",
-        border: `1px solid ${t.frost}`,
-        borderRadius: t.radiusButton,
-        background: t.white,
-        color: t.accent,
-        fontSize: 12,
-        fontWeight: 600,
-        cursor: busy ? "wait" : "pointer",
-      }}
-    >
-      {busy ? "Mapping…" : "Map"}
-    </button>
-  );
-}
-
 export function MaintenanceSiteContactView({ onBack, innerScrolls }) {
   const gridRef = useRef(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [mappingBusy, setMappingBusy] = useState(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [selectedCount, setSelectedCount] = useState(0);
   const [fetchedOnce, setFetchedOnce] = useState(false);
 
   const markMapped = useCallback((siteId, callerName) => {
@@ -96,6 +64,7 @@ export function MaintenanceSiteContactView({ onBack, innerScrolls }) {
       setRows(data.proposals ?? []);
       setFetchedOnce(true);
       gridRef.current?.api?.deselectAll();
+      setSelectedCount(0);
     } catch (err) {
       console.error("[sbm] site-contact proposals", err);
       setError("Could not load proposals — try again.");
@@ -104,30 +73,14 @@ export function MaintenanceSiteContactView({ onBack, innerScrolls }) {
     }
   }, []);
 
-  const mapOne = useCallback(
-    async (row) => {
-      if (!row?.site_id || !row?.caller_id) return;
-      setMappingBusy(row.site_id);
-      setError("");
-      try {
-        await postSiteContactMappings([{ site_id: row.site_id, caller_id: row.caller_id }]);
-        markMapped(row.site_id, row.caller_name);
-        await refreshContactsCaches();
-      } catch (err) {
-        console.error("[sbm] map site-contact", err);
-        setError("Mapping failed — try again.");
-      } finally {
-        setMappingBusy(null);
-      }
-    },
-    [markMapped, refreshContactsCaches]
-  );
-
   const mapSelected = useCallback(async () => {
     const api = gridRef.current?.api;
     if (!api) return;
     const selected = api.getSelectedRows().filter((r) => r.status === "proposed" && r.caller_id);
-    if (!selected.length) return;
+    if (!selected.length) {
+      setError("Select one or more sites, then Map these sites.");
+      return;
+    }
     setBulkBusy(true);
     setError("");
     try {
@@ -144,20 +97,13 @@ export function MaintenanceSiteContactView({ onBack, innerScrolls }) {
     }
   }, [markMapped, refreshContactsCaches]);
 
+  const onSelectionChanged = useCallback(() => {
+    const api = gridRef.current?.api;
+    setSelectedCount(api ? api.getSelectedRows().length : 0);
+  }, []);
+
   const columnDefs = useMemo(
     () => [
-      {
-        headerName: "",
-        checkboxSelection: true,
-        headerCheckboxSelection: true,
-        headerCheckboxSelectionFilteredOnly: true,
-        width: 48,
-        maxWidth: 48,
-        pinned: "left",
-        suppressMenu: true,
-        sortable: false,
-        filter: false,
-      },
       {
         field: "site_name",
         headerName: "Site",
@@ -200,28 +146,19 @@ export function MaintenanceSiteContactView({ onBack, innerScrolls }) {
         valueFormatter: (p) => SOURCE_LABELS[p.value] ?? p.value ?? "—",
       },
       {
-        field: "match_score",
-        headerName: "Score",
-        width: 72,
-        valueFormatter: (p) => (p.data?.status === "proposed" && p.value ? String(p.value) : "—"),
-      },
-      {
-        field: "status",
-        headerName: "Status",
-        width: 120,
-        valueFormatter: (p) => STATUS_LABELS[p.value] ?? p.value,
-      },
-      {
         headerName: "",
-        width: 88,
+        checkboxSelection: true,
+        headerCheckboxSelection: true,
+        headerCheckboxSelectionFilteredOnly: true,
+        width: 48,
+        maxWidth: 48,
         pinned: "right",
+        suppressMenu: true,
         sortable: false,
         filter: false,
-        cellRenderer: MapCell,
-        cellRendererParams: { onMap: mapOne, mappingBusy },
       },
     ],
-    [mapOne, mappingBusy]
+    []
   );
 
   const defaultColDef = useMemo(
@@ -294,7 +231,7 @@ export function MaintenanceSiteContactView({ onBack, innerScrolls }) {
         <button
           type="button"
           onClick={mapSelected}
-          disabled={bulkBusy || !fetchedOnce}
+          disabled={bulkBusy || !fetchedOnce || selectedCount === 0}
           style={{
             padding: "8px 14px",
             border: `1px solid ${t.frost}`,
@@ -310,7 +247,7 @@ export function MaintenanceSiteContactView({ onBack, innerScrolls }) {
         </button>
         {fetchedOnce ? (
           <span style={{ fontSize: 12, color: t.edge2 }}>
-            {proposedCount} mappable proposal{proposedCount === 1 ? "" : "s"}
+            {proposedCount} mappable · {selectedCount} selected
           </span>
         ) : null}
       </div>
@@ -348,6 +285,7 @@ export function MaintenanceSiteContactView({ onBack, innerScrolls }) {
               defaultColDef={defaultColDef}
               getRowId={(p) => p.data.site_id}
               onGridReady={onGridReady}
+              onSelectionChanged={onSelectionChanged}
               rowHeight={48}
               rowSelection="multiple"
               suppressRowClickSelection
