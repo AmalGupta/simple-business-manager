@@ -43,48 +43,30 @@ export function InstallationListView({ site, category, onBack, onOpenInstallatio
   const [adding, setAdding] = useState(false);
   const [label, setLabel] = useState("");
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
 
-  useEffect(() => {
-    let cancelled = false;
-    setInstallations(null);
-    setAdding(false);
-    setLabel("");
-    setError("");
+  const load = () => {
     fetchSiteInstallations(site.id, category)
-      .then((rows) => {
-        if (cancelled) return;
-        setInstallations(rows);
-        // Empty list → jump straight into naming so Add opens the checklist.
-        if (rows.length === 0) setAdding(true);
-      })
+      .then(setInstallations)
       .catch((err) => {
         console.error("[sbm] failed to load installations", err);
-        if (!cancelled) {
-          setInstallations([]);
-          setAdding(true);
-        }
+        setInstallations([]);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [site.id, category]);
+  };
+
+  useEffect(load, [site.id, category]);
 
   const submit = async () => {
     const trimmed = label.trim();
     if (!trimmed || saving) return;
     setSaving(true);
-    setError("");
     try {
       const created = await postSiteInstallation(site.id, trimmed, category);
-      // Navigate first — opening the checklist is the whole point of Add.
-      onOpenInstallation(created);
       setLabel("");
       setAdding(false);
       setInstallations((prev) => [...(prev ?? []), created]);
+      onOpenInstallation(created);
     } catch (err) {
       console.error("[sbm] failed to create installation", err);
-      setError(err.message || "Couldn't create that — try again.");
     } finally {
       setSaving(false);
     }
@@ -118,14 +100,10 @@ export function InstallationListView({ site, category, onBack, onOpenInstallatio
               Add
             </button>
           </div>
-          {error && <p style={{ fontSize: 12, color: t.signal, margin: "10px 0 0" }}>{error}</p>}
         </Card>
       ) : (
         <button
-          onClick={() => {
-            setError("");
-            setAdding(true);
-          }}
+          onClick={() => setAdding(true)}
           style={{
             display: "flex",
             alignItems: "center",
