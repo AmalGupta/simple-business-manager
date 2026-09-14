@@ -23,6 +23,7 @@ import { MyOpenTodosView } from "./views/calls/MyOpenTodosView.jsx";
 import { StaffDirectoryView } from "./views/staff/StaffDirectoryView.jsx";
 import { CallerTile } from "./views/callers/CallerTile.jsx";
 import { CallersDirectoryView } from "./views/callers/CallersDirectoryView.jsx";
+import { MaintenanceSiteContactView } from "./views/maintenance/MaintenanceSiteContactView.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
 import { SitesReviewView } from "./views/sites/SitesReviewView.jsx";
@@ -768,6 +769,12 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "staff-directory") return shell(<StaffDirectoryView onBack={() => setView(homeView)} />);
 
+  if (view.name === "maintenance-site-contact")
+    return shell(
+      <MaintenanceSiteContactView onBack={() => setView(view.from ?? homeView)} innerScrolls={innerScrolls} />,
+      { wide: true, fillViewport: innerScrolls }
+    );
+
   if (view.name === "callers-directory")
     return shell(<CallersDirectoryView onBack={() => setView(homeView)} innerScrolls={innerScrolls} />, {
       wide: true,
@@ -984,6 +991,9 @@ export default function SimpleBusinessManager() {
         customization={customization}
         onCustomizationChange={onCustomizationChange}
         onRequestReport={() => setView({ name: "app-request", from: { name: "home" } })}
+        onOpenMaintenanceSiteContact={() =>
+          setView({ name: "maintenance-site-contact", from: { name: "home" } })
+        }
         right={<span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>}
       >
         <StreakWall
