@@ -105,6 +105,12 @@ const GRID_CSS = `
 .sbm-contacts-grid .ag-cell {
   display: flex;
   align-items: center;
+  font-weight: 600;
+  color: var(--color-ink-emphasis);
+}
+.sbm-contacts-grid .ag-cell-value {
+  font-weight: inherit;
+  color: inherit;
 }
 .sbm-contacts-site-link {
   border: 0;
@@ -169,10 +175,11 @@ function LinkedSitesCell({ sites, bucket, onSiteClick }) {
   );
 }
 
-function listQueryOpts({ bucket, siteFilter, q, pageIndex }) {
+function listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }) {
   return {
     bucket,
     siteId: bucket === "saved" && siteFilter ? siteFilter.id : undefined,
+    linkedSitesOnly: bucket === "saved" && linkedSitesOnly && !siteFilter ? true : undefined,
     q: q.trim() || undefined,
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
@@ -184,6 +191,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const gridRef = useRef(null);
   const [bucket, setBucket] = useState("saved");
   const [siteFilter, setSiteFilter] = useState(null);
+  const [linkedSitesOnly, setLinkedSitesOnly] = useState(false);
   const [q, setQ] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
   const [rows, setRows] = useState(null);
@@ -194,8 +202,8 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const [error, setError] = useState("");
 
   const queryOpts = useMemo(
-    () => listQueryOpts({ bucket, siteFilter, q, pageIndex }),
-    [bucket, siteFilter, q, pageIndex]
+    () => listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }),
+    [bucket, siteFilter, linkedSitesOnly, q, pageIndex]
   );
 
   const applyData = useCallback((data) => {
@@ -379,6 +387,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
                   onClick={() => {
                     setBucket(tab.id);
                     setSiteFilter(null);
+                    setLinkedSitesOnly(false);
                     setPageIndex(0);
                     setQ("");
                   }}
@@ -437,9 +446,35 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
               </div>
             )}
 
+            {bucket === "saved" && (
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginBottom: 12,
+                  fontSize: 13,
+                  color: t.edge,
+                  cursor: "pointer",
+                  userSelect: "none",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={linkedSitesOnly}
+                  onChange={(e) => {
+                    setLinkedSitesOnly(e.target.checked);
+                    setPageIndex(0);
+                  }}
+                  style={{ width: 16, height: 16, accentColor: "var(--color-accent)" }}
+                />
+                Show contacts with linked sites only
+              </label>
+            )}
+
             <label style={{ display: "block", marginBottom: 12 }}>
               <span style={{ fontFamily: t.label, fontSize: 11, fontWeight: 700, color: t.edge2, textTransform: "uppercase" }}>
-                Search
+                Search contacts
               </span>
               <input
                 value={q}
@@ -485,7 +520,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
                     overlayNoRowsTemplate="No contacts in this list."
                   />
                 </div>
-                {total > PAGE_SIZE && (
+                {total > 0 && (
                   <div
                     style={{
                       display: "flex",
@@ -495,43 +530,47 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
                       marginTop: 12,
                       fontSize: 13,
                       color: t.edge2,
+                      flexShrink: 0,
                     }}
                   >
                     <span>
                       {rangeStart}–{rangeEnd} of {total}
+                      {total > PAGE_SIZE ? ` · page ${pageIndex + 1} of ${pageCount}` : ""}
                     </span>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        type="button"
-                        disabled={pageIndex <= 0}
-                        onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
-                        style={{
-                          padding: "6px 12px",
-                          border: `1px solid ${t.frost}`,
-                          borderRadius: t.radiusButton,
-                          background: t.white,
-                          cursor: pageIndex <= 0 ? "not-allowed" : "pointer",
-                          opacity: pageIndex <= 0 ? 0.5 : 1,
-                        }}
-                      >
-                        Previous
-                      </button>
-                      <button
-                        type="button"
-                        disabled={pageIndex >= pageCount - 1}
-                        onClick={() => setPageIndex((p) => p + 1)}
-                        style={{
-                          padding: "6px 12px",
-                          border: `1px solid ${t.frost}`,
-                          borderRadius: t.radiusButton,
-                          background: t.white,
-                          cursor: pageIndex >= pageCount - 1 ? "not-allowed" : "pointer",
-                          opacity: pageIndex >= pageCount - 1 ? 0.5 : 1,
-                        }}
-                      >
-                        Next
-                      </button>
-                    </div>
+                    {total > PAGE_SIZE ? (
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button
+                          type="button"
+                          disabled={pageIndex <= 0}
+                          onClick={() => setPageIndex((p) => Math.max(0, p - 1))}
+                          style={{
+                            padding: "6px 12px",
+                            border: `1px solid ${t.frost}`,
+                            borderRadius: t.radiusButton,
+                            background: t.white,
+                            cursor: pageIndex <= 0 ? "not-allowed" : "pointer",
+                            opacity: pageIndex <= 0 ? 0.5 : 1,
+                          }}
+                        >
+                          Previous
+                        </button>
+                        <button
+                          type="button"
+                          disabled={pageIndex >= pageCount - 1}
+                          onClick={() => setPageIndex((p) => p + 1)}
+                          style={{
+                            padding: "6px 12px",
+                            border: `1px solid ${t.frost}`,
+                            borderRadius: t.radiusButton,
+                            background: t.white,
+                            cursor: pageIndex >= pageCount - 1 ? "not-allowed" : "pointer",
+                            opacity: pageIndex >= pageCount - 1 ? 0.5 : 1,
+                          }}
+                        >
+                          Next
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
