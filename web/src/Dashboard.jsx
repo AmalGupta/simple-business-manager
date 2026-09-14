@@ -34,7 +34,6 @@ import { MyScheduleView } from "./views/home/MyScheduleView.jsx";
 import { StaffScheduleTile } from "./views/home/StaffScheduleTile.jsx";
 import { SiteVisitSiteList } from "./views/site-visit/SiteVisitSiteList.jsx";
 import { SiteVisitCategoryGrid } from "./views/site-visit/SiteVisitCategoryGrid.jsx";
-import { InstallationListView } from "./views/site-visit/InstallationListView.jsx";
 import { InstallationScreen } from "./views/site-visit/InstallationScreen.jsx";
 import { SiteComplaintForm } from "./views/site-visit/SiteComplaintForm.jsx";
 import { ComplaintsHomeView } from "./views/site-visit/ComplaintsHomeView.jsx";
@@ -63,8 +62,21 @@ import {
   fetchOpenSiteTasks,
   refreshCallsNeedingAction,
   defaultCallsNeedingActionWindow,
+  postSiteInstallation,
 } from "./lib/api.js";
 
+/** Fresh checklist title when skipping the instance list (field staff). */
+function newSiteVisitLabel(category) {
+  const kind =
+    category === "measurement" ? "Measurement" : category === "material_delivery" ? "Delivery" : "Installation";
+  const stamp = new Date().toLocaleString(undefined, {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  return `${kind} · ${stamp}`;
+}
 export default function SimpleBusinessManager() {
   const [calendarDays, setCalendarDays] = useState({});
   const [calendarMinYear, setCalendarMinYear] = useState(() => today().getFullYear());
@@ -925,21 +937,19 @@ export default function SimpleBusinessManager() {
       <SiteVisitCategoryGrid
         site={view.site}
         onBack={() => setView(view.from ?? homeView)}
-        onOpenCategory={(category) =>
-          category === "complaints"
-            ? setView({ name: "site-complaint", site: view.site, from: view })
-            : setView({ name: "site-visit-installations", site: view.site, category, from: view })
-        }
-      />
-    );
-
-  if (view.name === "site-visit-installations")
-    return shell(
-      <InstallationListView
-        site={view.site}
-        category={view.category}
-        onBack={() => setView(view.from ?? homeView)}
-        onOpenInstallation={(installation) => setView({ name: "installation", installation, from: view })}
+        onOpenCategory={async (category) => {
+          if (category === "complaints") {
+            setView({ name: "site-complaint", site: view.site, from: view });
+            return;
+          }
+          // Skip the instance list — create a row and open the checklist.
+          const created = await postSiteInstallation(view.site.id, newSiteVisitLabel(category), category);
+          setView({
+            name: "installation",
+            installation: created,
+            from: { name: "site-visit-category", site: view.site, from: view.from },
+          });
+        }}
       />
     );
 
