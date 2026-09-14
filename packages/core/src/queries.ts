@@ -1911,6 +1911,14 @@ export async function listSites(db: D1Database, forUserId?: string | null): Prom
   return results;
 }
 
+/** Confirmed sites only (`is_confirmed = 'Y'`) — site–contact maintenance backfill. */
+export async function listConfirmedSites(db: D1Database): Promise<SiteRow[]> {
+  const { results } = await db
+    .prepare(`${SITE_ROW_SELECT} WHERE sites.is_confirmed = 'Y' ORDER BY sites.name ASC`)
+    .all<SiteRow>();
+  return results;
+}
+
 const SITE_PATCH_FIELDS = [
   /* Editable so a name the extraction got wrong can be corrected from the
      review screen. Note it stays the pipeline's match key — upsertSite

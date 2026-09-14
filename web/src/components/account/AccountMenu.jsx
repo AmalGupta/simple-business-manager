@@ -16,9 +16,10 @@ export function AccountMenu({
   customization,
   onCustomizationChange,
   onRequestReport,
+  onOpenMaintenanceSiteContact,
 }) {
   const [open, setOpen] = useState(false);
-  const [panel, setPanel] = useState("root"); // root | settings | site-customization
+  const [panel, setPanel] = useState("root"); // root | settings | site-customization | maintenance
   const [showResetModal, setShowResetModal] = useState(false);
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [values, setValues] = useState(() => ({
@@ -172,6 +173,35 @@ export function AccountMenu({
         <span>Site customization</span>
         <ChevronRight size={14} color={t.edge2} />
       </button>
+      <button
+        role="menuitem"
+        onClick={() => setPanel("maintenance")}
+        style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+      >
+        <span>Maintenance</span>
+        <ChevronRight size={14} color={t.edge2} />
+      </button>
+    </>
+  );
+
+  const renderMaintenance = () => (
+    <>
+      <button role="menuitem" onClick={() => setPanel("settings")} style={menuItemStyle}>
+        <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <ChevronLeft size={14} color={t.edge2} />
+          Maintenance
+        </span>
+      </button>
+      <button
+        role="menuitem"
+        onClick={() => {
+          setOpen(false);
+          onOpenMaintenanceSiteContact?.();
+        }}
+        style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+      >
+        Associate – Site-contact
+      </button>
     </>
   );
 
@@ -243,7 +273,15 @@ export function AccountMenu({
       {open && (
         <div
           role="menu"
-          aria-label={panel === "root" ? "Account" : panel === "settings" ? "Settings" : "Site customization"}
+          aria-label={
+            panel === "root"
+              ? "Account"
+              : panel === "settings"
+                ? "Settings"
+                : panel === "maintenance"
+                  ? "Maintenance"
+                  : "Site customization"
+          }
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",
@@ -260,6 +298,7 @@ export function AccountMenu({
           {panel === "root" && renderRoot()}
           {panel === "settings" && renderSettings()}
           {panel === "site-customization" && renderSiteCustomization()}
+          {panel === "maintenance" && renderMaintenance()}
         </div>
       )}
 
