@@ -97,10 +97,11 @@ function LinkedSitesCell({ sites, bucket, onSiteClick }) {
   );
 }
 
-function listQueryOpts({ bucket, siteFilter, q, pageIndex }) {
+function listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }) {
   return {
     bucket,
     siteId: bucket === "saved" && siteFilter ? siteFilter.id : undefined,
+    linkedSitesOnly: bucket === "saved" && linkedSitesOnly && !siteFilter ? true : undefined,
     q: q.trim() || undefined,
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
@@ -112,6 +113,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const gridRef = useRef(null);
   const [bucket, setBucket] = useState("saved");
   const [siteFilter, setSiteFilter] = useState(null);
+  const [linkedSitesOnly, setLinkedSitesOnly] = useState(false);
   const [q, setQ] = useState("");
   const [pageIndex, setPageIndex] = useState(0);
   const [rows, setRows] = useState(null);
@@ -122,8 +124,8 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const [error, setError] = useState("");
 
   const queryOpts = useMemo(
-    () => listQueryOpts({ bucket, siteFilter, q, pageIndex }),
-    [bucket, siteFilter, q, pageIndex]
+    () => listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }),
+    [bucket, siteFilter, linkedSitesOnly, q, pageIndex]
   );
 
   const applyData = useCallback((data) => {
@@ -305,6 +307,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
                   onClick={() => {
                     setBucket(tab.id);
                     setSiteFilter(null);
+                    setLinkedSitesOnly(false);
                     setPageIndex(0);
                     setQ("");
                   }}
@@ -363,20 +366,56 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
               </div>
             )}
 
-            <label style={{ display: "block", marginBottom: 12 }}>
-              <span style={{ fontFamily: t.label, fontSize: 11, fontWeight: 700, color: t.edge2, textTransform: "uppercase" }}>
-                Search
-              </span>
-              <input
-                value={q}
-                onChange={(e) => {
-                  setQ(e.target.value);
-                  setPageIndex(0);
-                }}
-                placeholder="Name or phone…"
-                style={{ ...TEXT_INPUT_STYLE, marginTop: 6, width: "100%", maxWidth: 320 }}
-              />
-            </label>
+            <div
+              style={{
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "flex-end",
+                gap: "12px 20px",
+                marginBottom: 12,
+              }}
+            >
+              <label style={{ display: "block", flex: "0 1 320px" }}>
+                <span style={{ fontFamily: t.label, fontSize: 11, fontWeight: 700, color: t.edge2, textTransform: "uppercase" }}>
+                  Search
+                </span>
+                <input
+                  value={q}
+                  onChange={(e) => {
+                    setQ(e.target.value);
+                    setPageIndex(0);
+                  }}
+                  placeholder="Name or phone…"
+                  style={{ ...TEXT_INPUT_STYLE, marginTop: 6, width: "100%", maxWidth: 320 }}
+                />
+              </label>
+              {bucket === "saved" && (
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    marginBottom: 6,
+                    fontSize: 13,
+                    color: t.edge,
+                    cursor: "pointer",
+                    userSelect: "none",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={linkedSitesOnly}
+                    onChange={(e) => {
+                      setLinkedSitesOnly(e.target.checked);
+                      setPageIndex(0);
+                    }}
+                    style={{ width: 16, height: 16, accentColor: "var(--color-accent)" }}
+                  />
+                  Show contacts with linked sites only
+                </label>
+              )}
+            </div>
 
             {error && <p style={{ fontSize: 12, color: t.signal, margin: "0 0 10px" }}>{error}</p>}
 
