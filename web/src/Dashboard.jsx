@@ -49,7 +49,6 @@ import {
   fetchCallsCalendar,
   fetchDashboardSummary,
   fetchEscalations,
-  fetchSitesAttention,
   fetchSites,
   postCreateSite,
   postEscalation,
@@ -83,7 +82,6 @@ export default function SimpleBusinessManager() {
   const [calendarMinYear, setCalendarMinYear] = useState(() => today().getFullYear());
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
   const [escalations, setEscalations] = useState([]);
-  const [sitesAttention, setSitesAttention] = useState([]);
   const [allSites, setAllSites] = useState([]);
   const [staffRoster, setStaffRoster] = useState([]);
   const [callsCount, setCallsCount] = useState(0);
@@ -163,7 +161,6 @@ export default function SimpleBusinessManager() {
     setCalendarMinYear(today().getFullYear());
     setTodoRefreshKey(0);
     setEscalations([]);
-    setSitesAttention([]);
     setAllSites([]);
     setStaffRoster([]);
     setCallsCount(0);
@@ -189,7 +186,6 @@ export default function SimpleBusinessManager() {
       setCallsCount(summary.calls_count ?? 0);
       setCallersCount(summary.callers_count ?? 0);
       setCallsNeedingActionCount(summary.calls_needing_action_count ?? 0);
-      setSitesAttention(summary.sites_attention ?? []);
       setEscalations(summary.escalations ?? []);
       setStaffRoster(summary.staff_roster ?? []);
     };
@@ -252,19 +248,11 @@ export default function SimpleBusinessManager() {
   }, []);
 
   const refreshSites = useCallback(async () => {
-    if (me?.role === "staff") {
-      const sitesData = await fetchSites();
-      setAllSites(sitesData);
-      setConfirmedCount(sitesData.filter((s) => s.is_confirmed === "Y").length);
-      setUnconfirmedCount(sitesData.filter((s) => s.is_confirmed === null).length);
-      return;
-    }
-    const [sitesData, attentionData] = await Promise.all([fetchSites(), fetchSitesAttention()]);
+    const sitesData = await fetchSites();
     setAllSites(sitesData);
-    setSitesAttention(attentionData);
     setConfirmedCount(sitesData.filter((s) => s.is_confirmed === "Y").length);
     setUnconfirmedCount(sitesData.filter((s) => s.is_confirmed === null).length);
-  }, [me?.role]);
+  }, []);
 
   /* "Add new site": create + refresh so scoped lists / SiteView can resolve
      the new record. Callers decide where to navigate afterward. */
@@ -1020,8 +1008,8 @@ export default function SimpleBusinessManager() {
           original position. 2 columns on a phone; auto-widens toward one
           row as space allows. Every tile is fixed to --tile-height (see the
           Card `tile` variant) so the grid stays symmetrical regardless of
-          content — list tiles (SitesAttentionTile, EscalationsTile) scroll
-          internally instead of growing taller than their neighbours. */}
+          content — list tiles (EscalationsTile) scroll internally instead
+          of growing taller than their neighbours. */}
       <div
         style={{
           display: "grid",
@@ -1044,11 +1032,8 @@ export default function SimpleBusinessManager() {
           </Card>
         </button>
         <SitesAttentionTile
-          sites={sitesAttention}
-          onOpenSite={(site) => setView({ name: "site", site, from: { name: "home" } })}
           onReviewSites={() => setView({ name: "sites-review" })}
           onViewDirectory={() => setView({ name: "sites-directory" })}
-          hasAnySites={allSites.length > 0}
           unconfirmedCount={unconfirmedCount}
           confirmedCount={confirmedCount}
         />
