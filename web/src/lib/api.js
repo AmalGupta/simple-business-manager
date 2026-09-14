@@ -676,7 +676,7 @@ export async function fetchSiteInstallations(siteId, category) {
 }
 
 export async function postSiteInstallation(siteId, label, category) {
-  const res = await fetch(`/api/sites/${siteId}/installations`, {
+  const res = await sessionFetch(`/api/sites/${siteId}/installations`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ label, category }),
