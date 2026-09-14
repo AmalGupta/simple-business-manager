@@ -1,6 +1,80 @@
-/* Callers Directory table — scroll behavior follows shell data-inner-scrolls /
-   data-horizontal-scrolls (account menu Site customization). Default off:
-   page scrolls; cells wrap. Opt-in: fixed viewport with inner scroll. */
+/* Contacts directory — scroll behavior follows shell data-inner-scrolls /
+   data-horizontal-scrolls (account menu Site customization). */
+
+.sbm-contacts-index {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 12px;
+}
+
+.sbm-contacts-index__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 0 2px;
+  margin: 0;
+  position: relative;
+  z-index: 1;
+}
+
+.sbm-contacts-index__tab {
+  appearance: none;
+  margin: 0;
+  padding: 8px 14px 9px;
+  border: 1px solid var(--color-line);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: color-mix(in srgb, var(--color-line-soft) 70%, white);
+  color: var(--color-slate);
+  font-family: var(--font-label), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.2;
+  position: relative;
+  top: 1px;
+}
+
+.sbm-contacts-index__tab:hover {
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-line-soft) 40%, white);
+}
+
+.sbm-contacts-index__tab[aria-selected="true"] {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  top: 0;
+  padding-bottom: 10px;
+  z-index: 2;
+}
+
+.sbm-contacts-index__tab-count {
+  margin-left: 6px;
+  font-weight: 600;
+  opacity: 0.7;
+  letter-spacing: 0;
+  text-transform: none;
+  font-family: var(--font-body), system-ui, sans-serif;
+  font-size: 12px;
+}
+
+.sbm-contacts-index__page {
+  border-top-left-radius: 0;
+  position: relative;
+  z-index: 0;
+}
+
+[data-inner-scrolls="1"] .sbm-contacts-index__page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 
 .sbm-callers-page {
   display: flex;

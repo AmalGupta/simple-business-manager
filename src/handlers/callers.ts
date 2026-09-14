@@ -8,8 +8,10 @@ import {
   listCallers,
   countCallers,
   countCallersByCategory,
+  countCallersByBucket,
   updateCaller,
   CALLER_CATEGORIES,
+  type CallerBucket,
   type CallerCategory,
 } from "@sbm/core";
 import { requireAdmin } from "./auth";
@@ -23,6 +25,7 @@ function json(data: unknown, status = 200): Response {
 }
 
 const VALID_CATEGORIES = new Set<CallerCategory>(CALLER_CATEGORIES);
+const VALID_BUCKETS = new Set<CallerBucket>(["saved", "unsaved", "spam"]);
 
 function parseCategory(value: unknown): CallerCategory | undefined | null {
   if (value === undefined) return undefined;
@@ -30,8 +33,16 @@ function parseCategory(value: unknown): CallerCategory | undefined | null {
   return null; // present but invalid
 }
 
+function parseBucket(value: string | null): CallerBucket | undefined | null {
+  if (!value) return undefined;
+  if (VALID_BUCKETS.has(value as CallerBucket)) return value as CallerBucket;
+  return null;
+}
+
 /** Cap on one page of callers — the directory is a ~3.3k-row phone-contacts import. */
 const CALLERS_MAX_LIMIT = 200;
+/** Contacts directory grid pagination (unsaved tab can be large). */
+const CONTACTS_DIRECTORY_MAX_LIMIT = 500;
 
 function parsePositiveInt(value: string | null, max: number): number | null | undefined {
   if (value === null) return undefined;
@@ -43,12 +54,10 @@ function parsePositiveInt(value: string | null, max: number): number | null | un
 /**
  * GET /api/callers — Callers Directory list and category counts.
  *
- * `?category=` filters as before. `?q=` (substring on name or phone) and
- * `?limit=`/`?offset=` were added for the site-contacts picker, which can't
- * load the whole directory. Both are optional and omitted by the existing
- * Callers Directory screen, which still gets the full category unpaginated —
- * `total` is always the count matching category+q ignoring the page window,
- * so a paginated caller can render "showing N of M".
+ * `?category=` filters as before. `?bucket=saved|unsaved|spam` drives the
+ * Contacts directory tabs. `?siteId=` narrows saved (linked) contacts to one
+ * site. `?q=` (substring on name or phone) and `?limit=`/`?offset=` were added
+ * for the site-contacts picker, which can't load the whole directory.
  */
 export async function handleListCallers(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
@@ -65,20 +74,36 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
     category = parsed;
   }
 
+  const bucket = parseBucket(url.searchParams.get("bucket"));
+  if (url.searchParams.has("bucket") && bucket === null) {
+    return json({ error: "bucket must be one of saved, unsaved, spam" }, 400);
+  }
+
+  const siteId = url.searchParams.get("siteId")?.trim() || undefined;
+
   const q = url.searchParams.get("q")?.trim() || undefined;
 
-  const limit = parsePositiveInt(url.searchParams.get("limit"), CALLERS_MAX_LIMIT);
-  if (limit === null) return json({ error: `limit must be an integer between 0 and ${CALLERS_MAX_LIMIT}` }, 400);
+  const maxLimit = bucket ? CONTACTS_DIRECTORY_MAX_LIMIT : CALLERS_MAX_LIMIT;
+  const limit = parsePositiveInt(url.searchParams.get("limit"), maxLimit);
+  if (limit === null) return json({ error: `limit must be an integer between 0 and ${maxLimit}` }, 400);
   const offset = parsePositiveInt(url.searchParams.get("offset"), Number.MAX_SAFE_INTEGER);
   if (offset === null) return json({ error: "offset must be a non-negative integer" }, 400);
 
-  const opts = { category, q, limit, offset };
-  const [items, total, counts] = await Promise.all([
+  const opts = {
+    category,
+    ...(bucket ? { bucket } : {}),
+    siteId,
+    q,
+    limit,
+    offset,
+  };
+  const [items, total, counts, bucket_counts] = await Promise.all([
     listCallers(env.DB, opts),
     countCallers(env.DB, opts),
     countCallersByCategory(env.DB),
+    countCallersByBucket(env.DB),
   ]);
-  return json({ items, total, counts });
+  return json({ items, total, counts, bucket_counts });
 }
 
 /** POST /api/callers — admin adds a caller directly (e.g. seeding a Family/Spam number). */
