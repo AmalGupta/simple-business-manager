@@ -50,78 +50,6 @@ const PAGE_SIZE = 100;
 
 const EMPTY_BUCKET_COUNTS = { saved: 0, unsaved: 0, spam: 0 };
 
-const GRID_CSS = `
-.sbm-contacts-grid-wrap {
-  display: flex;
-  flex-direction: column;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-  overflow: hidden;
-}
-.sbm-contacts-grid.ag-theme-quartz {
-  --ag-font-family: var(--font-body), system-ui, sans-serif;
-  --ag-font-size: 13px;
-  --ag-background-color: var(--color-surface);
-  --ag-header-background-color: #DCE6FF;
-  --ag-odd-row-background-color: var(--color-surface);
-  --ag-even-row-background-color: color-mix(in srgb, #DCE6FF 35%, white);
-  --ag-row-hover-color: color-mix(in srgb, var(--color-accent) 6%, white);
-  --ag-border-color: var(--color-line);
-  --ag-row-border-color: var(--color-line-soft);
-  --ag-header-foreground-color: var(--color-ink);
-  --ag-foreground-color: var(--color-ink);
-  --ag-border-radius: 0;
-  --ag-wrapper-border-radius: 0;
-  --ag-cell-horizontal-padding: 12px;
-  --ag-header-height: 42px;
-  --ag-row-height: 48px;
-  width: 100%;
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
-}
-.sbm-contacts-grid .ag-root-wrapper {
-  border: none;
-  height: 100%;
-  background: var(--color-surface);
-}
-[data-inner-scrolls="0"] .sbm-contacts-grid-wrap {
-  overflow: visible;
-  flex: 0 0 auto;
-  height: auto;
-}
-[data-inner-scrolls="0"] .sbm-contacts-grid.ag-theme-quartz {
-  height: auto !important;
-  min-height: 280px;
-}
-.sbm-contacts-grid .ag-header-cell-text {
-  font-family: var(--font-label);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.sbm-contacts-grid .ag-cell {
-  display: flex;
-  align-items: center;
-}
-.sbm-contacts-site-link {
-  border: 0;
-  background: none;
-  padding: 0;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-accent);
-  cursor: pointer;
-  text-align: left;
-}
-.sbm-contacts-site-link:hover {
-  text-decoration: underline;
-}
-`;
-
 function TypeCell({ data, bucket, busyId, onChangeCategory }) {
   if (!data) return null;
   if (bucket === "spam") {
@@ -325,8 +253,6 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
         gap: 10,
       }}
     >
-      <style>{GRID_CSS}</style>
-
       <div style={{ flexShrink: 0 }}>
         <BackLink onClick={onBack}>Back</BackLink>
 
