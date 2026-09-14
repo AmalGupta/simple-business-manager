@@ -2,6 +2,7 @@
 
 import { matchStaffByOwner } from "./assignment";
 import { normalizeCallerPhone } from "./caller-category";
+import { SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import type {
   AppRequest,
   Call,
@@ -219,9 +220,10 @@ export interface CallerListOpts {
  * that consumes this can't load the whole table. LIKE with a leading `%`
  * can't use an index, but at this row count a scan is well under the D1
  * budget, and adding FTS for one picker isn't worth the schema surface.
+ *
+ * Saved / unsaved buckets: named contacts vs phone-only labels (see
+ * packages/core/src/caller-name.ts), not caller_sites linkage.
  */
-const CALLER_HAS_SITE = `EXISTS (SELECT 1 FROM caller_sites cs WHERE cs.caller_id = callers.id)`;
-
 function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (string | number)[] } {
   const where: string[] = [];
   const binds: (string | number)[] = [];
@@ -229,10 +231,10 @@ function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (strin
     where.push(`callers.category = 'spam'`);
   } else if (opts?.bucket === "saved") {
     where.push(`callers.category != 'spam'`);
-    where.push(CALLER_HAS_SITE);
+    where.push(`NOT ${SQL_CALLER_UNSAVED_CONTACT}`);
   } else if (opts?.bucket === "unsaved") {
     where.push(`callers.category != 'spam'`);
-    where.push(`NOT ${CALLER_HAS_SITE}`);
+    where.push(SQL_CALLER_UNSAVED_CONTACT);
   } else if (opts?.category) {
     where.push(`callers.category = ?`);
     binds.push(opts.category);
@@ -280,8 +282,8 @@ export async function countCallersByBucket(db: D1Database): Promise<CallerBucket
     .prepare(
       `SELECT
          SUM(CASE WHEN category = 'spam' THEN 1 ELSE 0 END) AS spam,
-         SUM(CASE WHEN category != 'spam' AND ${CALLER_HAS_SITE} THEN 1 ELSE 0 END) AS saved,
-         SUM(CASE WHEN category != 'spam' AND NOT ${CALLER_HAS_SITE} THEN 1 ELSE 0 END) AS unsaved
+         SUM(CASE WHEN category != 'spam' AND NOT ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS saved,
+         SUM(CASE WHEN category != 'spam' AND ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS unsaved
        FROM callers`
     )
     .first<{ spam: number; saved: number; unsaved: number }>();

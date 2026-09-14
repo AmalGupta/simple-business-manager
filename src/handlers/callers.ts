@@ -55,7 +55,8 @@ function parsePositiveInt(value: string | null, max: number): number | null | un
  * GET /api/callers — Callers Directory list and category counts.
  *
  * `?category=` filters as before. `?bucket=saved|unsaved|spam` drives the
- * Contacts directory tabs. `?siteId=` narrows saved (linked) contacts to one
+ * Contacts directory tabs (saved = named contacts, unsaved = phone-only labels).
+ * `?siteId=` narrows saved rows linked to one site via caller_sites.
  * site. `?q=` (substring on name or phone) and `?limit=`/`?offset=` were added
  * for the site-contacts picker, which can't load the whole directory.
  */
