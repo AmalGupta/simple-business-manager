@@ -7,7 +7,7 @@ const LINK_STYLE = {
   flexShrink: 0,
   width: "100%",
   textAlign: "left",
-  padding: "10px 0 0",
+  padding: 0,
   margin: 0,
   border: "none",
   background: "none",
@@ -26,13 +26,23 @@ export function SitesAttentionTile({ onReviewSites, onViewDirectory, unconfirmed
   return (
     <Card tile>
       <TileLabel>Sites needing attention</TileLabel>
-      <div style={{ flex: 1, minHeight: 0 }} />
-      <button onClick={onViewDirectory} style={{ ...LINK_STYLE, color: t.edge }}>
-        Confirmed sites{confirmedCount > 0 ? ` (${confirmedCount})` : ""}
-      </button>
-      <button onClick={onReviewSites} style={{ ...LINK_STYLE, color: t.accent }}>
-        Unconfirmed sites{unconfirmedCount > 0 ? ` (${unconfirmedCount})` : ""}
-      </button>
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: "center",
+          gap: 10,
+        }}
+      >
+        <button onClick={onViewDirectory} style={{ ...LINK_STYLE, color: t.edge }}>
+          Confirmed Sites{confirmedCount > 0 ? ` (${confirmedCount})` : ""}
+        </button>
+        <button onClick={onReviewSites} style={{ ...LINK_STYLE, color: t.accent }}>
+          Unconfirmed Sites{unconfirmedCount > 0 ? ` (${unconfirmedCount})` : ""}
+        </button>
+      </div>
     </Card>
   );
 }
