@@ -173,6 +173,24 @@ export interface CallerRow {
   created_at: string;
 }
 
+export type CallerBucket = "saved" | "unsaved" | "spam";
+
+export interface CallerLinkedSite {
+  id: string;
+  name: string;
+}
+
+/** Contacts directory row — callers list plus site links from caller_sites. */
+export interface CallerDirectoryRow extends CallerRow {
+  linked_sites: CallerLinkedSite[];
+}
+
+export interface CallerBucketCounts {
+  saved: number;
+  unsaved: number;
+  spam: number;
+}
+
 const CALLER_SELECT = `
   SELECT callers.id, callers.name, callers.phone, callers.category,
          callers.staff_user_id, users.name AS staff_user_name, callers.created_at
@@ -182,6 +200,10 @@ const CALLER_SELECT = `
 
 export interface CallerListOpts {
   category?: CallerCategory;
+  /** Contacts directory tabs — saved / unsaved / spam (see CallerBucket). */
+  bucket?: CallerBucket;
+  /** Saved tab: restrict to contacts linked to this site. */
+  siteId?: string;
   /** Case-insensitive substring match on name or phone. */
   q?: string;
   limit?: number;
@@ -198,12 +220,28 @@ export interface CallerListOpts {
  * can't use an index, but at this row count a scan is well under the D1
  * budget, and adding FTS for one picker isn't worth the schema surface.
  */
+const CALLER_HAS_SITE = `EXISTS (SELECT 1 FROM caller_sites cs WHERE cs.caller_id = callers.id)`;
+
 function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (string | number)[] } {
   const where: string[] = [];
   const binds: (string | number)[] = [];
-  if (opts?.category) {
+  if (opts?.bucket === "spam") {
+    where.push(`callers.category = 'spam'`);
+  } else if (opts?.bucket === "saved") {
+    where.push(`callers.category != 'spam'`);
+    where.push(CALLER_HAS_SITE);
+  } else if (opts?.bucket === "unsaved") {
+    where.push(`callers.category != 'spam'`);
+    where.push(`NOT ${CALLER_HAS_SITE}`);
+  } else if (opts?.category) {
     where.push(`callers.category = ?`);
     binds.push(opts.category);
+  }
+  if (opts?.siteId) {
+    where.push(
+      `EXISTS (SELECT 1 FROM caller_sites cs WHERE cs.caller_id = callers.id AND cs.site_id = ?)`
+    );
+    binds.push(opts.siteId);
   }
   const q = opts?.q?.trim();
   if (q) {
@@ -213,12 +251,53 @@ function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (strin
   return { clause: where.length ? `WHERE ${where.join(" AND ")}` : "", binds };
 }
 
+/** Sites linked to callers — batched for the Contacts directory grid. */
+export async function getLinkedSitesByCallerIds(
+  db: D1Database,
+  callerIds: string[]
+): Promise<Map<string, CallerLinkedSite[]>> {
+  const map = new Map<string, CallerLinkedSite[]>();
+  const rows = await queryAllByIdChunks<{ caller_id: string; id: string; name: string }>(
+    db,
+    callerIds,
+    (placeholders) =>
+      `SELECT caller_sites.caller_id AS caller_id, sites.id AS id, sites.name AS name
+       FROM caller_sites
+       JOIN sites ON sites.id = caller_sites.site_id
+       WHERE caller_sites.caller_id IN (${placeholders})
+       ORDER BY sites.name ASC`
+  );
+  for (const row of rows ?? []) {
+    const list = map.get(row.caller_id) ?? [];
+    list.push({ id: row.id, name: row.name });
+    map.set(row.caller_id, list);
+  }
+  return map;
+}
+
+export async function countCallersByBucket(db: D1Database): Promise<CallerBucketCounts> {
+  const row = await db
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN category = 'spam' THEN 1 ELSE 0 END) AS spam,
+         SUM(CASE WHEN category != 'spam' AND ${CALLER_HAS_SITE} THEN 1 ELSE 0 END) AS saved,
+         SUM(CASE WHEN category != 'spam' AND NOT ${CALLER_HAS_SITE} THEN 1 ELSE 0 END) AS unsaved
+       FROM callers`
+    )
+    .first<{ spam: number; saved: number; unsaved: number }>();
+  return {
+    spam: row?.spam ?? 0,
+    saved: row?.saved ?? 0,
+    unsaved: row?.unsaved ?? 0,
+  };
+}
+
 /**
  * Unpaginated by default — the Callers Directory screen still renders the
  * whole category at once, and changing that is out of scope here. Pass
  * `limit` to page (the site-contacts picker does).
  */
-export async function listCallers(db: D1Database, opts?: CallerListOpts): Promise<CallerRow[]> {
+export async function listCallers(db: D1Database, opts?: CallerListOpts): Promise<CallerDirectoryRow[]> {
   const { clause, binds } = callerFilterSql(opts);
   let sql = `${CALLER_SELECT} ${clause} ORDER BY callers.name ASC`;
   const allBinds = [...binds];
@@ -228,7 +307,16 @@ export async function listCallers(db: D1Database, opts?: CallerListOpts): Promis
   }
   const stmt = db.prepare(sql);
   const { results } = await (allBinds.length ? stmt.bind(...allBinds) : stmt).all<CallerRow>();
-  return results ?? [];
+  const rows = results ?? [];
+  if (rows.length === 0) return [];
+  const sitesByCaller = await getLinkedSitesByCallerIds(
+    db,
+    rows.map((r) => r.id)
+  );
+  return rows.map((row) => ({
+    ...row,
+    linked_sites: sitesByCaller.get(row.id) ?? [],
+  }));
 }
 
 /** Total matching `opts` ignoring limit/offset — the picker needs it to show "N of M". */
@@ -3813,7 +3901,7 @@ export async function getDashboardSummary(
       .first<{ n: number }>(),
     db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'snoozed'`).first<{ n: number }>(),
     getCallsCount(db),
-    db.prepare(`SELECT COUNT(*) AS n FROM callers`).first<{ n: number }>(),
+    countCallersByBucket(db).then((b) => ({ n: b.saved + b.unsaved })),
     getSitesNeedingAttention(db),
     listOpenEscalations(db),
     listSites(db),

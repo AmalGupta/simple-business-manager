@@ -60,7 +60,7 @@ export function AddCallerModal({ onClose, onCreate }) {
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Add caller"
+      aria-label="Add contact"
       onClick={onClose}
       style={{
         position: "fixed",
@@ -86,7 +86,7 @@ export function AddCallerModal({ onClose, onCreate }) {
           gap: 10,
         }}
       >
-        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Add caller</span>
+        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>Add contact</span>
         <input
           autoFocus
           placeholder="Name"
