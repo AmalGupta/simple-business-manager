@@ -4,11 +4,12 @@ import { sbmApiKey } from "../fixtures/dev-vars";
 import { TEST_ADMIN } from "../fixtures/test-data";
 
 test.describe("Contacts directory", () => {
-  test("bookmark tabs, unsaved/saved buckets, type edit, bucket API", async ({ page }) => {
+  test("bookmark tabs, saved/unsaved by name, type edit, bucket API", async ({ page }) => {
     await loginAsAdmin(page);
 
     const unique = `E2E Contact ${Date.now()}`;
     const phone = `9${String(Date.now()).slice(-9)}`;
+    const phoneOnly = `8${String(Date.now()).slice(-9)}`;
 
     const create = await page.request.post("/api/callers", {
       data: { name: unique, phone, category: "client" },
@@ -16,11 +17,22 @@ test.describe("Contacts directory", () => {
     expect(create.status()).toBe(201);
     const created = await create.json();
 
-    const unsavedList = await page.request.get("/api/callers?bucket=unsaved&q=" + encodeURIComponent(unique));
+    const savedList = await page.request.get("/api/callers?bucket=saved&q=" + encodeURIComponent(unique));
+    expect(savedList.status()).toBe(200);
+    const savedBody = await savedList.json();
+    expect(savedBody.items.some((c: { id: string }) => c.id === created.id)).toBe(true);
+    expect(savedBody.bucket_counts).toBeTruthy();
+
+    const phoneRow = await page.request.post("/api/callers", {
+      data: { name: phoneOnly, phone: phoneOnly, category: "client" },
+    });
+    expect(phoneRow.status()).toBe(201);
+    const phoneCreated = await phoneRow.json();
+
+    const unsavedList = await page.request.get("/api/callers?bucket=unsaved&q=" + encodeURIComponent(phoneOnly));
     expect(unsavedList.status()).toBe(200);
     const unsavedBody = await unsavedList.json();
-    expect(unsavedBody.items.some((c: { id: string }) => c.id === created.id)).toBe(true);
-    expect(unsavedBody.bucket_counts).toBeTruthy();
+    expect(unsavedBody.items.some((c: { id: string }) => c.id === phoneCreated.id)).toBe(true);
 
     const siteRes = await page.request.post("/api/sites", {
       headers: { "X-SBM-Key": sbmApiKey() },
@@ -34,11 +46,6 @@ test.describe("Contacts directory", () => {
       data: { caller_ids: [created.id] },
     });
     expect(link.status()).toBe(201);
-
-    const savedList = await page.request.get("/api/callers?bucket=saved&q=" + encodeURIComponent(unique));
-    expect(savedList.status()).toBe(200);
-    const savedBody = await savedList.json();
-    expect(savedBody.items.some((c: { id: string }) => c.id === created.id)).toBe(true);
 
     await page.getByRole("button", { name: /Contacts —/i }).click();
     await expect(page.getByRole("heading", { name: "Contacts", exact: true })).toBeVisible();
@@ -62,6 +69,7 @@ test.describe("Contacts directory", () => {
     );
 
     await page.request.patch(`/api/callers/${created.id}`, { data: { category: "spam" } });
+    await page.request.patch(`/api/callers/${phoneCreated.id}`, { data: { category: "spam" } });
   });
 
   test("account menu remains reachable from contacts view", async ({ page }) => {
