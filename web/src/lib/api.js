@@ -670,13 +670,13 @@ export async function patchSiteTask(id, patch) {
    X-SBM-Key involved. */
 
 export async function fetchSiteInstallations(siteId, category) {
-  const res = await sessionFetch(`/api/sites/${siteId}/installations?category=${category}`);
+  const res = await fetch(`/api/sites/${siteId}/installations?category=${category}`);
   if (!res.ok) throw new Error(`GET /api/sites/${siteId}/installations → ${res.status}`);
   return res.json();
 }
 
 export async function postSiteInstallation(siteId, label, category) {
-  const res = await sessionFetch(`/api/sites/${siteId}/installations`, {
+  const res = await fetch(`/api/sites/${siteId}/installations`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ label, category }),
@@ -690,7 +690,7 @@ export async function postSiteInstallation(siteId, label, category) {
 
 /** Returns { installation, updates } — updates is the full history, oldest first. */
 export async function fetchInstallation(id) {
-  const res = await sessionFetch(`/api/installations/${id}`);
+  const res = await fetch(`/api/installations/${id}`);
   if (!res.ok) throw new Error(`GET /api/installations/${id} → ${res.status}`);
   return res.json();
 }
@@ -700,7 +700,7 @@ export async function postInstallationUpdate(installationId, category, blob, fil
   const fd = new FormData();
   fd.append("category", category);
   fd.append("recording", blob, fileName);
-  const res = await sessionFetch(`/api/installations/${installationId}/updates`, { method: "POST", body: fd });
+  const res = await fetch(`/api/installations/${installationId}/updates`, { method: "POST", body: fd });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `POST /api/installations/${installationId}/updates → ${res.status}`);
@@ -712,11 +712,8 @@ export async function postInstallationUpdate(installationId, category, blob, fil
 export async function postInstallationUpdateMedia(updateId, file) {
   const fd = new FormData();
   fd.append("file", file);
-  const res = await sessionFetch(`/api/installation-updates/${updateId}/media`, { method: "POST", body: fd });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `POST /api/installation-updates/${updateId}/media → ${res.status}`);
-  }
+  const res = await fetch(`/api/installation-updates/${updateId}/media`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`POST /api/installation-updates/${updateId}/media → ${res.status}`);
   return res.json();
 }
 
