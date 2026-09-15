@@ -49,6 +49,7 @@ import {
   listOpenEscalations,
   listSiteTeamMembers,
   listSites,
+  listOpenTodosForSite,
   autoAssignOpenTodosByOwner,
   logTodoAssignmentToSiteTimeline,
   replaceExtraction,
@@ -745,6 +746,21 @@ export async function handleGetSiteContacts(request: Request, env: Env, siteId: 
     return json({ error: "forbidden" }, 403);
   }
   return json(await listSiteContacts(env.DB, siteId));
+}
+
+/**
+ * Open call todos for one site — confirmed-sites Open-count popup.
+ * Admin/superadmin only (same gate as the directory that opens it).
+ */
+export async function handleGetSiteOpenTodos(request: Request, env: Env, siteId: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const items = await listOpenTodosForSite(env.DB, siteId);
+  const voiceNotesByTodo = await getLatestVoiceNotesByTodoIds(
+    env.DB,
+    items.map((t) => t.id)
+  );
+  return json({ items, voice_notes_by_todo_id: Object.fromEntries(voiceNotesByTodo) });
 }
 
 /** `{ caller_ids: [...] }` from the picker. Idempotent — see addSiteContacts. */
