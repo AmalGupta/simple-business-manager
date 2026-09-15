@@ -3835,6 +3835,45 @@ export interface AssignedTodoRow {
   recorded_at: string | null;
 }
 
+/** Open call todos for one site — confirmed-sites Open-count popup. */
+export interface SiteOpenTodoRow extends AssignedTodoRow {
+  recording_date: string | null;
+  assignees: TodoAssignee[];
+}
+
+/** Open call todos linked to a site via call_sites, newest call first. */
+export async function listOpenTodosForSite(db: D1Database, siteId: string): Promise<SiteOpenTodoRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT todos.id AS id,
+              todos.call_id AS call_id,
+              todos.owner AS owner,
+              todos.text AS text,
+              todos.due_date AS due_date,
+              todos.status AS status,
+              COALESCE(callers.name, 'Unknown caller') AS client_name,
+              calls.recorded_at AS recorded_at,
+              calls.recording_date AS recording_date
+       FROM todos
+       JOIN calls ON calls.id = todos.call_id
+       JOIN call_sites ON call_sites.call_id = calls.id
+       LEFT JOIN callers ON callers.id = calls.client_id
+       WHERE call_sites.site_id = ?
+         AND todos.status = 'open'
+         AND calls.deleted_at IS NULL
+       ORDER BY calls.recorded_at DESC, todos.created_at DESC`
+    )
+    .bind(siteId)
+    .all<Omit<SiteOpenTodoRow, "assignees">>();
+  const rows = results ?? [];
+  if (rows.length === 0) return [];
+  const map = await getAssigneesByTodoIds(
+    db,
+    rows.map((r) => r.id)
+  );
+  return rows.map((r) => ({ ...r, assignees: map.get(r.id) ?? [] }));
+}
+
 /** Open call todos assigned to a user — personal work queue (staff or admin). */
 export async function listMyOpenTodos(db: D1Database, userId: string): Promise<AssignedTodoRow[]> {
   const { results } = await db

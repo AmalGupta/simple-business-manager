@@ -29,6 +29,7 @@ import {
   handleGetSitesAttention,
   handleGetSiteTeam,
   handleGetSiteContacts,
+  handleGetSiteOpenTodos,
   handlePostSiteContacts,
   handleDeleteSiteContact,
   handlePatchSite,
@@ -327,6 +328,12 @@ export default {
     if (siteTeamMatch && request.method === "POST") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handlePostSiteTeamMember(request, env, siteTeamMatch[1]);
+    }
+
+    const siteOpenTodosMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/open-todos$/);
+    if (siteOpenTodosMatch && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetSiteOpenTodos(request, env, siteOpenTodosMatch[1]);
     }
 
     // --- Site-task workflow system — migration 0013. ---
