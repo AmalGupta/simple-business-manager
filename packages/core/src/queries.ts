@@ -2693,13 +2693,14 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
      )
      SELECT sites.id AS id, sites.name AS name, sites.site_name_being_used AS site_name_being_used,
             sites.target_closure_date AS target_closure_date,
-            COALESCE(SUM(CASE WHEN todos.status = 'open' THEN 1 ELSE 0 END), 0) AS open_count,
+            COALESCE(SUM(CASE WHEN todos.status = 'open' AND calls_for_open.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS open_count,
             last_activity.last_at AS last_activity_at,
             callers.name AS discovered_from_caller_name,
             substr(COALESCE(disc.recording_date, disc.recorded_at), 1, 10) AS discovered_from_call_date
      FROM sites
      LEFT JOIN call_sites ON call_sites.site_id = sites.id
-     LEFT JOIN todos ON todos.call_id = call_sites.call_id
+     LEFT JOIN calls calls_for_open ON calls_for_open.id = call_sites.call_id AND calls_for_open.deleted_at IS NULL
+     LEFT JOIN todos ON todos.call_id = calls_for_open.id
      LEFT JOIN last_activity ON last_activity.site_id = sites.id
      LEFT JOIN calls disc ON disc.id = sites.discovered_from_call_id
      LEFT JOIN callers ON callers.id = disc.client_id
