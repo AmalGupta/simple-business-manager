@@ -54,7 +54,7 @@ function FilterBar({ filters, setFilters, shown, total }) {
 
 const EMPTY_FILTERS = { name: "", contact: "", activity: "any" };
 
-export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalScrolls = false }) {
+export function SitesGrid({ rows, onOpenSite, onOpenTodos, innerScrolls = false, horizontalScrolls = false }) {
   const gridRef = useRef(null);
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [narrow, setNarrow] = useState(
@@ -153,6 +153,35 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
         suppressSizeToFit: true,
         cellClass: "sbm-scol-open",
         valueGetter: (p) => p.data?.open_count ?? 0,
+        cellRenderer: (p) => {
+          const count = p.data?.open_count ?? 0;
+          if (!p.data || !onOpenTodos) return String(count);
+          return (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenTodos(p.data);
+              }}
+              aria-label={`${count} open items for ${p.data.name}`}
+              style={{
+                border: 0,
+                background: "none",
+                padding: 0,
+                margin: 0,
+                font: "inherit",
+                fontVariantNumeric: "tabular-nums",
+                color: count > 0 ? "var(--color-accent)" : "var(--color-slate)",
+                fontWeight: count > 0 ? 700 : 400,
+                cursor: "pointer",
+                textDecoration: count > 0 ? "underline" : "none",
+                textUnderlineOffset: 3,
+              }}
+            >
+              {count}
+            </button>
+          );
+        },
       },
     ];
 
@@ -170,7 +199,7 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
       });
     }
     return cols;
-  }, [narrow, horizontalScrolls]);
+  }, [narrow, horizontalScrolls, onOpenTodos]);
 
   const defaultColDef = useMemo(
     () => ({

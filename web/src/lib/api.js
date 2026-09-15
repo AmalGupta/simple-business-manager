@@ -691,6 +691,18 @@ export async function fetchSiteTasks(siteId) {
   return fetchJSON(`/api/sites/${siteId}/tasks`);
 }
 
+/** Open call todos for one site — confirmed-sites Open-count popup. */
+export async function fetchSiteOpenTodos(siteId) {
+  const res = await fetch(`/api/sites/${siteId}/open-todos`, { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`GET /api/sites/${siteId}/open-todos → ${res.status}`);
+  const data = await res.json();
+  const notes = data.voice_notes_by_todo_id ?? {};
+  return {
+    items: data.items ?? [],
+    voiceNotesByTodoId: new Map(Object.entries(notes)),
+  };
+}
+
 /** Every still-unassigned stage at one site — the handoff picker shown after marking a stage done. */
 export async function fetchUnassignedSiteTasks(siteId) {
   return fetchJSON(`/api/sites/${siteId}/tasks/unassigned`);

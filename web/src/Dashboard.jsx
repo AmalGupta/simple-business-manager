@@ -729,6 +729,10 @@ export default function SimpleBusinessManager() {
           isHome={me.role === "staff" && (!view.from || view.from.name === "staff-home")}
           innerScrolls={innerScrolls}
           horizontalScrolls={horizontalScrolls}
+          staffRoster={staffRoster}
+          currentUser={me}
+          onAssignTodo={me.role !== "staff" ? onAssignTodo : undefined}
+          onToggleTodo={me.role !== "staff" ? onToggle : undefined}
         />
       </>,
       // Six columns need the 1100px container, not the default 720 — same

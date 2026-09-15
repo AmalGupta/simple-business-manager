@@ -1,10 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
 import { t } from "../../theme.js";
-import { getCachedConfirmedSites, loadConfirmedSites } from "../../lib/api.js";
+import { getCachedConfirmedSites, loadConfirmedSites, refreshConfirmedSites } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { SitesGrid } from "./SitesGrid.jsx";
+import { SiteOpenTodosPopup } from "./SiteOpenTodosPopup.jsx";
 
 /* ------------------------------------------------------------------
    Sites directory — reached via the "N confirmed sites" rollup on Tile 3.
@@ -23,8 +24,21 @@ export function SitesDirectoryView({
   isHome = false,
   innerScrolls = false,
   horizontalScrolls = false,
+  staffRoster = [],
+  currentUser = null,
+  onAssignTodo,
+  onToggleTodo,
 }) {
   const [sites, setSites] = useState(() => getCachedConfirmedSites());
+  const [openTodosSite, setOpenTodosSite] = useState(null);
+
+  const reloadSites = useCallback(() => {
+    return refreshConfirmedSites()
+      .then((data) => setSites(data))
+      .catch((err) => {
+        console.error("[sbm] failed to refresh confirmed sites", err);
+      });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,8 +108,21 @@ export function SitesDirectoryView({
         <SitesGrid
           rows={sites}
           onOpenSite={onOpenSite}
+          onOpenTodos={onAssignTodo && onToggleTodo ? setOpenTodosSite : undefined}
           innerScrolls={innerScrolls}
           horizontalScrolls={horizontalScrolls}
+        />
+      )}
+
+      {openTodosSite && onAssignTodo && onToggleTodo && (
+        <SiteOpenTodosPopup
+          site={openTodosSite}
+          staffRoster={staffRoster}
+          currentUser={currentUser}
+          onAssignTodo={onAssignTodo}
+          onToggleTodo={onToggleTodo}
+          onClose={() => setOpenTodosSite(null)}
+          onChanged={reloadSites}
         />
       )}
     </div>
