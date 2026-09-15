@@ -4,7 +4,7 @@ import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
 import { t } from "../../theme.js";
-import { fmtShort, fmtAgo, daysUntil } from "../../lib/dates.js";
+import { fmtAgo } from "../../lib/dates.js";
 import { Card } from "../../components/Card.jsx";
 import {
   SITES_GRID_CSS,
@@ -35,13 +35,6 @@ function contactsLabel(site) {
   return list.map((c) => c.name).join(", ");
 }
 
-function discoveredLabel(site) {
-  if (!site.discovered_from_caller_name && !site.discovered_from_call_date) return "";
-  const caller = site.discovered_from_caller_name || "Unknown caller";
-  const date = fmtShort(site.discovered_from_call_date);
-  return date ? `${caller} · ${date}` : caller;
-}
-
 function FilterBar({ filters, setFilters, shown, total }) {
   const set = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
   return (
@@ -54,13 +47,12 @@ function FilterBar({ filters, setFilters, shown, total }) {
         placeholder="Search contact…"
       />
       <DateWindowFilter label="Last activity" value={filters.activity} onChange={(v) => set("activity", v)} />
-      <DateWindowFilter label="Discovered" value={filters.discovered} onChange={(v) => set("discovered", v)} />
       <FilterCount shown={shown} total={total} />
     </div>
   );
 }
 
-const EMPTY_FILTERS = { name: "", contact: "", activity: "any", discovered: "any" };
+const EMPTY_FILTERS = { name: "", contact: "", activity: "any" };
 
 export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalScrolls = false }) {
   const gridRef = useRef(null);
@@ -80,14 +72,13 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
   /* Filtered client-side rather than through AG Grid's own filter model or
      a server round trip: this endpoint already returns every confirmed
      site the viewer can see in one payload, so there's nothing to fetch,
-     and four plain controls are easier to reason about than four column
-     filter instances. */
+     and plain controls are easier to reason about than column filter
+     instances. */
   const filtered = useMemo(() => {
     if (!rows) return null;
     const name = filters.name.trim().toLowerCase();
     const contact = filters.contact.trim().toLowerCase();
     const activityWindow = windowFor(filters.activity);
-    const discoveredWindow = windowFor(filters.discovered);
 
     return rows.filter((s) => {
       if (name && !siteSearchText(s).includes(name)) return false;
@@ -98,7 +89,6 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
         if (!hit) return false;
       }
       if (!activityWindow.test(daysAgo(s.last_activity_at))) return false;
-      if (!discoveredWindow.test(daysAgo(s.discovered_from_call_date))) return false;
       return true;
     });
   }, [rows, filters]);
@@ -178,35 +168,6 @@ export function SitesGrid({ rows, onOpenSite, innerScrolls = false, horizontalSc
         wrapText: !horizontalScrolls,
         autoHeight: !horizontalScrolls,
       });
-      cols.push(
-        {
-          headerName: "Discovered",
-          colId: "discovered",
-          flex: 1.2,
-          minWidth: 140,
-          cellClass: "sbm-scol-discovered",
-          valueGetter: (p) => discoveredLabel(p.data ?? {}),
-          valueFormatter: (p) => p.value || "—",
-        },
-        {
-          headerName: "Target closure",
-          colId: "target",
-          width: 130,
-          suppressSizeToFit: true,
-          cellClass: (p) => {
-            const iso = p.data?.target_closure_date;
-            const missed = iso && daysUntil(iso) < 0;
-            return missed ? "sbm-scol-target sbm-missed" : "sbm-scol-target";
-          },
-          valueGetter: (p) => p.data?.target_closure_date ?? "",
-          valueFormatter: (p) => {
-            if (!p.value) return "—";
-            const overdue = daysUntil(p.value) < 0;
-            return overdue ? `${fmtShort(p.value)} · missed ${Math.abs(daysUntil(p.value))}d` : fmtShort(p.value);
-          },
-          comparator: (a, b) => (a || "").localeCompare(b || ""),
-        }
-      );
     }
     return cols;
   }, [narrow, horizontalScrolls]);
