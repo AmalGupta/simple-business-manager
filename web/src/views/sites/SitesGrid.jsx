@@ -149,37 +149,31 @@ export function SitesGrid({ rows, onOpenSite, onOpenTodos, innerScrolls = false,
       {
         headerName: "Open",
         colId: "open",
-        width: 84,
+        width: 92,
         suppressSizeToFit: true,
         cellClass: "sbm-scol-open",
         valueGetter: (p) => p.data?.open_count ?? 0,
+        /* Clicks are handled in onCellClicked — AG Grid's onRowClicked still
+           fires for cellRenderer buttons even with stopPropagation, so the
+           Open cell must not rely on a nested button alone. */
         cellRenderer: (p) => {
           const count = p.data?.open_count ?? 0;
-          if (!p.data || !onOpenTodos) return String(count);
+          if (!p.data) return String(count);
+          if (!onOpenTodos) return String(count);
           return (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenTodos(p.data);
-              }}
-              aria-label={`${count} open items for ${p.data.name}`}
+            <span
+              data-sbm-open-todos="1"
               style={{
-                border: 0,
-                background: "none",
-                padding: 0,
-                margin: 0,
-                font: "inherit",
                 fontVariantNumeric: "tabular-nums",
                 color: count > 0 ? "var(--color-accent)" : "var(--color-slate)",
                 fontWeight: count > 0 ? 700 : 400,
-                cursor: "pointer",
-                textDecoration: count > 0 ? "underline" : "none",
+                textDecoration: "underline",
                 textUnderlineOffset: 3,
+                cursor: "pointer",
               }}
             >
               {count}
-            </button>
+            </span>
           );
         },
       },
@@ -214,8 +208,22 @@ export function SitesGrid({ rows, onOpenSite, onOpenTodos, innerScrolls = false,
   /* onOpenSite takes the site NAME, not the id — the view state machine in
      Dashboard.jsx keys the site drilldown by name. getRowId still uses id,
      which is what AG Grid needs to be stable. */
+  const onCellClicked = useCallback(
+    (event) => {
+      if (event.colDef?.colId !== "open") return;
+      if (!onOpenTodos || !event.data) return;
+      event.event?.preventDefault?.();
+      event.event?.stopPropagation?.();
+      onOpenTodos(event.data);
+    },
+    [onOpenTodos]
+  );
+
   const onRowClicked = useCallback(
     (event) => {
+      const target = event.event?.target;
+      if (typeof target?.closest === "function" && target.closest("[data-sbm-open-todos]")) return;
+      if (event.column?.getColId?.() === "open") return;
       if (event.data?.name) onOpenSite(event.data.name);
     },
     [onOpenSite]
@@ -260,6 +268,7 @@ export function SitesGrid({ rows, onOpenSite, onOpenTodos, innerScrolls = false,
               defaultColDef={defaultColDef}
               getRowId={getRowId}
               rowSelection={{ mode: "singleRow", checkboxes: false, enableClickSelection: true }}
+              onCellClicked={onCellClicked}
               onRowClicked={onRowClicked}
               onGridReady={onGridReady}
               onGridSizeChanged={onGridSizeChanged}
