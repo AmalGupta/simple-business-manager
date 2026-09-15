@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
 import { t } from "../../theme.js";
 import { fmtShort, fmtDate, isUrgent } from "../../lib/dates.js";
-import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE, TILE_ROW_STYLE } from "../../styles.js";
+import { SMALL_SECONDARY_BUTTON_STYLE, TILE_ROW_STYLE } from "../../styles.js";
 import { fetchSiteOpenTodos, postTodoVoiceNote, refreshConfirmedSites } from "../../lib/api.js";
+import { TodoRow } from "../../components/TodoRow.jsx";
 import { TodoAssignControl } from "../calls/TodoAssignControl.jsx";
 import { TodoVoiceNoteButton } from "../../components/TodoVoiceNoteButton.jsx";
 import { siteDisplayName } from "./sitesGridChrome.jsx";
 
-/* Popup from the confirmed-sites Open count — open call todos for one site,
-   newest first. Mark done / assign / voice note reuse the same APIs as
-   Calls needing action; assign already writes site_edits for Site details. */
+/* Popup from the confirmed-sites Open count — the same open call todos that
+   make up open_count, newest first. Mark done / assign / voice note match
+   the Open todos / Calls needing action patterns; assign already writes
+   site_edits for Site details. */
 export function SiteOpenTodosPopup({
   site,
   staffRoster,
@@ -21,7 +23,7 @@ export function SiteOpenTodosPopup({
 }) {
   const [items, setItems] = useState(null);
   const [voiceNotesByTodoId, setVoiceNotesByTodoId] = useState(() => new Map());
-  const [busyId, setBusyId] = useState(null);
+  const [busyIds, setBusyIds] = useState(() => new Set());
 
   const reload = useCallback(() => {
     if (!site?.id) return Promise.resolve();
@@ -46,15 +48,19 @@ export function SiteOpenTodosPopup({
     await onChanged();
   }, [onChanged]);
 
-  const markDone = async (todo) => {
-    setBusyId(todo.id);
+  const toggle = async (todo) => {
+    setBusyIds((s) => new Set(s).add(todo.id));
     try {
       await onToggleTodo(todo);
       await Promise.all([reload(), refreshDirectory()]);
     } catch (err) {
-      console.error("[sbm] failed to mark todo done", err);
+      console.error("[sbm] failed to toggle site open todo", err);
     } finally {
-      setBusyId(null);
+      setBusyIds((s) => {
+        const next = new Set(s);
+        next.delete(todo.id);
+        return next;
+      });
     }
   };
 
@@ -124,55 +130,39 @@ export function SiteOpenTodosPopup({
           items.map((todo) => {
             const dateIso = todo.recording_date || todo.recorded_at;
             const urgent = isUrgent(todo);
-            const busy = busyId === todo.id;
             return (
-              <div key={todo.id} style={{ ...TILE_ROW_STYLE, flexDirection: "column", alignItems: "stretch", gap: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 14, color: t.edge, fontWeight: 500, lineHeight: 1.4 }}>{todo.text}</div>
-                    <div style={{ fontSize: 12, color: t.edge2, marginTop: 4, lineHeight: 1.4 }}>
-                      {todo.owner === "self" ? "Self" : todo.owner}
-                      {todo.due_date && (
-                        <span style={{ color: urgent ? t.signal : "inherit", fontWeight: urgent ? 700 : 400 }}>
-                          {" "}
-                          · due {fmtShort(todo.due_date)}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 12, color: t.edge2, marginTop: 2 }}>
-                      {todo.client_name}
-                      {dateIso ? ` · ${fmtDate(dateIso)}` : ""}
-                    </div>
+              <div key={todo.id} style={{ ...TILE_ROW_STYLE, display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch" }}>
+                <TodoRow todo={todo} urgent={urgent} onToggle={toggle} busy={busyIds.has(todo.id)} showDue />
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "stretch",
+                    gap: 8,
+                    paddingLeft: 28,
+                    minWidth: 0,
+                  }}
+                >
+                  <div style={{ fontSize: 13, color: t.edge2 }}>
+                    {todo.client_name}
+                    {dateIso ? ` · ${fmtDate(dateIso)}` : ""}
+                    {todo.owner ? ` · owner ${todo.owner === "self" ? "Self" : todo.owner}` : ""}
+                    {todo.due_date ? ` · due ${fmtShort(todo.due_date)}` : ""}
                   </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => markDone(todo)}
-                    style={{
-                      ...PRIMARY_BUTTON_STYLE,
-                      minHeight: 34,
-                      padding: "0 12px",
-                      fontSize: 12,
-                      flexShrink: 0,
-                      opacity: busy ? 0.6 : 1,
-                    }}
-                  >
-                    {busy ? "Saving…" : "Mark done"}
-                  </button>
+                  <TodoAssignControl
+                    todo={todo}
+                    staffRoster={staffRoster}
+                    currentUser={currentUser}
+                    onAssign={assign}
+                    extraActions={
+                      <TodoVoiceNoteButton
+                        todoId={todo.id}
+                        existingNote={voiceNotesByTodoId.get(todo.id)}
+                        onUpload={addVoiceNote}
+                      />
+                    }
+                  />
                 </div>
-                <TodoAssignControl
-                  todo={todo}
-                  staffRoster={staffRoster}
-                  currentUser={currentUser}
-                  onAssign={assign}
-                  extraActions={
-                    <TodoVoiceNoteButton
-                      todoId={todo.id}
-                      existingNote={voiceNotesByTodoId.get(todo.id)}
-                      onUpload={addVoiceNote}
-                    />
-                  }
-                />
               </div>
             );
           })
