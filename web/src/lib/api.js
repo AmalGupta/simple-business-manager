@@ -693,9 +693,7 @@ export async function fetchSiteTasks(siteId) {
 
 /** Open call todos for one site — confirmed-sites Open-count popup. */
 export async function fetchSiteOpenTodos(siteId) {
-  const res = await fetch(`/api/sites/${siteId}/open-todos`, { credentials: "same-origin" });
-  if (!res.ok) throw new Error(`GET /api/sites/${siteId}/open-todos → ${res.status}`);
-  const data = await res.json();
+  const data = await fetchJSON(`/api/sites/${siteId}/open-todos`);
   const notes = data.voice_notes_by_todo_id ?? {};
   return {
     items: data.items ?? [],
