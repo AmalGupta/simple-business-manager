@@ -24,9 +24,11 @@ export function SiteOpenTodosPopup({
   const [items, setItems] = useState(null);
   const [voiceNotesByTodoId, setVoiceNotesByTodoId] = useState(() => new Map());
   const [busyIds, setBusyIds] = useState(() => new Set());
+  const [loadError, setLoadError] = useState("");
 
   const reload = useCallback(() => {
     if (!site?.id) return Promise.resolve();
+    setLoadError("");
     return fetchSiteOpenTodos(site.id)
       .then(({ items: next, voiceNotesByTodoId: notes }) => {
         setItems(next);
@@ -36,6 +38,7 @@ export function SiteOpenTodosPopup({
         console.error("[sbm] failed to load site open todos", err);
         setItems([]);
         setVoiceNotesByTodoId(new Map());
+        setLoadError(err.message || "Failed to load open items.");
       });
   }, [site?.id]);
 
@@ -124,6 +127,8 @@ export function SiteOpenTodosPopup({
 
         {items === null ? (
           <p style={{ fontSize: 13, color: t.edge2 }}>Loading…</p>
+        ) : loadError ? (
+          <p style={{ fontSize: 13, color: t.signal, margin: "8px 0" }}>{loadError}</p>
         ) : items.length === 0 ? (
           <p style={{ fontSize: 13, color: t.edge2, margin: "8px 0" }}>No open items for this site.</p>
         ) : (
