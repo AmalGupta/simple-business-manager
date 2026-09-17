@@ -657,6 +657,27 @@ export async function resolveCall(callId) {
   return res.json();
 }
 
+/** CNA — suggested sites for Assign to Site (contact → caller_sites). */
+export async function fetchTodoAssignSiteOptions(todoId) {
+  return fetchJSON(`/api/todos/${todoId}/assign-site`);
+}
+
+/**
+ * Assign site to a todo (and parent call). associateContact also writes caller_sites.
+ */
+export async function assignTodoSite(todoId, siteId, { associateContact = false } = {}) {
+  const res = await fetch(`/api/todos/${todoId}/assign-site`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ site_id: siteId, associate_contact: associateContact }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/todos/${todoId}/assign-site → ${res.status}`);
+  }
+  return res.json();
+}
+
 /** Calls resolved from Calls Needing Action — Resolved Calls home tile / grid. */
 export async function fetchResolvedCalls(limit = 500) {
   const data = await fetchJSON(`/api/calls/resolved?limit=${limit}`);
