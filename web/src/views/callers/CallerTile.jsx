@@ -10,7 +10,7 @@ export function CallerTile({ count, onOpen }) {
   return (
     <button
       onClick={onOpen}
-      style={{ all: "unset", cursor: "pointer", display: "block" }}
+      style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", height: "100%" }}
       aria-label={`Contacts — ${count} saved and unsaved`}
     >
       <Card tile>
