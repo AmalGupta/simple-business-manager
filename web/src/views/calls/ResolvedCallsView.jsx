@@ -1,42 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AgGridReact } from "ag-grid-react";
-import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
 import { t } from "../../theme.js";
 import { fmtDate } from "../../lib/dates.js";
 import { fetchResolvedCalls } from "../../lib/api.js";
 import { BackLink } from "../../components/BackLink.jsx";
 import { Card } from "../../components/Card.jsx";
-
-ModuleRegistry.registerModules([AllCommunityModule]);
-
-const GRID_CSS = `
-.sbm-resolved-calls-grid.ag-theme-quartz {
-  --ag-font-family: var(--font-body), system-ui, sans-serif;
-  --ag-font-size: 13px;
-  --ag-background-color: var(--color-surface);
-  --ag-header-background-color: #DCE6FF;
-  --ag-odd-row-background-color: var(--color-surface);
-  --ag-even-row-background-color: color-mix(in srgb, #DCE6FF 35%, white);
-  --ag-border-color: var(--color-line);
-  --ag-row-border-color: var(--color-line-soft);
-  --ag-header-foreground-color: var(--color-ink);
-  --ag-foreground-color: var(--color-ink);
-  --ag-header-height: 42px;
-  --ag-row-height: 48px;
-  width: 100%;
-  height: 100%;
-  min-height: 320px;
-}
-.sbm-resolved-calls-grid .ag-header-cell-label {
-  font-family: var(--font-label), system-ui, sans-serif;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 11px;
-}
-`;
+import { AgGridPage, AgGridShell } from "../../components/ag-grid/AgGridShell.jsx";
 
 function fmtCellDate(value) {
   if (!value) return "—";
@@ -50,6 +18,9 @@ function fmtCellDate(value) {
 /**
  * Admin list of calls resolved from Calls Needing Action — AG Grid rows,
  * newest resolve first. Row click opens call detail via onOpenCall.
+ *
+ * Height / scroll follows Site customization (inner_scrolls) via AgGridShell —
+ * do not add local height:100% CSS here.
  */
 export function ResolvedCallsView({ onBack, onOpenCall, innerScrolls = false }) {
   const [rows, setRows] = useState([]);
@@ -131,20 +102,13 @@ export function ResolvedCallsView({ onBack, onOpenCall, innerScrolls = false }) 
   );
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: 12,
-        height: innerScrolls ? "100%" : undefined,
-        minHeight: innerScrolls ? 0 : undefined,
-      }}
-    >
-      <style>{GRID_CSS}</style>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+    <AgGridPage innerScrolls={innerScrolls}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <BackLink onClick={onBack}>Back</BackLink>
         <h1 style={{ margin: 0, fontFamily: t.display, fontSize: 22, fontWeight: 500 }}>Resolved Calls</h1>
-        <span style={{ fontSize: 13, color: t.edge2 }}>{loading ? "Loading…" : `${rows.length} call${rows.length === 1 ? "" : "s"}`}</span>
+        <span style={{ fontSize: 13, color: t.edge2 }}>
+          {loading ? "Loading…" : `${rows.length} call${rows.length === 1 ? "" : "s"}`}
+        </span>
       </div>
 
       {error ? (
@@ -152,25 +116,17 @@ export function ResolvedCallsView({ onBack, onOpenCall, innerScrolls = false }) 
           <p style={{ margin: 0, color: t.signal, fontSize: 14 }}>{error}</p>
         </Card>
       ) : (
-        <div
-          className="sbm-resolved-calls-grid ag-theme-quartz"
-          style={{
-            flex: innerScrolls ? "1 1 auto" : undefined,
-            minHeight: innerScrolls ? 0 : 420,
-          }}
-        >
-          <AgGridReact
-            rowData={rows}
-            columnDefs={columnDefs}
-            defaultColDef={{ sortable: true, resizable: true, filter: true }}
-            animateRows={false}
-            suppressCellFocus
-            onRowClicked={onRowClicked}
-            getRowId={(p) => p.data.id}
-            overlayNoRowsTemplate={loading ? "Loading…" : "No resolved calls yet"}
-          />
-        </div>
+        <AgGridShell
+          innerScrolls={innerScrolls}
+          clickableRows
+          className="sbm-resolved-calls-grid"
+          rowData={rows}
+          columnDefs={columnDefs}
+          onRowClicked={onRowClicked}
+          getRowId={(p) => p.data.id}
+          overlayNoRowsTemplate={loading ? "Loading…" : "No resolved calls yet"}
+        />
       )}
-    </div>
+    </AgGridPage>
   );
 }
