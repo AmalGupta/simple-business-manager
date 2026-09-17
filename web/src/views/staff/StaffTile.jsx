@@ -11,7 +11,7 @@ export function StaffTile({ count, onOpen }) {
   return (
     <button
       onClick={onOpen}
-      style={{ all: "unset", cursor: "pointer", display: "block" }}
+      style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", height: "100%" }}
       aria-label={`Staff — ${count} people`}
     >
       <Card tile>

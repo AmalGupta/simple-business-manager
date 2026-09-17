@@ -65,6 +65,7 @@ import {
   defaultCallsNeedingActionWindow,
   postSiteInstallation,
   patchMyCustomization,
+  fetchMaterialShortages,
 } from "./lib/api.js";
 
 /** Fresh checklist title when skipping the instance list (field staff). */
@@ -102,6 +103,7 @@ export default function SimpleBusinessManager() {
   const [openSiteTasks, setOpenSiteTasks] = useState([]);
   const [myOpenTodos, setMyOpenTodos] = useState([]);
   const [complaintsRefreshKey, setComplaintsRefreshKey] = useState(0);
+  const [materialShortCount, setMaterialShortCount] = useState(0);
   const [view, setView] = useState({ name: "home" });
   const [busyIds, setBusyIds] = useState(new Set());
 
@@ -222,6 +224,25 @@ export default function SimpleBusinessManager() {
       console.error("[sbm] failed to prefetch calls needing action", err)
     );
 
+    return () => {
+      cancelled = true;
+    };
+  }, [me]);
+
+  useEffect(() => {
+    if (!me || (me.role !== "admin" && me.role !== "superadmin")) {
+      setMaterialShortCount(0);
+      return;
+    }
+    let cancelled = false;
+    fetchMaterialShortages("open")
+      .then((rows) => {
+        if (!cancelled) setMaterialShortCount(rows.length);
+      })
+      .catch((err) => {
+        console.error("[sbm] failed to load material shortages", err);
+        if (!cancelled) setMaterialShortCount(0);
+      });
     return () => {
       cancelled = true;
     };
@@ -498,7 +519,7 @@ export default function SimpleBusinessManager() {
         node: (
           <button
             onClick={() => setView({ name: "calls" })}
-            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
+            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", height: "100%" }}
             aria-label={`Calls logged — ${callsCount}`}
           >
             <Card tile>
@@ -543,10 +564,17 @@ export default function SimpleBusinessManager() {
         id: "callers",
         node: <CallerTile count={callersCount} onOpen={() => setView({ name: "callers-directory" })} />,
       });
-      items.push({
-        id: "material-shortages",
-        node: <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />,
-      });
+      if (materialShortCount > 0) {
+        items.push({
+          id: "material-shortages",
+          node: (
+            <MaterialShortagesTile
+              count={materialShortCount}
+              onOpen={() => setView({ name: "material-shortages" })}
+            />
+          ),
+        });
+      }
       items.push({
         id: "calls-needing-action",
         node: (
@@ -564,7 +592,7 @@ export default function SimpleBusinessManager() {
         node: (
           <button
             onClick={() => setView({ name: "my-open-todos", from: { name: "home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
+            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", height: "100%" }}
             aria-label={`My call tasks — ${myOpenTodos.length} open`}
           >
             <Card tile>
@@ -607,7 +635,7 @@ export default function SimpleBusinessManager() {
       node: (
         <button
           onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
-          style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
+          style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", height: "100%" }}
           aria-label={`Open today — ${openToday}`}
         >
           <StatCard value={openToday} label="open today" />
@@ -621,7 +649,7 @@ export default function SimpleBusinessManager() {
         node: (
           <button
             onClick={() => setView({ name: "parked-todos", from: { name: "home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
+            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", height: "100%" }}
             aria-label={`Parked — ${parkedCount}`}
           >
             <StatCard value={parkedCount} label="parked" />
@@ -643,6 +671,7 @@ export default function SimpleBusinessManager() {
     staffRoster.length,
     callersCount,
     callsNeedingActionCount,
+    materialShortCount,
     myOpenTodos.length,
     complaintsRefreshKey,
     openSiteTasks,
