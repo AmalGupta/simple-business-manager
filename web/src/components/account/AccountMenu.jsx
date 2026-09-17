@@ -28,9 +28,11 @@ export function AccountMenu({
   }));
   const [busyKey, setBusyKey] = useState(null);
   const [error, setError] = useState("");
+  const [resettingTiles, setResettingTiles] = useState(false);
   const containerRef = useRef(null);
 
   const canCustomize = me?.role === "admin" || me?.role === "superadmin";
+  const hasCustomTileOrder = Array.isArray(customization?.home_tile_order) && customization.home_tile_order.length > 0;
 
   useEffect(() => {
     setValues({
@@ -97,6 +99,25 @@ export function AccountMenu({
       setError("Failed to save — try again.");
     } finally {
       setBusyKey(null);
+    }
+  };
+
+  const resetHomeTileOrder = async () => {
+    if (!canCustomize || resettingTiles) return;
+    setResettingTiles(true);
+    setError("");
+    try {
+      const data = await patchMyCustomization({ home_tile_order: null });
+      const resolved = data.customization ?? {
+        ...values,
+        home_tile_order: null,
+      };
+      onCustomizationChange?.(resolved);
+    } catch (err) {
+      console.error("[sbm] failed to reset home tile order", err);
+      setError("Failed to reset tile order — try again.");
+    } finally {
+      setResettingTiles(false);
     }
   };
 
@@ -240,6 +261,18 @@ export function AccountMenu({
       ) : null}
       {scrollToggle("inner_scrolls", "Vertical scroll")}
       {scrollToggle("horizontal_scrolls", "Horizontal scroll")}
+      <button
+        role="menuitem"
+        onClick={resetHomeTileOrder}
+        disabled={!hasCustomTileOrder || resettingTiles}
+        style={{
+          ...menuItemStyle,
+          opacity: !hasCustomTileOrder || resettingTiles ? 0.45 : 1,
+          cursor: !hasCustomTileOrder || resettingTiles ? "default" : "pointer",
+        }}
+      >
+        {resettingTiles ? "Resetting…" : "Reset home tile order"}
+      </button>
     </>
   );
 
