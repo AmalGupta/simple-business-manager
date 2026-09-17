@@ -23,6 +23,8 @@ import {
   resolveCustomization,
   canSetCustomizationKey,
   encodeCustomizationBool,
+  validateHomeTileOrderValue,
+  getCustomizationPref,
   CUSTOMIZATION_PREFS,
   revokeAllSessionsForUser,
   revokeSession,
@@ -208,6 +210,7 @@ export async function handlePatchCustomization(request: Request, env: Env): Prom
   if (keys.length === 0) return json({ error: "no preferences provided" }, 400);
 
   const known = new Set(CUSTOMIZATION_PREFS.map((p) => p.key));
+  const encoded: Record<string, string> = {};
   for (const key of keys) {
     if (!known.has(key as CustomizationKey)) {
       return json({ error: `unknown preference: ${key}` }, 400);
@@ -215,13 +218,26 @@ export async function handlePatchCustomization(request: Request, env: Env): Prom
     if (!canSetCustomizationKey(session.user_role, key)) {
       return json({ error: "forbidden" }, 403);
     }
-    if (typeof record[key] !== "boolean") {
-      return json({ error: `${key} must be a boolean` }, 400);
+    const pref = getCustomizationPref(key);
+    if (!pref) {
+      return json({ error: `unknown preference: ${key}` }, 400);
+    }
+    if (pref.kind === "boolean") {
+      if (typeof record[key] !== "boolean") {
+        return json({ error: `${key} must be a boolean` }, 400);
+      }
+      encoded[key] = encodeCustomizationBool(record[key] as boolean);
+    } else if (pref.kind === "string_array" && pref.key === "home_tile_order") {
+      const result = validateHomeTileOrderValue(record[key]);
+      if (!result.ok) return json({ error: result.error }, 400);
+      encoded[key] = result.encoded;
+    } else {
+      return json({ error: `unsupported preference: ${key}` }, 400);
     }
   }
 
   for (const key of keys) {
-    await setUserSetting(env.DB, session.user_id, key, encodeCustomizationBool(record[key] as boolean));
+    await setUserSetting(env.DB, session.user_id, key, encoded[key]);
   }
 
   const rows = await listUserSettings(env.DB, session.user_id);
