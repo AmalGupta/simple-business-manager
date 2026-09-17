@@ -19,6 +19,7 @@ import {
   getCallsNeedingAction,
   getCallsNeedingActionCalendar,
   countCallsNeedingAction,
+  listResolvedCalls,
   CALLS_NEEDING_ACTION_MAX_LIMIT,
   getCallWithTodos,
   getCallerById,
@@ -259,6 +260,16 @@ export async function handleResolveCall(request: Request, env: Env, callId: stri
   const call = await getCallWithTodos(env.DB, callId);
   if (!call) return json({ error: "not found" }, 404);
   return json(call);
+}
+
+/** Resolved Calls home tile / AG Grid — admin ack history. */
+export async function handleListResolvedCalls(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const url = new URL(request.url);
+  const limitRaw = Number(url.searchParams.get("limit") ?? "500");
+  const limit = Number.isFinite(limitRaw) ? limitRaw : 500;
+  return json({ items: await listResolvedCalls(env.DB, limit) });
 }
 
 /** Home-page "Calls logged" tile — total row count, including low_signal calls the feed itself never shows a card for. */

@@ -3,8 +3,10 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { t } from "../../theme.js";
 import { today, isoDate, todayIso, addDaysIso, fmtShort } from "../../lib/dates.js";
 import { BackLink } from "../../components/BackLink.jsx";
+import { Modal } from "../../components/Modal.jsx";
 import { StreakWall } from "./StreakWall.jsx";
 import { CallActionCard } from "./CallActionCard.jsx";
+import { PRIMARY_BUTTON_STYLE } from "../../styles.js";
 import {
   CNA_LOOKBACK_DAYS,
   CNA_WINDOW_DAYS,
@@ -154,6 +156,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   const [opening, setOpening] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [error, setError] = useState("");
+  const [resolveAckOpen, setResolveAckOpen] = useState(false);
   const [voiceNotesByTodoId, setVoiceNotesByTodoId] = useState(
     () => getCachedCallsNeedingAction(defaultCallsNeedingActionWindow())?.voiceNotesByTodoId ?? new Map()
   );
@@ -634,6 +637,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     }
     setLookbackTotal((n) => (typeof n === "number" ? Math.max(0, n - 1) : n));
     onResolved?.();
+    setResolveAckOpen(true);
     resyncDefaultWindow();
   };
 
@@ -783,6 +787,22 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
             <ChevronRight size={16} />
           </button>
         </div>
+      )}
+
+      {resolveAckOpen && (
+        <Modal
+          title="Call resolved"
+          label="Call resolved"
+          onClose={() => setResolveAckOpen(false)}
+          width={400}
+        >
+          <p style={{ margin: 0, fontSize: 14, color: t.edge, lineHeight: 1.45 }}>
+            Call resolved. You can view it in the Resolved Calls homepage tile.
+          </p>
+          <button type="button" onClick={() => setResolveAckOpen(false)} style={{ ...PRIMARY_BUTTON_STYLE, alignSelf: "flex-end" }}>
+            OK
+          </button>
+        </Modal>
       )}
     </div>
   );

@@ -657,6 +657,12 @@ export async function resolveCall(callId) {
   return res.json();
 }
 
+/** Calls resolved from Calls Needing Action — Resolved Calls home tile / grid. */
+export async function fetchResolvedCalls(limit = 500) {
+  const data = await fetchJSON(`/api/calls/resolved?limit=${limit}`);
+  return data.items ?? [];
+}
+
 /** Quick raw-audio clip attached to one todo row — no transcription, unlike postSiteVoiceNote. */
 export async function postTodoVoiceNote(todoId, blob, fileName) {
   const fd = new FormData();
