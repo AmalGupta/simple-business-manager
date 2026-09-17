@@ -58,32 +58,23 @@ function sameIdList(a, b) {
   return true;
 }
 
-function visibleKey(ids) {
-  return ids.join("\0");
-}
-
 /**
  * Admin home tile grid with phone-style reorder via a top-right grip.
- *
- * Display order is local-first after mount: dropping does not re-apply
- * `savedOrder` (that was flashing the pre-drag layout while the PATCH
- * round-tripped). `savedOrder` is only used to seed, to reconcile when the
- * visible tile set changes, and when the user resets order in settings.
+ * Any `{ id, node }` item is rearrangeable — not limited to today's catalog.
+ * On drop, persists a full preference (including currently hidden tile ids)
+ * so when tiles appear/disappear the user's relative order is restored.
  */
 export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangeable = true }) {
   const visibleIds = useMemo(() => items.map((i) => i.id), [items]);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const defaultOrder = useMemo(() => buildDefaultHomeTileOrder(visibleIds, DEFAULT_HOME_TILE_ORDER), [visibleIds]);
-  const visKey = visibleKey(visibleIds);
 
-  const seed = useMemo(
+  const resolved = useMemo(
     () => mergeHomeTileOrder(savedOrder, visibleIds, defaultOrder),
-    // Seed once per visible-set; intentional — do not re-seed on every savedOrder write.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [visKey],
+    [savedOrder, visibleIds, defaultOrder],
   );
 
-  const [order, setOrder] = useState(seed);
+  const [order, setOrder] = useState(resolved);
   const [draggingId, setDraggingId] = useState(null);
 
   const cellRefs = useRef(new Map());
@@ -91,37 +82,30 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
   const prevRectsRef = useRef(new Map());
   const dragRef = useRef(null);
   const orderRef = useRef(order);
-  const savedOrderRef = useRef(savedOrder);
   const suppressClickUntilRef = useRef(0);
+  /** After a successful drop, ignore stale `resolved` until savedOrder catches up. */
+  const pendingFullOrderRef = useRef(null);
   const listenersRef = useRef(null);
-  const skipFlipRef = useRef(false);
   orderRef.current = order;
-  savedOrderRef.current = savedOrder;
 
-  /* Visible tiles appeared/disappeared — reconcile, keeping relative order. */
   useEffect(() => {
-    setOrder((prev) => {
-      const next = mergeHomeTileOrder(
-        persistHomeTileOrder(savedOrderRef.current, prev, defaultOrder),
-        visibleIds,
-        defaultOrder,
-      );
-      return sameIdList(prev, next) ? prev : next;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visKey]);
+    if (draggingId) return;
 
-  /* Account menu "Reset home tile order" clears the preference. */
-  const savedKey = Array.isArray(savedOrder) && savedOrder.length ? savedOrder.join("\0") : "";
-  const prevSavedKeyRef = useRef(savedKey);
-  useEffect(() => {
-    const prevKey = prevSavedKeyRef.current;
-    prevSavedKeyRef.current = savedKey;
-    if (prevKey && !savedKey) {
-      skipFlipRef.current = true;
-      setOrder(mergeHomeTileOrder(null, visibleIds, defaultOrder));
+    const pending = pendingFullOrderRef.current;
+    if (pending) {
+      const fromSaved = mergeHomeTileOrder(savedOrder, visibleIds, defaultOrder);
+      if (sameIdList(savedOrder, pending) || sameIdList(fromSaved, orderRef.current)) {
+        pendingFullOrderRef.current = null;
+        if (!sameIdList(orderRef.current, fromSaved)) setOrder(fromSaved);
+        return;
+      }
+      /* Parent has not applied the optimistic save yet — keep local order
+         so we do not flash back to the pre-drag layout. */
+      return;
     }
-  }, [savedKey, visibleIds, defaultOrder]);
+
+    setOrder((prev) => (sameIdList(prev, resolved) ? prev : resolved));
+  }, [resolved, draggingId, savedOrder, visibleIds, defaultOrder]);
 
   const setCellRef = useCallback((id, el) => {
     if (el) cellRefs.current.set(id, el);
@@ -133,31 +117,16 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
     else innerRefs.current.delete(id);
   }, []);
 
-  const baselineRects = useCallback(() => {
-    const next = new Map();
-    for (const id of orderRef.current) {
-      const el = cellRefs.current.get(id);
-      if (el) next.set(id, el.getBoundingClientRect());
-    }
-    prevRectsRef.current = next;
-  }, []);
-
   const clearInnerTransforms = useCallback(() => {
     for (const inner of innerRefs.current.values()) {
-      inner.style.transition = "none";
       inner.style.transform = "";
+      inner.style.transition = "";
     }
   }, []);
 
-  /* FLIP only when `order` changes — not when draggingId toggles (that was
-     animating a bogus invert after drop and looked like a layout flash). */
+  /* FLIP on the inner wrapper so React style updates on the cell don't
+     clear the sliding transform mid-animation. */
   useLayoutEffect(() => {
-    if (skipFlipRef.current) {
-      skipFlipRef.current = false;
-      baselineRects();
-      return;
-    }
-
     const nextRects = new Map();
     for (const id of order) {
       const el = cellRefs.current.get(id);
@@ -165,7 +134,7 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
       nextRects.set(id, el.getBoundingClientRect());
     }
 
-    if (!prefersReducedMotion() && prevRectsRef.current.size > 0) {
+    if (!prefersReducedMotion()) {
       for (const id of order) {
         const inner = innerRefs.current.get(id);
         const prev = prevRectsRef.current.get(id);
@@ -173,46 +142,21 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
         if (!inner || !prev || !next) continue;
         const dx = prev.left - next.left;
         const dy = prev.top - next.top;
-        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-        const lift = id === dragRef.current?.id ? " scale(1.03)" : "";
+        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
+          if (id === draggingId) inner.style.transform = "scale(1.03)";
+          continue;
+        }
+        const lift = id === draggingId ? " scale(1.03)" : "";
         inner.style.transition = "none";
         inner.style.transform = `translate(${dx}px, ${dy}px)${lift}`;
         void inner.offsetWidth;
         inner.style.transition = `transform ${LAYOUT_MS}ms cubic-bezier(.22,.61,.36,1)`;
-        inner.style.transform = id === dragRef.current?.id ? "scale(1.03)" : "";
+        inner.style.transform = id === draggingId ? "scale(1.03)" : "";
       }
     }
 
     prevRectsRef.current = nextRects;
-  }, [order, baselineRects]);
-
-  /* Lift style for the active tile without going through FLIP. */
-  useLayoutEffect(() => {
-    for (const [id, inner] of innerRefs.current.entries()) {
-      if (!inner) continue;
-      if (id === draggingId) {
-        if (!inner.style.transform || inner.style.transform === "none") {
-          inner.style.transition = "transform 120ms ease";
-          inner.style.transform = "scale(1.03)";
-        }
-      } else if (!dragRef.current) {
-        /* idle — leave FLIP-owned transforms alone while they animate */
-      }
-    }
-    if (!draggingId) {
-      /* Drop finished: ensure no leftover scale after a tick */
-      const t = window.setTimeout(() => {
-        if (dragRef.current) return;
-        for (const inner of innerRefs.current.values()) {
-          if (inner.style.transform.includes("scale")) {
-            inner.style.transition = `transform ${LAYOUT_MS}ms ease`;
-            inner.style.transform = "";
-          }
-        }
-      }, LAYOUT_MS + 40);
-      return () => window.clearTimeout(t);
-    }
-  }, [draggingId]);
+  }, [order, draggingId]);
 
   const detachDragListeners = useCallback(() => {
     const L = listenersRef.current;
@@ -230,6 +174,7 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
       const state = dragRef.current;
       dragRef.current = null;
       detachDragListeners();
+      clearInnerTransforms();
 
       if (!state) {
         setDraggingId(null);
@@ -239,22 +184,18 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
       if (commit && state.moved) {
         suppressClickUntilRef.current = Date.now() + 400;
         const visibleOrder = orderRef.current.slice();
-        const full = persistHomeTileOrder(savedOrderRef.current, visibleOrder, defaultOrder);
-        /* Keep local order as-is — do not re-seed from savedOrder (flash). */
-        skipFlipRef.current = true;
-        clearInnerTransforms();
-        baselineRects();
+        const full = persistHomeTileOrder(savedOrder, visibleOrder, defaultOrder);
+        pendingFullOrderRef.current = full;
+        setOrder(visibleOrder);
         setDraggingId(null);
         onOrderChange?.(full);
       } else {
-        skipFlipRef.current = true;
-        clearInnerTransforms();
-        baselineRects();
         setDraggingId(null);
-        setOrder(mergeHomeTileOrder(savedOrderRef.current, visibleIds, defaultOrder));
+        pendingFullOrderRef.current = null;
+        setOrder(resolved);
       }
     },
-    [onOrderChange, defaultOrder, visibleIds, detachDragListeners, clearInnerTransforms, baselineRects],
+    [onOrderChange, resolved, savedOrder, defaultOrder, detachDragListeners, clearInnerTransforms],
   );
 
   const indexFromPoint = useCallback((clientX, clientY, currentOrder) => {
@@ -282,6 +223,8 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
       e.preventDefault();
       e.stopPropagation();
 
+      /* Window listeners — not element capture. Reordering remounts/moves the
+         grip mid-drag and would drop setPointerCapture, leaving the tile stuck. */
       detachDragListeners();
 
       dragRef.current = {
@@ -291,37 +234,36 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
         startY: e.clientY,
         moved: false,
       };
-      baselineRects();
       setDraggingId(id);
       document.body.style.userSelect = "none";
       document.body.style.cursor = "grabbing";
 
       const move = (ev) => {
-        const st = dragRef.current;
-        if (!st || ev.pointerId !== st.pointerId) return;
-        const dx = ev.clientX - st.startX;
-        const dy = ev.clientY - st.startY;
-        if (!st.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
-          st.moved = true;
+        const state = dragRef.current;
+        if (!state || ev.pointerId !== state.pointerId) return;
+        const dx = ev.clientX - state.startX;
+        const dy = ev.clientY - state.startY;
+        if (!state.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+          state.moved = true;
         }
-        if (!st.moved) return;
+        if (!state.moved) return;
         const target = indexFromPoint(ev.clientX, ev.clientY, orderRef.current);
         setOrder((prev) => {
-          const next = moveIdToIndex(prev, st.id, target);
+          const next = moveIdToIndex(prev, state.id, target);
           if (next.length === prev.length && next.every((tid, i) => tid === prev[i])) return prev;
           return next;
         });
       };
 
       const up = (ev) => {
-        const st = dragRef.current;
-        if (!st || ev.pointerId !== st.pointerId) return;
+        const state = dragRef.current;
+        if (!state || ev.pointerId !== state.pointerId) return;
         endDrag(true);
       };
 
       const cancel = (ev) => {
-        const st = dragRef.current;
-        if (!st || ev.pointerId !== st.pointerId) return;
+        const state = dragRef.current;
+        if (!state || ev.pointerId !== state.pointerId) return;
         endDrag(false);
       };
 
@@ -330,7 +272,7 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
       window.addEventListener("pointerup", up);
       window.addEventListener("pointercancel", cancel);
     },
-    [arrangeable, detachDragListeners, endDrag, indexFromPoint, baselineRects],
+    [arrangeable, detachDragListeners, endDrag, indexFromPoint],
   );
 
   useEffect(() => () => detachDragListeners(), [detachDragListeners]);

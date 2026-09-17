@@ -496,22 +496,7 @@ export default function SimpleBusinessManager() {
       });
       try {
         const data = await patchMyCustomization({ home_tile_order: nextIds });
-        const resolved = data.customization;
-        if (!resolved) return;
-        /* Skip a no-op setState when the server echoed our optimistic order —
-           that re-render was contributing to a visible intermediate flash. */
-        const prevOrder = nextIds;
-        const nextOrder = resolved.home_tile_order;
-        const sameOrder =
-          Array.isArray(prevOrder) &&
-          Array.isArray(nextOrder) &&
-          prevOrder.length === nextOrder.length &&
-          prevOrder.every((id, i) => id === nextOrder[i]);
-        const sameBools =
-          Boolean(resolved.inner_scrolls) === Boolean(prev?.inner_scrolls) &&
-          Boolean(resolved.horizontal_scrolls) === Boolean(prev?.horizontal_scrolls);
-        if (sameOrder && sameBools) return;
-        onCustomizationChange(resolved);
+        if (data.customization) onCustomizationChange(data.customization);
       } catch (err) {
         console.error("[sbm] failed to save home tile order", err);
         if (prev) onCustomizationChange(prev);
