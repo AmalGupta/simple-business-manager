@@ -1,0 +1,17 @@
+---
+description: AG Grid directory views must use AgGridShell; height follows Site customization scroll attributes.
+alwaysApply: true
+---
+
+# AG Grid display (do not reinvent height)
+
+AG Grid height/scroll is an **application attribute**, not per-view CSS.
+
+- Site customization: `inner_scrolls` / `horizontal_scrolls`
+- Dashboard shell mirrors them as `data-inner-scrolls` / `data-horizontal-scrolls`
+- New full-page grids **must** use:
+  - `AgGridPage` + `AgGridShell` from `web/src/components/ag-grid/AgGridShell.jsx`
+- Pass the same `innerScrolls` boolean Dashboard already threads into views.
+- Do **not** copy `height: 100%` / `min-height` hacks into view-local grid CSS — that collapses the grid to ~0px (seen repeatedly on sites/contacts/resolved).
+
+`AgGridShell` sets `domLayout` from `innerScrolls` (`autoHeight` when off, `normal` when on).
