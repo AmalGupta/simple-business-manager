@@ -238,8 +238,8 @@ export function AccountMenu({
       {error ? (
         <p style={{ margin: 0, padding: "6px 14px", fontSize: 12, color: t.signal }}>{error}</p>
       ) : null}
-      {scrollToggle("inner_scrolls", "Vertical scroll")}
-      {scrollToggle("horizontal_scrolls", "Horizontal scroll")}
+      {scrollToggle("inner_scrolls", "Vertical scroll (incl. grids)")}
+      {scrollToggle("horizontal_scrolls", "Horizontal scroll (incl. grids)")}
     </>
   );
 

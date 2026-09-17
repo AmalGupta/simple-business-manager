@@ -1,0 +1,114 @@
+/*
+  Application AG Grid chrome — sizing is owned here, not per view.
+
+  Driven by Site customization attributes on the Dashboard shell:
+    data-inner-scrolls="0|1"       (customization.inner_scrolls)
+    data-horizontal-scrolls="0|1"  (customization.horizontal_scrolls)
+
+  When Vertical scroll is OFF (default): AgGridShell uses domLayout=autoHeight
+  so the grid grows with rows and the page scrolls. When ON: the wrap claims
+  flex height and the grid scrolls inside (normal layout).
+
+  New directory/list grids MUST use AgGridShell (+ AgGridPage when they are
+  a full Dashboard view). Do not copy height:100% / min-height hacks into
+  view-local CSS — that is how grids collapse to ~0px repeatedly.
+*/
+
+.sbm-ag-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+}
+
+.sbm-ag-grid.ag-theme-quartz {
+  --ag-font-family: var(--font-body), system-ui, sans-serif;
+  --ag-font-size: 13px;
+  --ag-background-color: var(--color-surface);
+  --ag-header-background-color: #dce6ff;
+  --ag-odd-row-background-color: var(--color-surface);
+  --ag-even-row-background-color: color-mix(in srgb, #dce6ff 35%, white);
+  --ag-row-hover-color: color-mix(in srgb, var(--color-accent) 6%, white);
+  --ag-selected-row-background-color: color-mix(in srgb, var(--color-accent) 14%, white);
+  --ag-border-color: var(--color-line);
+  --ag-row-border-color: var(--color-line-soft);
+  --ag-header-foreground-color: var(--color-ink);
+  --ag-foreground-color: var(--color-ink);
+  --ag-secondary-foreground-color: var(--color-slate);
+  --ag-border-radius: 0;
+  --ag-wrapper-border-radius: 0;
+  --ag-cell-horizontal-padding: 12px;
+  --ag-header-height: 42px;
+  --ag-row-height: 48px;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+.sbm-ag-grid .ag-root-wrapper {
+  border: none;
+  height: 100%;
+  background: var(--color-surface);
+}
+
+.sbm-ag-grid .ag-header-cell-label,
+.sbm-ag-grid .ag-header-cell-text {
+  font-family: var(--font-label), system-ui, sans-serif;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--color-ink);
+}
+
+/* Vertical scroll OFF — page scrolls; grid must not trap height:100%. */
+[data-inner-scrolls="0"] .sbm-ag-grid-wrap {
+  overflow: visible;
+  flex: 0 0 auto;
+  height: auto;
+  min-height: 0;
+}
+
+[data-inner-scrolls="0"] .sbm-ag-grid.ag-theme-quartz {
+  height: auto !important;
+  flex: 0 0 auto;
+  min-height: 200px;
+}
+
+[data-inner-scrolls="0"] .sbm-ag-grid .ag-root-wrapper {
+  height: auto;
+}
+
+[data-inner-scrolls="0"] .sbm-ag-grid .ag-body-viewport,
+[data-inner-scrolls="0"] .sbm-ag-grid .ag-center-cols-viewport {
+  overflow-y: visible !important;
+}
+
+/* Horizontal scroll OFF — wrap cells instead of sideways scroll. */
+[data-horizontal-scrolls="0"] .sbm-ag-grid .ag-body-viewport,
+[data-horizontal-scrolls="0"] .sbm-ag-grid .ag-center-cols-viewport {
+  overflow-x: hidden !important;
+}
+
+.sbm-ag-grid-page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+/* Under Vertical scroll ON, claim Dashboard fillViewport height so
+   height:100% on the grid resolves to a real pixel value. */
+.sbm-ag-grid-page[data-fill="1"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.sbm-ag-grid[data-clickable-rows="1"] .ag-row {
+  cursor: pointer;
+}
