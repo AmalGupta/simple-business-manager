@@ -42,6 +42,7 @@ import {
   handleGetCallsNeedingActionCalendar,
   handleGetCallsNeedingActionCount,
   handleResolveCall,
+  handleListResolvedCalls,
   handleReExtractCall,
   handleRetryCallStt,
 } from "./handlers/api";
@@ -203,10 +204,16 @@ export default {
       return handleGetCallsByTodoStatus(request, env);
     }
 
-    // Must come before callMatch below — "count" / "transcripts" would otherwise parse as a call id.
+    // Must come before callMatch below — "count" / "transcripts" / "resolved"
+    // would otherwise parse as a call id.
     if (url.pathname === "/api/calls/count" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetCallsCount(request, env);
+    }
+
+    if (url.pathname === "/api/calls/resolved" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleListResolvedCalls(request, env);
     }
 
     if (url.pathname === "/api/calls/transcripts" && request.method === "GET") {
