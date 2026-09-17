@@ -156,6 +156,13 @@
   word-break: break-word;
 }
 
+.cna-card__todo-site {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
 .cna-card__todo-controls {
   display: flex;
   flex-direction: column;

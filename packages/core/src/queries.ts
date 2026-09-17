@@ -857,6 +857,10 @@ export interface TodoRow {
   status: Todo["status"];
   completed_at: string | null;
   closed_by_call_id: string | null;
+  /** migration 0036 — site assigned from CNA. */
+  site_id: string | null;
+  /** Joined site name when site_id is set. */
+  site_name: string | null;
   /** migration 0025 — a todo can be assigned to more than one staff member. */
   assignees: TodoAssignee[];
 }
@@ -958,6 +962,8 @@ interface RawTodoRow {
   completed_at: string | null;
   closed_by_call_id: string | null;
   customer_waiting: 0 | 1;
+  site_id: string | null;
+  site_name: string | null;
 }
 
 interface RawCommitmentRow {
@@ -1002,8 +1008,11 @@ const CALL_LIST_SELECT = `
 `;
 
 const TODO_SELECT = `
-  SELECT id, call_id, owner, text, due_date, status, completed_at, closed_by_call_id, customer_waiting
+  SELECT todos.id, todos.call_id, todos.owner, todos.text, todos.due_date, todos.status,
+         todos.completed_at, todos.closed_by_call_id, todos.customer_waiting,
+         todos.site_id AS site_id, sites.name AS site_name
   FROM todos
+  LEFT JOIN sites ON sites.id = todos.site_id
 `;
 
 const COMMITMENT_SELECT = `
@@ -1029,6 +1038,8 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     status: t.status,
     completed_at: t.completed_at,
     closed_by_call_id: t.closed_by_call_id,
+    site_id: t.site_id ?? null,
+    site_name: t.site_name ?? null,
     assignees: [], // filled in by hydrateTodoAssignees — see hydrateCallRows/getCallWithTodos
   };
 }
@@ -1226,7 +1237,7 @@ async function hydrateCallRows(db: D1Database, calls: RawCallJoinRow[]): Promise
   const callIds = calls.map((c) => c.id);
   const [todos, commitments, siteRows] = await Promise.all([
     queryAllByIdChunks<RawTodoRow>(db, callIds, (ph) =>
-      `${TODO_SELECT} WHERE call_id IN (${ph}) ORDER BY created_at ASC`
+      `${TODO_SELECT} WHERE todos.call_id IN (${ph}) ORDER BY todos.created_at ASC`
     ),
     queryAllByIdChunks<RawCommitmentRow>(db, callIds, (ph) =>
       `${COMMITMENT_SELECT} WHERE call_id IN (${ph}) ORDER BY created_at ASC`
@@ -1482,7 +1493,7 @@ export async function getCallWithTodos(db: D1Database, id: string): Promise<Call
   if (!c) return null;
 
   const [{ results: rawTodos }, { results: rawCommitments }, { results: rawSites }] = await Promise.all([
-    db.prepare(`${TODO_SELECT} WHERE call_id = ? ORDER BY created_at ASC`).bind(id).all<RawTodoRow>(),
+    db.prepare(`${TODO_SELECT} WHERE todos.call_id = ? ORDER BY todos.created_at ASC`).bind(id).all<RawTodoRow>(),
     db.prepare(`${COMMITMENT_SELECT} WHERE call_id = ? ORDER BY created_at ASC`).bind(id).all<RawCommitmentRow>(),
     db.prepare(`${SITE_SELECT} AND call_sites.call_id = ?`).bind(id).all<RawSiteRow>(),
   ]);
@@ -1699,6 +1710,140 @@ export async function listResolvedCalls(db: D1Database, limit = 500): Promise<Re
     .bind(capped)
     .all<ResolvedCallRow>();
   return results ?? [];
+}
+
+export interface TodoAssignSiteContact {
+  id: string;
+  name: string;
+  phone: string | null;
+}
+
+/** Suggested sites for CNA Assign-to-Site — contact's caller_sites links. */
+export interface TodoAssignSiteOptions {
+  todo_id: string;
+  call_id: string;
+  contact: TodoAssignSiteContact | null;
+  suggested_sites: CallerLinkedSite[];
+  /** Sites already on the parent call via call_sites. */
+  linked_site_ids: string[];
+  current_site_id: string | null;
+}
+
+/**
+ * Call → contact (client_id, else phone/name lookup) → linked sites to recommend.
+ */
+export async function getTodoAssignSiteOptions(
+  db: D1Database,
+  todoId: string
+): Promise<TodoAssignSiteOptions | null> {
+  const row = await db
+    .prepare(
+      `SELECT todos.id AS todo_id,
+              todos.call_id AS call_id,
+              todos.site_id AS current_site_id,
+              calls.client_id AS client_id,
+              callers.name AS contact_name,
+              callers.phone AS contact_phone
+       FROM todos
+       JOIN calls ON calls.id = todos.call_id
+       LEFT JOIN callers ON callers.id = calls.client_id
+       WHERE todos.id = ?`
+    )
+    .bind(todoId)
+    .first<{
+      todo_id: string;
+      call_id: string;
+      current_site_id: string | null;
+      client_id: string | null;
+      contact_name: string | null;
+      contact_phone: string | null;
+    }>();
+  if (!row) return null;
+
+  let contact: TodoAssignSiteContact | null = null;
+  if (row.client_id) {
+    contact = {
+      id: row.client_id,
+      name: row.contact_name || "Unknown caller",
+      phone: row.contact_phone,
+    };
+  } else {
+    /* Rare: call with no client_id — try phone/name from any prior chip is N/A;
+       leave contact null so the UI skips the association QNA. */
+  }
+
+  let suggested_sites: CallerLinkedSite[] = [];
+  if (contact) {
+    const map = await getLinkedSitesByCallerIds(db, [contact.id]);
+    suggested_sites = map.get(contact.id) ?? [];
+  }
+
+  const { results: linkedRows } = await db
+    .prepare(`SELECT site_id FROM call_sites WHERE call_id = ?`)
+    .bind(row.call_id)
+    .all<{ site_id: string }>();
+
+  return {
+    todo_id: row.todo_id,
+    call_id: row.call_id,
+    contact,
+    suggested_sites,
+    linked_site_ids: (linkedRows ?? []).map((r) => r.site_id),
+    current_site_id: row.current_site_id,
+  };
+}
+
+export interface AssignTodoToSiteResult {
+  todo: TodoRow;
+  call_id: string;
+  site_id: string;
+  site_name: string;
+  associated_contact: boolean;
+}
+
+/**
+ * Assign a site to a todo; because the call is the parent, also INSERT
+ * call_sites. Optionally link the call's contact via caller_sites.
+ */
+export async function assignTodoToSite(
+  db: D1Database,
+  todoId: string,
+  siteId: string,
+  opts: { associateContact: boolean } = { associateContact: false }
+): Promise<AssignTodoToSiteResult | null> {
+  const todo = await getTodoById(db, todoId);
+  if (!todo) return null;
+
+  const siteName = await getSiteName(db, siteId);
+  if (!siteName) return null;
+
+  await db.prepare(`UPDATE todos SET site_id = ? WHERE id = ?`).bind(siteId, todoId).run();
+  await linkCallToSiteExplicit(db, todo.call_id, siteId);
+
+  let associated_contact = false;
+  if (opts.associateContact) {
+    const call = await getCallById(db, todo.call_id);
+    if (call?.client_id) {
+      await addSiteContacts(db, siteId, [call.client_id]);
+      associated_contact = true;
+    }
+  }
+
+  const raw = await db
+    .prepare(`${TODO_SELECT} WHERE todos.id = ?`)
+    .bind(todoId)
+    .first<RawTodoRow>();
+  if (!raw) return null;
+  const todoRow = toTodoRow(raw);
+  await hydrateTodoAssignees(db, [todoRow]);
+
+  return {
+    todo: todoRow,
+    call_id: todo.call_id,
+    site_id: siteId,
+    site_name: siteName,
+    associated_contact,
+  };
 }
 
 /**
@@ -3428,7 +3573,7 @@ export async function getSiteTimeline(
   const todosByVoiceMemoCall = new Map<string, TodoRow[]>();
   if (voiceMemoCallIds.length > 0) {
     const rawTodos = await queryAllByIdChunks<RawTodoRow>(db, voiceMemoCallIds, (ph) =>
-      `${TODO_SELECT} WHERE call_id IN (${ph}) ORDER BY created_at ASC`
+      `${TODO_SELECT} WHERE todos.call_id IN (${ph}) ORDER BY todos.created_at ASC`
     );
     const rows = rawTodos.map(toTodoRow);
     await hydrateTodoAssignees(db, rows);
