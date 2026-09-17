@@ -33,7 +33,7 @@ export function WorkflowCategoryTile({ category, label, count, onOpen }) {
   return (
     <button
       onClick={() => onOpen(category)}
-      style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", height: "100%" }}
+      style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
       aria-label={`${label} — ${count} open`}
     >
       <Card tile>

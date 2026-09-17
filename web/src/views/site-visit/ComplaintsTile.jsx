@@ -29,7 +29,7 @@ export function ComplaintsTile({ onOpen, refreshKey = 0 }) {
   return (
     <button
       onClick={onOpen}
-      style={{ all: "unset", cursor: "pointer", display: "block", width: "100%", height: "100%" }}
+      style={{ all: "unset", cursor: "pointer", display: "block" }}
       aria-label={`Complaints — ${count ?? 0} open`}
     >
       <Card tile>

@@ -1,50 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GripHorizontal } from "lucide-react";
 import { t } from "../../theme.js";
 import { mergeHomeTileOrder, moveIdToIndex, DEFAULT_HOME_TILE_ORDER } from "./homeTileOrder.js";
 
 const DRAG_THRESHOLD_PX = 4;
-const LAYOUT_MS = 250;
 
 const GRID_STYLE = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
   gap: 12,
   marginBottom: "1.5rem",
-  alignItems: "stretch",
 };
-
-const FILL_CSS = `
-[data-home-tile-grid] > [data-tile-id] {
-  min-width: 0;
-  width: 100%;
-  height: var(--tile-height);
-}
-[data-home-tile-grid] > [data-tile-id] > [data-tile-inner] {
-  position: relative;
-  width: 100%;
-  height: 100%;
-}
-[data-home-tile-grid] > [data-tile-id] > [data-tile-inner] > *:not([data-tile-grip]) {
-  box-sizing: border-box;
-  width: 100%;
-  height: 100%;
-  display: block;
-}
-[data-home-tile-grid] > [data-tile-id] > [data-tile-inner] > button {
-  width: 100%;
-  height: 100%;
-}
-@media (prefers-reduced-motion: reduce) {
-  [data-home-tile-grid] [data-tile-inner] {
-    transition: none !important;
-  }
-}
-`;
-
-function prefersReducedMotion() {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 /**
  * Admin home tile grid with phone-style reorder via a top-right grip.
@@ -69,8 +35,6 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
   }, [resolved, draggingId]);
 
   const cellRefs = useRef(new Map());
-  const innerRefs = useRef(new Map());
-  const prevRectsRef = useRef(new Map());
   const dragRef = useRef(null);
   const orderRef = useRef(order);
   const suppressClickUntilRef = useRef(0);
@@ -80,53 +44,6 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
     if (el) cellRefs.current.set(id, el);
     else cellRefs.current.delete(id);
   }, []);
-
-  const setInnerRef = useCallback((id, el) => {
-    if (el) innerRefs.current.set(id, el);
-    else innerRefs.current.delete(id);
-  }, []);
-
-  /* FLIP on the inner wrapper so React style updates on the cell don't
-     clear the sliding transform mid-animation. */
-  useLayoutEffect(() => {
-    const nextRects = new Map();
-    for (const id of order) {
-      const el = cellRefs.current.get(id);
-      if (!el) continue;
-      nextRects.set(id, el.getBoundingClientRect());
-    }
-
-    if (!prefersReducedMotion()) {
-      for (const id of order) {
-        const inner = innerRefs.current.get(id);
-        const prev = prevRectsRef.current.get(id);
-        const next = nextRects.get(id);
-        if (!inner || !prev || !next) continue;
-        const dx = prev.left - next.left;
-        const dy = prev.top - next.top;
-        if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) {
-          if (id === draggingId) inner.style.transform = "scale(1.03)";
-          continue;
-        }
-        const lift = id === draggingId ? " scale(1.03)" : "";
-        inner.style.transition = "none";
-        inner.style.transform = `translate(${dx}px, ${dy}px)${lift}`;
-        void inner.offsetWidth;
-        inner.style.transition = `transform ${LAYOUT_MS}ms cubic-bezier(.22,.61,.36,1)`;
-        inner.style.transform = id === draggingId ? "scale(1.03)" : "";
-      }
-    }
-
-    prevRectsRef.current = nextRects;
-  }, [order, draggingId]);
-
-  useEffect(() => {
-    if (draggingId) return;
-    for (const inner of innerRefs.current.values()) {
-      inner.style.transform = "";
-      inner.style.transition = "";
-    }
-  }, [draggingId]);
 
   const indexFromPoint = useCallback((clientX, clientY, currentOrder) => {
     let bestIdx = 0;
@@ -193,7 +110,7 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
       const target = indexFromPoint(e.clientX, e.clientY, orderRef.current);
       setOrder((prev) => {
         const next = moveIdToIndex(prev, state.id, target);
-        if (next.length === prev.length && next.every((tid, i) => tid === prev[i])) return prev;
+        if (next.length === prev.length && next.every((id, i) => id === prev[i])) return prev;
         return next;
       });
     },
@@ -227,7 +144,6 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
 
   return (
     <div style={GRID_STYLE} data-home-tile-grid="">
-      <style>{FILL_CSS}</style>
       {order.map((id) => {
         const item = byId.get(id);
         if (!item) return null;
@@ -239,49 +155,50 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
             data-tile-id={id}
             onClickCapture={onCellClickCapture}
             style={{
-              opacity: isDragging ? 0.92 : 1,
-              zIndex: isDragging ? 3 : 1,
+              position: "relative",
+              opacity: isDragging ? 0.85 : 1,
+              transform: isDragging ? "scale(1.02)" : "none",
+              transition: draggingId ? "transform 120ms ease, opacity 120ms ease" : undefined,
+              zIndex: isDragging ? 2 : 1,
               touchAction: "manipulation",
             }}
           >
-            <div ref={(el) => setInnerRef(id, el)} data-tile-inner="" style={{ willChange: draggingId ? "transform" : undefined }}>
-              {arrangeable && (
-                <button
-                  type="button"
-                  aria-label={`Reorder ${id}`}
-                  data-tile-grip={id}
-                  onPointerDown={(e) => onGripPointerDown(e, id)}
-                  onPointerMove={onGripPointerMove}
-                  onPointerUp={onGripPointerUp}
-                  onPointerCancel={onGripPointerCancel}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                  }}
-                  style={{
-                    position: "absolute",
-                    top: 6,
-                    right: 6,
-                    zIndex: 4,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    width: 28,
-                    height: 28,
-                    padding: 0,
-                    border: "none",
-                    borderRadius: 4,
-                    background: isDragging ? "rgba(20,24,31,0.08)" : "transparent",
-                    color: t.edge2,
-                    cursor: isDragging ? "grabbing" : "grab",
-                    touchAction: "none",
-                  }}
-                >
-                  <GripHorizontal size={16} strokeWidth={2.25} aria-hidden />
-                </button>
-              )}
-              {item.node}
-            </div>
+            {arrangeable && (
+              <button
+                type="button"
+                aria-label={`Reorder ${id}`}
+                data-tile-grip={id}
+                onPointerDown={(e) => onGripPointerDown(e, id)}
+                onPointerMove={onGripPointerMove}
+                onPointerUp={onGripPointerUp}
+                onPointerCancel={onGripPointerCancel}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                style={{
+                  position: "absolute",
+                  top: 6,
+                  right: 6,
+                  zIndex: 3,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 28,
+                  height: 28,
+                  padding: 0,
+                  border: "none",
+                  borderRadius: 4,
+                  background: isDragging ? "rgba(20,24,31,0.08)" : "transparent",
+                  color: t.edge2,
+                  cursor: "grab",
+                  touchAction: "none",
+                }}
+              >
+                <GripHorizontal size={16} strokeWidth={2.25} aria-hidden />
+              </button>
+            )}
+            {item.node}
           </div>
         );
       })}
