@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GripHorizontal } from "lucide-react";
 import { t } from "../../theme.js";
-import { mergeHomeTileOrder, moveIdToIndex, persistHomeTileOrder, buildDefaultHomeTileOrder, DEFAULT_HOME_TILE_ORDER } from "./homeTileOrder.js";
+import { mergeHomeTileOrder, moveIdToIndex, DEFAULT_HOME_TILE_ORDER } from "./homeTileOrder.js";
 
 const DRAG_THRESHOLD_PX = 4;
 const LAYOUT_MS = 250;
@@ -48,18 +48,16 @@ function prefersReducedMotion() {
 
 /**
  * Admin home tile grid with phone-style reorder via a top-right grip.
- * Any `{ id, node }` item is rearrangeable — not limited to today's catalog.
- * On drop, persists a full preference (including currently hidden tile ids)
- * so when tiles appear/disappear the user's relative order is restored.
+ * `items` is [{ id, node }]; `savedOrder` is the persisted preference (or null).
+ * `onOrderChange(nextIds)` fires on drop after a real drag.
  */
 export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangeable = true }) {
   const visibleIds = useMemo(() => items.map((i) => i.id), [items]);
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
-  const defaultOrder = useMemo(() => buildDefaultHomeTileOrder(visibleIds, DEFAULT_HOME_TILE_ORDER), [visibleIds]);
 
   const resolved = useMemo(
-    () => mergeHomeTileOrder(savedOrder, visibleIds, defaultOrder),
-    [savedOrder, visibleIds, defaultOrder],
+    () => mergeHomeTileOrder(savedOrder, visibleIds, DEFAULT_HOME_TILE_ORDER),
+    [savedOrder, visibleIds],
   );
 
   const [order, setOrder] = useState(resolved);
@@ -156,15 +154,12 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
       if (!state) return;
       if (commit && state.moved) {
         suppressClickUntilRef.current = Date.now() + 400;
-        /* Persist full preference (incl. currently hidden tiles) so when a
-           tile disappears and later returns, its prior slot is restored. */
-        const full = persistHomeTileOrder(savedOrder, orderRef.current, defaultOrder);
-        onOrderChange?.(full);
+        onOrderChange?.(orderRef.current.slice());
       } else if (!state.moved) {
         setOrder(resolved);
       }
     },
-    [onOrderChange, resolved, savedOrder, defaultOrder],
+    [onOrderChange, resolved],
   );
 
   const onGripPointerDown = useCallback(
