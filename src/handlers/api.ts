@@ -20,6 +20,8 @@ import {
   getCallsNeedingActionCalendar,
   countCallsNeedingAction,
   listResolvedCalls,
+  getTodoAssignSiteOptions,
+  assignTodoToSite,
   CALLS_NEEDING_ACTION_MAX_LIMIT,
   getCallWithTodos,
   getCallerById,
@@ -260,6 +262,47 @@ export async function handleResolveCall(request: Request, env: Env, callId: stri
   const call = await getCallWithTodos(env.DB, callId);
   if (!call) return json({ error: "not found" }, 404);
   return json(call);
+}
+
+/** CNA Assign-to-Site — suggested sites from the call's contact links. */
+export async function handleGetTodoAssignSiteOptions(
+  request: Request,
+  env: Env,
+  todoId: string
+): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const options = await getTodoAssignSiteOptions(env.DB, todoId);
+  if (!options) return json({ error: "not found" }, 404);
+  return json(options);
+}
+
+/**
+ * Assign a site to a todo (and therefore to its parent call via call_sites).
+ * Body: `{ site_id, associate_contact?: boolean }`.
+ */
+export async function handleAssignTodoSite(
+  request: Request,
+  env: Env,
+  todoId: string
+): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const siteId = typeof record.site_id === "string" ? record.site_id.trim() : "";
+  if (!siteId) return json({ error: "site_id is required" }, 400);
+  const associateContact = Boolean(record.associate_contact);
+
+  const result = await assignTodoToSite(env.DB, todoId, siteId, { associateContact });
+  if (!result) return json({ error: "not found" }, 404);
+  return json(result);
 }
 
 /** Resolved Calls home tile / AG Grid — admin ack history. */

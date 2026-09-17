@@ -203,6 +203,9 @@ CREATE TABLE todos (
   -- Column exists now so M1 needs no migration against live data.
   closed_by_call_id TEXT REFERENCES calls(id),
 
+  -- migration 0036: site assigned from CNA; parent call also gets call_sites.
+  site_id           TEXT REFERENCES sites(id),
+
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 
   -- Assignment lived here as assigned_to_user_id/assigned_by_user_id/
