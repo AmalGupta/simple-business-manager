@@ -10,8 +10,7 @@ import { TILE_VALUE_ROW_STYLE, TILE_NUMBER_STYLE } from "./styles.js";
 import { AppHeader } from "./components/AppHeader.jsx";
 import { LoginScreen } from "./views/auth/LoginScreen.jsx";
 import { StaffTile } from "./views/staff/StaffTile.jsx";
-import { listVisibleWorkflowTiles, WorkflowCategoryTile } from "./views/home/WorkflowTilesRow.jsx";
-import { HomeTileGrid } from "./views/home/HomeTileGrid.jsx";
+import { WorkflowTilesRow } from "./views/home/WorkflowTilesRow.jsx";
 import { WorkflowCategorySiteList } from "./views/home/WorkflowCategorySiteList.jsx";
 import { SitesAttentionTile } from "./views/home/SitesAttentionTile.jsx";
 import { EscalationsTile } from "./views/home/EscalationsTile.jsx";
@@ -64,7 +63,6 @@ import {
   refreshCallsNeedingAction,
   defaultCallsNeedingActionWindow,
   postSiteInstallation,
-  patchMyCustomization,
 } from "./lib/api.js";
 
 /** Fresh checklist title when skipping the instance list (field staff). */
@@ -455,202 +453,12 @@ export default function SimpleBusinessManager() {
 
   const openCall = view.name === "call" ? fetchedCall : null;
 
-  const customization = me?.customization ?? {
-    inner_scrolls: false,
-    horizontal_scrolls: false,
-    home_tile_order: null,
-  };
+  const customization = me?.customization ?? { inner_scrolls: false, horizontal_scrolls: false };
   const innerScrolls = Boolean(customization.inner_scrolls);
   const horizontalScrolls = Boolean(customization.horizontal_scrolls);
   const onCustomizationChange = useCallback((next) => {
     setMe((m) => (m ? { ...m, customization: next } : m));
   }, []);
-
-  const onHomeTileOrderChange = useCallback(
-    async (nextIds) => {
-      const prev = me?.customization ?? null;
-      onCustomizationChange({
-        ...(prev ?? { inner_scrolls: false, horizontal_scrolls: false, home_tile_order: null }),
-        home_tile_order: nextIds,
-      });
-      try {
-        const data = await patchMyCustomization({ home_tile_order: nextIds });
-        if (data.customization) onCustomizationChange(data.customization);
-      } catch (err) {
-        console.error("[sbm] failed to save home tile order", err);
-        if (prev) onCustomizationChange(prev);
-      }
-    },
-    [me?.customization, onCustomizationChange],
-  );
-
-  const isOfficeAdmin = me?.role === "admin" || me?.role === "superadmin";
-
-  const homeTileItems = useMemo(() => {
-    if (!me || me.role === "staff") return [];
-    const items = [
-      {
-        id: "closed-today",
-        node: <StatCard value={closedToday} label="closed today" />,
-      },
-      {
-        id: "calls-logged",
-        node: (
-          <button
-            onClick={() => setView({ name: "calls" })}
-            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
-            aria-label={`Calls logged — ${callsCount}`}
-          >
-            <Card tile>
-              <TileLabel>calls logged</TileLabel>
-              <div style={TILE_VALUE_ROW_STYLE}>
-                <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
-              </div>
-            </Card>
-          </button>
-        ),
-      },
-      {
-        id: "sites-attention",
-        node: (
-          <SitesAttentionTile
-            onReviewSites={() => setView({ name: "sites-review" })}
-            onViewDirectory={() => setView({ name: "sites-directory" })}
-            unconfirmedCount={unconfirmedCount}
-            confirmedCount={confirmedCount}
-          />
-        ),
-      },
-      {
-        id: "escalations",
-        node: (
-          <EscalationsTile
-            escalations={escalations}
-            onAdd={onAddEscalation}
-            onClose={onCloseEscalation}
-            busyIds={busyIds}
-          />
-        ),
-      },
-    ];
-
-    if (isOfficeAdmin) {
-      items.push({
-        id: "staff",
-        node: <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />,
-      });
-      items.push({
-        id: "callers",
-        node: <CallerTile count={callersCount} onOpen={() => setView({ name: "callers-directory" })} />,
-      });
-      items.push({
-        id: "material-shortages",
-        node: <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />,
-      });
-      items.push({
-        id: "calls-needing-action",
-        node: (
-          <CallsNeedingActionTile
-            count={callsNeedingActionCount}
-            onOpen={() => setView({ name: "calls-needing-action", from: { name: "home" } })}
-          />
-        ),
-      });
-    }
-
-    if (myOpenTodos.length > 0) {
-      items.push({
-        id: "my-open-todos",
-        node: (
-          <button
-            onClick={() => setView({ name: "my-open-todos", from: { name: "home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
-            aria-label={`My call tasks — ${myOpenTodos.length} open`}
-          >
-            <Card tile>
-              <TileLabel>My call tasks</TileLabel>
-              <div style={TILE_VALUE_ROW_STYLE}>
-                <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length}</span>
-              </div>
-            </Card>
-          </button>
-        ),
-      });
-    }
-
-    items.push({
-      id: "complaints",
-      node: (
-        <ComplaintsTile
-          refreshKey={complaintsRefreshKey}
-          onOpen={() => setView({ name: "complaints-home", from: { name: "home" } })}
-        />
-      ),
-    });
-
-    for (const wf of listVisibleWorkflowTiles(openSiteTasks)) {
-      items.push({
-        id: wf.id,
-        node: (
-          <WorkflowCategoryTile
-            category={wf.category}
-            label={wf.label}
-            count={wf.count}
-            onOpen={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}
-          />
-        ),
-      });
-    }
-
-    items.push({
-      id: "open-today",
-      node: (
-        <button
-          onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
-          style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
-          aria-label={`Open today — ${openToday}`}
-        >
-          <StatCard value={openToday} label="open today" />
-        </button>
-      ),
-    });
-
-    if (parkedCount > 0) {
-      items.push({
-        id: "parked",
-        node: (
-          <button
-            onClick={() => setView({ name: "parked-todos", from: { name: "home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block", width: "100%" }}
-            aria-label={`Parked — ${parkedCount}`}
-          >
-            <StatCard value={parkedCount} label="parked" />
-          </button>
-        ),
-      });
-    }
-
-    return items;
-  }, [
-    me,
-    isOfficeAdmin,
-    closedToday,
-    callsCount,
-    unconfirmedCount,
-    confirmedCount,
-    escalations,
-    busyIds,
-    staffRoster.length,
-    callersCount,
-    callsNeedingActionCount,
-    myOpenTodos.length,
-    complaintsRefreshKey,
-    openSiteTasks,
-    openToday,
-    parkedCount,
-    onAddEscalation,
-    onCloseEscalation,
-  ]);
 
   const shell = (children, { wide = false, fillViewport = false } = {}) => (
     <div
@@ -1195,14 +1003,104 @@ export default function SimpleBusinessManager() {
         />
       </AppHeader>
 
-      {/* Home tile panel — admin/superadmin can drag via the grip to reorder
-          (phone-style live reflow). Order persists in user_settings. */}
-      <HomeTileGrid
-        items={homeTileItems}
-        savedOrder={customization.home_tile_order}
-        onOrderChange={onHomeTileOrderChange}
-        arrangeable={isOfficeAdmin}
-      />
+      {/* Home tile panel. Order (top to bottom): sites needing attention,
+          escalations, staff, the dynamic workflow-category tiles (business-
+          wide counts — see WorkflowTilesRow), then "open today" and "calls
+          logged" at the very bottom. "Open today" moved off the top and the
+          call-card feed moved to its own page (see "calls" view) — both per
+          the admin-overview revision to this plan; "closed today" kept its
+          original position. 2 columns on a phone; auto-widens toward one
+          row as space allows. Every tile is fixed to --tile-height (see the
+          Card `tile` variant) so the grid stays symmetrical regardless of
+          content — list tiles (EscalationsTile) scroll internally instead
+          of growing taller than their neighbours. */}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          gap: 12,
+          marginBottom: "1.5rem",
+        }}
+      >
+        <StatCard value={closedToday} label="closed today" />
+        <button
+          onClick={() => setView({ name: "calls" })}
+          style={{ all: "unset", cursor: "pointer", display: "block" }}
+          aria-label={`Calls logged — ${callsCount}`}
+        >
+          <Card tile>
+            <TileLabel>calls logged</TileLabel>
+            <div style={TILE_VALUE_ROW_STYLE}>
+              <span style={TILE_NUMBER_STYLE}>{callsCount}</span>
+            </div>
+          </Card>
+        </button>
+        <SitesAttentionTile
+          onReviewSites={() => setView({ name: "sites-review" })}
+          onViewDirectory={() => setView({ name: "sites-directory" })}
+          unconfirmedCount={unconfirmedCount}
+          confirmedCount={confirmedCount}
+        />
+        <EscalationsTile
+          escalations={escalations}
+          onAdd={onAddEscalation}
+          onClose={onCloseEscalation}
+          busyIds={busyIds}
+        />
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <CallerTile count={callersCount} onOpen={() => setView({ name: "callers-directory" })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <CallsNeedingActionTile
+            count={callsNeedingActionCount}
+            onOpen={() => setView({ name: "calls-needing-action", from: { name: "home" } })}
+          />
+        )}
+        {myOpenTodos.length > 0 && (
+          <button
+            onClick={() => setView({ name: "my-open-todos", from: { name: "home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label={`My call tasks — ${myOpenTodos.length} open`}
+          >
+            <Card tile>
+              <TileLabel>My call tasks</TileLabel>
+              <div style={TILE_VALUE_ROW_STYLE}>
+                <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length}</span>
+              </div>
+            </Card>
+          </button>
+        )}
+        <ComplaintsTile
+          refreshKey={complaintsRefreshKey}
+          onOpen={() => setView({ name: "complaints-home", from: { name: "home" } })}
+        />
+        <WorkflowTilesRow
+          tasks={openSiteTasks}
+          onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}
+        />
+        <button
+          onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
+          style={{ all: "unset", cursor: "pointer", display: "block" }}
+          aria-label={`Open today — ${openToday}`}
+        >
+          <StatCard value={openToday} label="open today" />
+        </button>
+        {parkedCount > 0 && (
+          <button
+            onClick={() => setView({ name: "parked-todos", from: { name: "home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label={`Parked — ${parkedCount}`}
+          >
+            <StatCard value={parkedCount} label="parked" />
+          </button>
+        )}
+      </div>
     </>
   );
 }
