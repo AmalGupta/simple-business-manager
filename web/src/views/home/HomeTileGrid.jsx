@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GripHorizontal } from "lucide-react";
 import { t } from "../../theme.js";
-import { mergeHomeTileOrder, moveIdToIndex, persistHomeTileOrder, buildDefaultHomeTileOrder, DEFAULT_HOME_TILE_ORDER } from "./homeTileOrder.js";
+import {
+  mergeHomeTileOrder,
+  moveIdToIndex,
+  persistHomeTileOrder,
+  buildDefaultHomeTileOrder,
+  DEFAULT_HOME_TILE_ORDER,
+} from "./homeTileOrder.js";
 
 const DRAG_THRESHOLD_PX = 4;
 const LAYOUT_MS = 250;
@@ -46,6 +52,12 @@ function prefersReducedMotion() {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
+function sameIdList(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 /**
  * Admin home tile grid with phone-style reorder via a top-right grip.
  * Any `{ id, node }` item is rearrangeable — not limited to today's catalog.
@@ -65,18 +77,35 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
   const [order, setOrder] = useState(resolved);
   const [draggingId, setDraggingId] = useState(null);
 
-  useEffect(() => {
-    if (draggingId) return;
-    setOrder(resolved);
-  }, [resolved, draggingId]);
-
   const cellRefs = useRef(new Map());
   const innerRefs = useRef(new Map());
   const prevRectsRef = useRef(new Map());
   const dragRef = useRef(null);
   const orderRef = useRef(order);
   const suppressClickUntilRef = useRef(0);
+  /** After a successful drop, ignore stale `resolved` until savedOrder catches up. */
+  const pendingFullOrderRef = useRef(null);
+  const listenersRef = useRef(null);
   orderRef.current = order;
+
+  useEffect(() => {
+    if (draggingId) return;
+
+    const pending = pendingFullOrderRef.current;
+    if (pending) {
+      const fromSaved = mergeHomeTileOrder(savedOrder, visibleIds, defaultOrder);
+      if (sameIdList(savedOrder, pending) || sameIdList(fromSaved, orderRef.current)) {
+        pendingFullOrderRef.current = null;
+        if (!sameIdList(orderRef.current, fromSaved)) setOrder(fromSaved);
+        return;
+      }
+      /* Parent has not applied the optimistic save yet — keep local order
+         so we do not flash back to the pre-drag layout. */
+      return;
+    }
+
+    setOrder((prev) => (sameIdList(prev, resolved) ? prev : resolved));
+  }, [resolved, draggingId, savedOrder, visibleIds, defaultOrder]);
 
   const setCellRef = useCallback((id, el) => {
     if (el) cellRefs.current.set(id, el);
@@ -86,6 +115,13 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
   const setInnerRef = useCallback((id, el) => {
     if (el) innerRefs.current.set(id, el);
     else innerRefs.current.delete(id);
+  }, []);
+
+  const clearInnerTransforms = useCallback(() => {
+    for (const inner of innerRefs.current.values()) {
+      inner.style.transform = "";
+      inner.style.transition = "";
+    }
   }, []);
 
   /* FLIP on the inner wrapper so React style updates on the cell don't
@@ -122,13 +158,45 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
     prevRectsRef.current = nextRects;
   }, [order, draggingId]);
 
-  useEffect(() => {
-    if (draggingId) return;
-    for (const inner of innerRefs.current.values()) {
-      inner.style.transform = "";
-      inner.style.transition = "";
-    }
-  }, [draggingId]);
+  const detachDragListeners = useCallback(() => {
+    const L = listenersRef.current;
+    if (!L) return;
+    window.removeEventListener("pointermove", L.move);
+    window.removeEventListener("pointerup", L.up);
+    window.removeEventListener("pointercancel", L.cancel);
+    listenersRef.current = null;
+    document.body.style.userSelect = "";
+    document.body.style.cursor = "";
+  }, []);
+
+  const endDrag = useCallback(
+    (commit) => {
+      const state = dragRef.current;
+      dragRef.current = null;
+      detachDragListeners();
+      clearInnerTransforms();
+
+      if (!state) {
+        setDraggingId(null);
+        return;
+      }
+
+      if (commit && state.moved) {
+        suppressClickUntilRef.current = Date.now() + 400;
+        const visibleOrder = orderRef.current.slice();
+        const full = persistHomeTileOrder(savedOrder, visibleOrder, defaultOrder);
+        pendingFullOrderRef.current = full;
+        setOrder(visibleOrder);
+        setDraggingId(null);
+        onOrderChange?.(full);
+      } else {
+        setDraggingId(null);
+        pendingFullOrderRef.current = null;
+        setOrder(resolved);
+      }
+    },
+    [onOrderChange, resolved, savedOrder, defaultOrder, detachDragListeners, clearInnerTransforms],
+  );
 
   const indexFromPoint = useCallback((clientX, clientY, currentOrder) => {
     let bestIdx = 0;
@@ -148,31 +216,17 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
     return bestIdx;
   }, []);
 
-  const endDrag = useCallback(
-    (commit) => {
-      const state = dragRef.current;
-      dragRef.current = null;
-      setDraggingId(null);
-      if (!state) return;
-      if (commit && state.moved) {
-        suppressClickUntilRef.current = Date.now() + 400;
-        /* Persist full preference (incl. currently hidden tiles) so when a
-           tile disappears and later returns, its prior slot is restored. */
-        const full = persistHomeTileOrder(savedOrder, orderRef.current, defaultOrder);
-        onOrderChange?.(full);
-      } else if (!state.moved) {
-        setOrder(resolved);
-      }
-    },
-    [onOrderChange, resolved, savedOrder, defaultOrder],
-  );
-
   const onGripPointerDown = useCallback(
     (e, id) => {
       if (!arrangeable) return;
+      if (e.button != null && e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
-      e.currentTarget.setPointerCapture(e.pointerId);
+
+      /* Window listeners — not element capture. Reordering remounts/moves the
+         grip mid-drag and would drop setPointerCapture, leaving the tile stuck. */
+      detachDragListeners();
+
       dragRef.current = {
         id,
         pointerId: e.pointerId,
@@ -181,50 +235,50 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
         moved: false,
       };
       setDraggingId(id);
+      document.body.style.userSelect = "none";
+      document.body.style.cursor = "grabbing";
+
+      const move = (ev) => {
+        const state = dragRef.current;
+        if (!state || ev.pointerId !== state.pointerId) return;
+        const dx = ev.clientX - state.startX;
+        const dy = ev.clientY - state.startY;
+        if (!state.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
+          state.moved = true;
+        }
+        if (!state.moved) return;
+        const target = indexFromPoint(ev.clientX, ev.clientY, orderRef.current);
+        setOrder((prev) => {
+          const next = moveIdToIndex(prev, state.id, target);
+          if (next.length === prev.length && next.every((tid, i) => tid === prev[i])) return prev;
+          return next;
+        });
+      };
+
+      const up = (ev) => {
+        const state = dragRef.current;
+        if (!state || ev.pointerId !== state.pointerId) return;
+        endDrag(true);
+      };
+
+      const cancel = (ev) => {
+        const state = dragRef.current;
+        if (!state || ev.pointerId !== state.pointerId) return;
+        endDrag(false);
+      };
+
+      listenersRef.current = { move, up, cancel };
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", cancel);
     },
-    [arrangeable],
+    [arrangeable, detachDragListeners, endDrag, indexFromPoint],
   );
 
-  const onGripPointerMove = useCallback(
-    (e) => {
-      const state = dragRef.current;
-      if (!state || e.pointerId !== state.pointerId) return;
-      const dx = e.clientX - state.startX;
-      const dy = e.clientY - state.startY;
-      if (!state.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD_PX) {
-        state.moved = true;
-      }
-      if (!state.moved) return;
-      const target = indexFromPoint(e.clientX, e.clientY, orderRef.current);
-      setOrder((prev) => {
-        const next = moveIdToIndex(prev, state.id, target);
-        if (next.length === prev.length && next.every((tid, i) => tid === prev[i])) return prev;
-        return next;
-      });
-    },
-    [indexFromPoint],
-  );
-
-  const onGripPointerUp = useCallback(
-    (e) => {
-      const state = dragRef.current;
-      if (!state || e.pointerId !== state.pointerId) return;
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        /* already released */
-      }
-      endDrag(true);
-    },
-    [endDrag],
-  );
-
-  const onGripPointerCancel = useCallback(() => {
-    endDrag(false);
-  }, [endDrag]);
+  useEffect(() => () => detachDragListeners(), [detachDragListeners]);
 
   const onCellClickCapture = useCallback((e) => {
-    if (Date.now() < suppressClickUntilRef.current) {
+    if (Date.now() < suppressClickUntilRef.current || dragRef.current) {
       e.preventDefault();
       e.stopPropagation();
     }
@@ -247,18 +301,20 @@ export function HomeTileGrid({ items, savedOrder = null, onOrderChange, arrangea
               opacity: isDragging ? 0.92 : 1,
               zIndex: isDragging ? 3 : 1,
               touchAction: "manipulation",
+              pointerEvents: draggingId && !isDragging ? "none" : undefined,
             }}
           >
-            <div ref={(el) => setInnerRef(id, el)} data-tile-inner="" style={{ willChange: draggingId ? "transform" : undefined }}>
+            <div
+              ref={(el) => setInnerRef(id, el)}
+              data-tile-inner=""
+              style={{ willChange: draggingId ? "transform" : undefined }}
+            >
               {arrangeable && (
                 <button
                   type="button"
                   aria-label={`Reorder ${id}`}
                   data-tile-grip={id}
                   onPointerDown={(e) => onGripPointerDown(e, id)}
-                  onPointerMove={onGripPointerMove}
-                  onPointerUp={onGripPointerUp}
-                  onPointerCancel={onGripPointerCancel}
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
