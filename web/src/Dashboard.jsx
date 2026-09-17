@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { t } from "./theme.js";
-import { today, dayKey, isoDate, fmtDate } from "./lib/dates.js";
+import { today, isoDate, fmtDate } from "./lib/dates.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./lib/constants.js";
 import { Card } from "./components/Card.jsx";
 import { BackLink } from "./components/BackLink.jsx";
@@ -42,7 +42,9 @@ import { ComplaintsTile } from "./views/site-visit/ComplaintsTile.jsx";
 import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
 import { CallsNeedingActionTile } from "./views/home/CallsNeedingActionTile.jsx";
+import { ResolvedCallsTile } from "./views/home/ResolvedCallsTile.jsx";
 import { CallsNeedingActionView } from "./views/calls/CallsNeedingActionView.jsx";
+import { ResolvedCallsView } from "./views/calls/ResolvedCallsView.jsx";
 import { RequestForm } from "./views/requests/RequestForm.jsx";
 import {
   fetchCall,
@@ -87,10 +89,9 @@ export default function SimpleBusinessManager() {
   const [callsCount, setCallsCount] = useState(0);
   const [callersCount, setCallersCount] = useState(0);
   const [callsNeedingActionCount, setCallsNeedingActionCount] = useState(0);
-  /* Home open/closed tiles — from GET /api/dashboard/summary, not derived from
-     the (possibly still-loading) calls list. Kept in sync on todo toggles. */
-  const [openToday, setOpenToday] = useState(0);
-  const [closedToday, setClosedToday] = useState(0);
+  const [resolvedCallsCount, setResolvedCallsCount] = useState(0);
+  /* Home parked tile — from GET /api/dashboard/summary. Open/closed-today
+     tiles were removed in favour of Resolved Calls. */
   const [parkedCount, setParkedCount] = useState(0);
   const [confirmedCount, setConfirmedCount] = useState(0);
   const [unconfirmedCount, setUnconfirmedCount] = useState(0);
@@ -166,8 +167,7 @@ export default function SimpleBusinessManager() {
     setCallsCount(0);
     setCallersCount(0);
     setCallsNeedingActionCount(0);
-    setOpenToday(0);
-    setClosedToday(0);
+    setResolvedCallsCount(0);
     setParkedCount(0);
     setConfirmedCount(0);
     setUnconfirmedCount(0);
@@ -180,12 +180,11 @@ export default function SimpleBusinessManager() {
       setMyOpenTodos(summary.my_open_todos ?? []);
       setConfirmedCount(summary.confirmed_count ?? 0);
       setUnconfirmedCount(summary.unconfirmed_count ?? 0);
-      setOpenToday(summary.open_today ?? 0);
-      setClosedToday(summary.closed_today ?? 0);
       setParkedCount(summary.parked_count ?? 0);
       setCallsCount(summary.calls_count ?? 0);
       setCallersCount(summary.callers_count ?? 0);
       setCallsNeedingActionCount(summary.calls_needing_action_count ?? 0);
+      setResolvedCallsCount(summary.resolved_calls_count ?? 0);
       setEscalations(summary.escalations ?? []);
       setStaffRoster(summary.staff_roster ?? []);
     };
@@ -340,28 +339,15 @@ export default function SimpleBusinessManager() {
   }, []);
 
   /* Optimistic write, rolled back if D1 rejects it. Also keeps home
-     open_today / closed_today in sync with the summary read model. */
+     parked_count in sync with the summary read model. */
   const mutate = useCallback(async (todo, patch) => {
     const prev = { status: todo.status, completed_at: todo.completed_at };
-    const todayKey = isoDate(today().getFullYear(), today().getMonth(), today().getDate());
-    const prevClosedToday = prev.status === "done" && dayKey(prev.completed_at) === todayKey;
-    const nextClosedToday = patch.status === "done" && dayKey(patch.completed_at) === todayKey;
-    const prevOpen = prev.status === "open";
-    const nextOpen = patch.status === "open";
     const prevParked = prev.status === "snoozed";
     const nextParked = patch.status === "snoozed";
 
     const applyCountDelta = (fromPrev) => {
-      const wasOpen = fromPrev ? prevOpen : nextOpen;
-      const isOpen = fromPrev ? nextOpen : prevOpen;
-      const wasClosedToday = fromPrev ? prevClosedToday : nextClosedToday;
-      const isClosedToday = fromPrev ? nextClosedToday : prevClosedToday;
       const wasParked = fromPrev ? prevParked : nextParked;
       const isParked = fromPrev ? nextParked : prevParked;
-      if (wasOpen && !isOpen) setOpenToday((n) => Math.max(0, n - 1));
-      if (!wasOpen && isOpen) setOpenToday((n) => n + 1);
-      if (wasClosedToday && !isClosedToday) setClosedToday((n) => Math.max(0, n - 1));
-      if (!wasClosedToday && isClosedToday) setClosedToday((n) => n + 1);
       if (wasParked && !isParked) setParkedCount((n) => Math.max(0, n - 1));
       if (!wasParked && isParked) setParkedCount((n) => n + 1);
     };
@@ -779,10 +765,23 @@ export default function SimpleBusinessManager() {
         staffRoster={staffRoster}
         currentUser={me}
         onAssignTodo={onAssignTodo}
-        onResolved={() => setCallsNeedingActionCount((n) => Math.max(0, n - 1))}
+        onResolved={() => {
+          setCallsNeedingActionCount((n) => Math.max(0, n - 1));
+          setResolvedCallsCount((n) => n + 1);
+        }}
         onBack={() => setView(view.from ?? homeView)}
       />,
       { wide: true }
+    );
+
+  if (view.name === "resolved-calls")
+    return shell(
+      <ResolvedCallsView
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenCall={(id) => setView({ name: "call", id, from: { name: "resolved-calls" } })}
+        innerScrolls={innerScrolls}
+      />,
+      { wide: true, fillViewport: innerScrolls }
     );
 
   if (view.name === "staff-home")
@@ -1003,13 +1002,7 @@ export default function SimpleBusinessManager() {
         />
       </AppHeader>
 
-      {/* Home tile panel. Order (top to bottom): sites needing attention,
-          escalations, staff, the dynamic workflow-category tiles (business-
-          wide counts — see WorkflowTilesRow), then "open today" and "calls
-          logged" at the very bottom. "Open today" moved off the top and the
-          call-card feed moved to its own page (see "calls" view) — both per
-          the admin-overview revision to this plan; "closed today" kept its
-          original position. 2 columns on a phone; auto-widens toward one
+      {/* Home tile panel. 2 columns on a phone; auto-widens toward one
           row as space allows. Every tile is fixed to --tile-height (see the
           Card `tile` variant) so the grid stays symmetrical regardless of
           content — list tiles (EscalationsTile) scroll internally instead
@@ -1022,7 +1015,6 @@ export default function SimpleBusinessManager() {
           marginBottom: "1.5rem",
         }}
       >
-        <StatCard value={closedToday} label="closed today" />
         <button
           onClick={() => setView({ name: "calls" })}
           style={{ all: "unset", cursor: "pointer", display: "block" }}
@@ -1062,6 +1054,12 @@ export default function SimpleBusinessManager() {
             onOpen={() => setView({ name: "calls-needing-action", from: { name: "home" } })}
           />
         )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <ResolvedCallsTile
+            count={resolvedCallsCount}
+            onOpen={() => setView({ name: "resolved-calls", from: { name: "home" } })}
+          />
+        )}
         {myOpenTodos.length > 0 && (
           <button
             onClick={() => setView({ name: "my-open-todos", from: { name: "home" } })}
@@ -1084,13 +1082,6 @@ export default function SimpleBusinessManager() {
           tasks={openSiteTasks}
           onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}
         />
-        <button
-          onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
-          style={{ all: "unset", cursor: "pointer", display: "block" }}
-          aria-label={`Open today — ${openToday}`}
-        >
-          <StatCard value={openToday} label="open today" />
-        </button>
         {parkedCount > 0 && (
           <button
             onClick={() => setView({ name: "parked-todos", from: { name: "home" } })}

@@ -1651,6 +1651,56 @@ export async function resolveCall(db: D1Database, callId: string, resolvedByUser
     .run();
 }
 
+/** Home "Resolved Calls" tile — all-time count of admin-acked calls. */
+export async function countResolvedCalls(db: D1Database): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM calls
+       WHERE resolved_at IS NOT NULL AND deleted_at IS NULL`
+    )
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+export interface ResolvedCallRow {
+  id: string;
+  client_name: string;
+  client_phone: string | null;
+  recorded_at: string | null;
+  recording_date: string | null;
+  summary: string | null;
+  resolved_at: string;
+  resolved_by_name: string | null;
+  todo_count: number;
+}
+
+/** Resolved-calls AG Grid — newest resolve first. */
+export async function listResolvedCalls(db: D1Database, limit = 500): Promise<ResolvedCallRow[]> {
+  const capped = Math.max(1, Math.min(limit, 1000));
+  const { results } = await db
+    .prepare(
+      `SELECT calls.id AS id,
+              COALESCE(callers.name, 'Unknown caller') AS client_name,
+              callers.phone AS client_phone,
+              calls.recorded_at AS recorded_at,
+              calls.recording_date AS recording_date,
+              calls.summary AS summary,
+              calls.resolved_at AS resolved_at,
+              resolvers.name AS resolved_by_name,
+              (SELECT COUNT(*) FROM todos WHERE todos.call_id = calls.id) AS todo_count
+       FROM calls
+       LEFT JOIN callers ON callers.id = calls.client_id
+       LEFT JOIN users AS resolvers ON resolvers.id = calls.resolved_by_user_id
+       WHERE calls.resolved_at IS NOT NULL
+         AND calls.deleted_at IS NULL
+       ORDER BY calls.resolved_at DESC, calls.id DESC
+       LIMIT ?`
+    )
+    .bind(capped)
+    .all<ResolvedCallRow>();
+  return results ?? [];
+}
+
 /**
  * Logs "assigned {todo text} to {names}" against every site the todo's call
  * is linked to via call_sites — same free-text pattern updateSite/createSite
@@ -3823,6 +3873,8 @@ export interface DashboardSummary {
   callers_count: number;
   /** Calls Needing Action tile count (migration 0025) — admin/superadmin only; 0 on the staff-scoped summary. */
   calls_needing_action_count: number;
+  /** Resolved Calls tile — admin ack count; 0 on the staff-scoped summary. */
+  resolved_calls_count: number;
 }
 
 export interface AssignedTodoRow {
@@ -3932,6 +3984,7 @@ export async function getDashboardSummary(
       unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
       callers_count: 0,
       calls_needing_action_count: 0,
+      resolved_calls_count: 0,
     };
   }
 
@@ -3948,6 +4001,7 @@ export async function getDashboardSummary(
     staff_roster,
     open_site_tasks,
     callsNeedingActionCount,
+    resolvedCallsCount,
     my_open_todos,
   ] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'open'`).first<{ n: number }>(),
@@ -3964,6 +4018,7 @@ export async function getDashboardSummary(
     listStaffRoster(db),
     listOpenSiteTasks(db),
     countCallsNeedingAction(db),
+    countResolvedCalls(db),
     viewerUserId ? listMyOpenTodos(db, viewerUserId) : Promise.resolve([] as AssignedTodoRow[]),
   ]);
 
@@ -3982,5 +4037,6 @@ export async function getDashboardSummary(
     unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
     callers_count: callersRow?.n ?? 0,
     calls_needing_action_count: callsNeedingActionCount,
+    resolved_calls_count: resolvedCallsCount,
   };
 }
