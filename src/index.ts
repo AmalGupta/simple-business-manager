@@ -43,6 +43,8 @@ import {
   handleGetCallsNeedingActionCount,
   handleResolveCall,
   handleListResolvedCalls,
+  handleGetTodoAssignSiteOptions,
+  handleAssignTodoSite,
   handleReExtractCall,
   handleRetryCallStt,
 } from "./handlers/api";
@@ -270,6 +272,16 @@ export default {
     if (todoMatch && request.method === "PATCH") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handlePatchTodo(request, env, todoMatch[1]);
+    }
+
+    const todoAssignSiteOptsMatch = url.pathname.match(/^\/api\/todos\/([^/]+)\/assign-site$/);
+    if (todoAssignSiteOptsMatch && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetTodoAssignSiteOptions(request, env, todoAssignSiteOptsMatch[1]);
+    }
+    if (todoAssignSiteOptsMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleAssignTodoSite(request, env, todoAssignSiteOptsMatch[1]);
     }
 
     if (url.pathname === "/api/todos/auto-assign" && request.method === "POST") {

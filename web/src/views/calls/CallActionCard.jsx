@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { fmtDate } from "../../lib/dates.js";
-import { PRIMARY_BUTTON_STYLE } from "../../styles.js";
+import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 import { TodoVoiceNoteButton } from "../../components/TodoVoiceNoteButton.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
+import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
 import "./CallActionCard.css";
 
 /* One card in the Calls Needing Action carousel — see
@@ -19,12 +20,14 @@ export function CallActionCard({
   staffRoster,
   currentUser = null,
   onAssignTodo,
+  onAssignTodoSite,
   onResolve,
   onAddVoiceNote,
   voiceNotesByTodoId,
 }) {
   const [transcriptOpen, setTranscriptOpen] = useState(false);
   const [resolving, setResolving] = useState(false);
+  const [siteTodo, setSiteTodo] = useState(null);
 
   const dateIso = call.recording_date || call.recorded_at;
   const todos = call.todos ?? [];
@@ -73,6 +76,9 @@ export function CallActionCard({
           todos.map((todo) => (
             <div key={todo.id} className="cna-card__todo-row">
               <p className="cna-card__todo-text">{todo.text}</p>
+              {todo.site_name ? (
+                <p className="cna-card__todo-site">Site: {todo.site_name}</p>
+              ) : null}
               <div className="cna-card__todo-controls">
                 <TodoAssignControl
                   todo={todo}
@@ -80,11 +86,20 @@ export function CallActionCard({
                   currentUser={currentUser}
                   onAssign={onAssignTodo}
                   extraActions={
-                    <TodoVoiceNoteButton
-                      todoId={todo.id}
-                      existingNote={voiceNotesByTodoId?.get(todo.id)}
-                      onUpload={onAddVoiceNote}
-                    />
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => setSiteTodo(todo)}
+                        style={SMALL_SECONDARY_BUTTON_STYLE}
+                      >
+                        {todo.site_id ? "Change site" : "Assign to Site"}
+                      </button>
+                      <TodoVoiceNoteButton
+                        todoId={todo.id}
+                        existingNote={voiceNotesByTodoId?.get(todo.id)}
+                        onUpload={onAddVoiceNote}
+                      />
+                    </>
                   }
                 />
               </div>
@@ -98,6 +113,17 @@ export function CallActionCard({
           {resolving ? "Resolving…" : "Resolve"}
         </button>
       </div>
+
+      {siteTodo && (
+        <AssignTodoSiteModal
+          todo={siteTodo}
+          onClose={() => setSiteTodo(null)}
+          onAssigned={(result) => {
+            onAssignTodoSite?.(call.id, result);
+            setSiteTodo(null);
+          }}
+        />
+      )}
     </div>
   );
 }

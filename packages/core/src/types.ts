@@ -225,6 +225,8 @@ export interface Todo {
   origin: TodoOrigin;
 
   closed_by_call_id: string | null; // M1 placeholder — unused in M0
+  /** migration 0036 — site assigned from CNA; parent call also linked via call_sites. */
+  site_id: string | null;
   created_at: string;
 }
 

@@ -616,6 +616,30 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     resyncDefaultWindow();
   };
 
+  const handleAssignTodoSite = (callId, result) => {
+    const updated = result?.todo;
+    const siteName = result?.site_name;
+    if (!updated?.id) return;
+    setCallsById((prev) => {
+      const next = new Map(prev);
+      const call = next.get(callId);
+      if (!call) return prev;
+      const siteNames = new Set(call.sites ?? []);
+      if (siteName) siteNames.add(siteName);
+      next.set(callId, {
+        ...call,
+        sites: [...siteNames],
+        todos: call.todos.map((td) =>
+          td.id === updated.id
+            ? { ...td, ...updated, site_id: result.site_id, site_name: siteName ?? updated.site_name }
+            : td
+        ),
+      });
+      return next;
+    });
+    resyncDefaultWindow();
+  };
+
   const handleResolve = async (callId) => {
     const resolvedDate = callDateIso(callsById.get(callId) ?? {});
     await resolveCall(callId);
@@ -766,6 +790,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
                 staffRoster={staffRoster}
                 currentUser={currentUser}
                 onAssignTodo={handleAssignTodo}
+                onAssignTodoSite={handleAssignTodoSite}
                 onResolve={handleResolve}
                 onAddVoiceNote={handleAddVoiceNote}
                 voiceNotesByTodoId={voiceNotesByTodoId}
