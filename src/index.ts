@@ -74,6 +74,7 @@ import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostS
 import { handleCreateCaller, handleListCallers, handleUpdateCaller } from "./handlers/callers";
 import { handleGetSiteContactProposals, handlePostSiteContactMappings } from "./handlers/maintenance";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
+import { handlePostDeskVoiceNote } from "./handlers/desk-voice-note";
 import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
 import {
@@ -515,6 +516,12 @@ export default {
       if (!session) return new Response("Unauthorized", { status: 401 });
       if (!(await assertSiteMembership(env, session, voiceNoteMatch[1]))) return new Response("Forbidden", { status: 403 });
       return handlePostSiteVoiceNote(request, env, ctx, voiceNoteMatch[1], session.user_id);
+    }
+
+    // Desk conversation mic on admin home — same Sarvam → Claude → todos
+    // pipeline as a call/site voice memo; assigned_by = recording admin.
+    if (url.pathname === "/api/desk-voice-note" && request.method === "POST") {
+      return handlePostDeskVoiceNote(request, env, ctx);
     }
 
     const recordingMatch = url.pathname.match(/^\/api\/calls\/([^/]+)\/recording$/);

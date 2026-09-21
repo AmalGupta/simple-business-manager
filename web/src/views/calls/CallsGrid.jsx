@@ -429,22 +429,36 @@ export function CallsGrid({
         flex: narrow ? 1.2 : 1.3,
         minWidth: narrow ? 110 : 150,
         cellClass: "sbm-col-site",
-        valueGetter: (p) => p.data?.recorded_for_site_name || "—",
+        valueGetter: (p) => {
+          const explicit = p.data?.recorded_for_site_name;
+          if (explicit) return explicit;
+          const linked = Array.isArray(p.data?.sites) ? p.data.sites.filter(Boolean) : [];
+          return linked.length ? linked.join(", ") : "—";
+        },
         cellRenderer: (p) => {
-          const name = p.data?.recorded_for_site_name;
-          if (!name) return "—";
-          if (!onOpenSite) return name;
+          const explicit = p.data?.recorded_for_site_name;
+          const linked = Array.isArray(p.data?.sites) ? p.data.sites.filter(Boolean) : [];
+          const names = explicit ? [explicit] : linked;
+          if (names.length === 0) return "—";
+          if (!onOpenSite) return names.join(", ");
           return (
-            <button
-              type="button"
-              className="sbm-calls-site-link"
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpenSite(name);
-              }}
-            >
-              {name}
-            </button>
+            <span style={{ display: "inline-flex", flexWrap: "wrap", gap: "0 2px", alignItems: "baseline" }}>
+              {names.map((name, i) => (
+                <span key={`${name}-${i}`}>
+                  {i > 0 ? ", " : null}
+                  <button
+                    type="button"
+                    className="sbm-calls-site-link"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenSite(name);
+                    }}
+                  >
+                    {name}
+                  </button>
+                </span>
+              ))}
+            </span>
           );
         },
         wrapText: !horizontalScrolls,
