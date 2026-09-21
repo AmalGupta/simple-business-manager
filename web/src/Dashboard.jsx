@@ -15,6 +15,10 @@ import { WorkflowTilesRow } from "./views/home/WorkflowTilesRow.jsx";
 import { WorkflowCategorySiteList } from "./views/home/WorkflowCategorySiteList.jsx";
 import { SitesAttentionTile } from "./views/home/SitesAttentionTile.jsx";
 import { EscalationsTile } from "./views/home/EscalationsTile.jsx";
+import { StaffHomePanel } from "./views/home/StaffHomePanel.jsx";
+import { HomeDashboardTabs } from "./views/home/HomeDashboardTabs.jsx";
+import { PendingWorkView } from "./views/home/PendingWorkView.jsx";
+import { MyScheduleView } from "./views/home/MyScheduleView.jsx";
 import { StreakWall } from "./views/calls/StreakWall.jsx";
 import { DayView } from "./views/calls/DayView.jsx";
 import { CallsPageView } from "./views/calls/CallsPageView.jsx";
@@ -29,11 +33,6 @@ import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
 import { SitesReviewView } from "./views/sites/SitesReviewView.jsx";
 import { SiteView } from "./views/sites/SiteView.jsx";
-import { PendingWorkView } from "./views/home/PendingWorkView.jsx";
-import { PendingWorkTile } from "./views/home/PendingWorkTile.jsx";
-import { MyScheduleView } from "./views/home/MyScheduleView.jsx";
-import { StaffScheduleTile } from "./views/home/StaffScheduleTile.jsx";
-import { SiteVisitTile } from "./views/site-visit/SiteVisitTile.jsx";
 import { SiteVisitSiteList } from "./views/site-visit/SiteVisitSiteList.jsx";
 import { SiteVisitCategoryGrid } from "./views/site-visit/SiteVisitCategoryGrid.jsx";
 import { InstallationScreen } from "./views/site-visit/InstallationScreen.jsx";
@@ -101,6 +100,13 @@ export default function SimpleBusinessManager() {
      superadmin. See fetchOpenSiteTasks and migration 0013. */
   const [openSiteTasks, setOpenSiteTasks] = useState([]);
   const [myOpenTodos, setMyOpenTodos] = useState([]);
+  /** Admin home bookmark tabs — staff with ≥1 open call todo. */
+  const [staffWithOpenTodos, setStaffWithOpenTodos] = useState([]);
+  /** Selected admin-home tab: "admin" or a staff user id. */
+  const [homeTab, setHomeTab] = useState("admin");
+  /** Cached staff-scoped summary for the selected staff home tab. */
+  const [staffPanel, setStaffPanel] = useState(null);
+  const [staffPanelLoading, setStaffPanelLoading] = useState(false);
   const [complaintsRefreshKey, setComplaintsRefreshKey] = useState(0);
   const [view, setView] = useState({ name: "home" });
   const [busyIds, setBusyIds] = useState(new Set());
@@ -174,6 +180,9 @@ export default function SimpleBusinessManager() {
     setUnconfirmedCount(0);
     setOpenSiteTasks([]);
     setMyOpenTodos([]);
+    setStaffWithOpenTodos([]);
+    setHomeTab("admin");
+    setStaffPanel(null);
 
     const applySummary = (summary) => {
       setAllSites(summary.sites ?? []);
@@ -188,6 +197,7 @@ export default function SimpleBusinessManager() {
       setResolvedCallsCount(summary.resolved_calls_count ?? 0);
       setEscalations(summary.escalations ?? []);
       setStaffRoster(summary.staff_roster ?? []);
+      setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
     };
 
     if (me.role === "staff") {
@@ -365,6 +375,26 @@ export default function SimpleBusinessManager() {
     try {
       await patchTodo(todo.id, patch);
       setTodoRefreshKey((k) => k + 1);
+      if (me?.role !== "staff") {
+        fetchDashboardSummary()
+          .then((summary) => {
+            setMyOpenTodos(summary.my_open_todos ?? []);
+            setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
+          })
+          .catch((err) => console.error("[sbm] failed to refresh staff tabs after todo mutate", err));
+        if (homeTab !== "admin") {
+          fetchDashboardSummary({ forUserId: homeTab })
+            .then((summary) => {
+              setStaffPanel({
+                userId: homeTab,
+                openSiteTasks: summary.open_site_tasks ?? [],
+                myOpenTodos: summary.my_open_todos ?? [],
+                sites: summary.sites ?? [],
+              });
+            })
+            .catch((err) => console.error("[sbm] failed to refresh staff panel after todo mutate", err));
+        }
+      }
     } catch {
       applyCountDelta(false);
       // Restore personal-queue row when the todo came from that list
@@ -379,7 +409,7 @@ export default function SimpleBusinessManager() {
         return n;
       });
     }
-  }, []);
+  }, [me?.role, homeTab]);
 
   const onToggle = useCallback(
     (todo) =>
@@ -408,14 +438,66 @@ export default function SimpleBusinessManager() {
     try {
       const summary = await fetchDashboardSummary();
       setMyOpenTodos(summary.my_open_todos ?? []);
+      setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
+      setHomeTab((tab) => {
+        if (tab === "admin") return tab;
+        const still = (summary.staff_with_open_todos ?? []).some((s) => s.id === tab);
+        return still ? tab : "admin";
+      });
+      if (homeTab !== "admin") {
+        const staffSum = await fetchDashboardSummary({ forUserId: homeTab });
+        setStaffPanel({
+          userId: homeTab,
+          openSiteTasks: staffSum.open_site_tasks ?? [],
+          myOpenTodos: staffSum.my_open_todos ?? [],
+          sites: staffSum.sites ?? [],
+        });
+      }
     } catch (err) {
       console.error("[sbm] failed to refresh my open todos after assign", err);
     }
-    // Callers that already have the full todo in hand (e.g. the Calls
-    // Needing Action carousel) can patch their own list locally with this
-    // instead of doing a full network refetch just to pick up assignees[].
     return updated;
-  }, []);
+  }, [homeTab]);
+
+  /* Load staff-scoped summary when admin selects a staff home bookmark. */
+  useEffect(() => {
+    if (!me || me.role === "staff") return;
+    if (homeTab === "admin") {
+      setStaffPanel(null);
+      setStaffPanelLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setStaffPanelLoading(true);
+    fetchDashboardSummary({ forUserId: homeTab })
+      .then((summary) => {
+        if (cancelled) return;
+        setStaffPanel({
+          userId: homeTab,
+          openSiteTasks: summary.open_site_tasks ?? [],
+          myOpenTodos: summary.my_open_todos ?? [],
+          sites: summary.sites ?? [],
+        });
+      })
+      .catch((err) => {
+        console.error("[sbm] failed to load staff dashboard tab", err);
+        if (!cancelled) setStaffPanel(null);
+      })
+      .finally(() => {
+        if (!cancelled) setStaffPanelLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [me, homeTab]);
+
+  /* If the selected staff no longer has open todos, fall back to Admin. */
+  useEffect(() => {
+    if (homeTab === "admin") return;
+    if (!staffWithOpenTodos.some((s) => s.id === homeTab)) {
+      setHomeTab("admin");
+    }
+  }, [staffWithOpenTodos, homeTab]);
 
   useEffect(() => {
     if (view.name !== "call") {
@@ -559,6 +641,62 @@ export default function SimpleBusinessManager() {
     return <LoginScreen error={loginError} initialName={loginInitialName} />;
   }
 
+  const goHomeTab = (id) => {
+    setHomeTab(id);
+    setView({ name: "home" });
+  };
+
+  /* Same header + calendar as the admin home screen. Staff bookmark tile
+     pages reuse this so only the body under the tabs changes. */
+  const adminHomeHeader = (
+    <AppHeader
+      me={me}
+      onLogout={onLogout}
+      onResetPin={onResetPin}
+      onUpdatePhone={onUpdatePhone}
+      customization={customization}
+      onCustomizationChange={onCustomizationChange}
+      onRequestReport={() => setView({ name: "app-request", from: { name: "home" } })}
+      onOpenMaintenanceSiteContact={() =>
+        setView({ name: "maintenance-site-contact", from: { name: "home" } })
+      }
+      right={
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <DeskConversationMic />
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
+        </div>
+      }
+    >
+      <StreakWall
+        days={monthDays}
+        onSelectDay={(date) => setView({ name: "day", date })}
+        selected={null}
+        year={calMonth.year}
+        month={calMonth.month}
+        yearOptions={yearOptions}
+        onChangeYear={(y) => goToMonth(y, calMonth.month)}
+        onChangeMonth={(m) => goToMonth(calMonth.year, m)}
+        onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
+        onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
+        todayIso={isoDate(today().getFullYear(), today().getMonth(), today().getDate())}
+      />
+    </AppHeader>
+  );
+
+  /** Admin viewing a staff bookmark: keep header + tabs; swap body only. */
+  const shellInStaffBookmark = (content, opts) => {
+    const scopeId = view.forUserId || null;
+    if (!scopeId || me.role === "staff") return shell(content, opts);
+    return shell(
+      <>
+        {adminHomeHeader}
+        <HomeDashboardTabs homeTab={scopeId} staffTabs={staffWithOpenTodos} onSelect={goHomeTab} />
+        {content}
+      </>,
+      opts
+    );
+  };
+
   if (view.name === "call" && fetchedCall === undefined) {
     return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
   }
@@ -697,7 +835,7 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "sites-directory")
-    return shell(
+    return shellInStaffBookmark(
       <>
         {me.role === "staff" && (
           <AppHeader
@@ -713,7 +851,14 @@ export default function SimpleBusinessManager() {
         <SitesDirectoryView
           onBack={() => setView(view.from ?? homeView)}
           onOpenSite={(site) => setView({ name: "site", site, from: view })}
-          onAddSite={() => setView({ name: "add-site", from: view, afterCreate: { name: "site" } })}
+          onAddSite={() =>
+            setView({
+              name: "add-site",
+              from: view,
+              afterCreate: { name: "site" },
+              forUserId: view.forUserId,
+            })
+          }
           isHome={me.role === "staff" && (!view.from || view.from.name === "staff-home")}
           innerScrolls={innerScrolls}
           horizontalScrolls={horizontalScrolls}
@@ -721,6 +866,7 @@ export default function SimpleBusinessManager() {
           currentUser={me}
           onAssignTodo={me.role !== "staff" ? onAssignTodo : undefined}
           onToggleTodo={me.role !== "staff" ? onToggle : undefined}
+          forUserId={view.forUserId || null}
         />
       </>,
       // Six columns need the 1100px container, not the default 720 — same
@@ -729,17 +875,28 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "add-site")
-    return shell(
+    return shellInStaffBookmark(
       <AddSiteScreen
         defaultAssignedBy={me?.name ?? ""}
         onBack={() => setView(view.from ?? homeView)}
         onCreate={createSiteAndRefresh}
         onDone={(site) => {
+          const scopeId = view.forUserId || null;
           const next = view.afterCreate?.name;
           if (next === "site-visit-category") {
-            setView({ name: "site-visit-category", site, from: view.from ?? homeView });
+            setView({
+              name: "site-visit-category",
+              site,
+              from: view.from ?? homeView,
+              forUserId: scopeId,
+            });
           } else if (next === "site-complaint") {
-            setView({ name: "site-complaint", site, from: view.from ?? homeView });
+            setView({
+              name: "site-complaint",
+              site,
+              from: view.from ?? homeView,
+              forUserId: scopeId,
+            });
           } else {
             setView({ name: "site", site: site.name, from: view.from ?? homeView });
           }
@@ -799,143 +956,143 @@ export default function SimpleBusinessManager() {
           onRequestReport={() => setView({ name: "app-request", from: { name: "staff-home" } })}
         />
 
-        {/* Staff home tiles: Pending Work, To-Do / Calendar, Site Visit,
-            Complaints, and optional call todos when assigned. */}
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: 12,
-            marginBottom: "1.5rem",
-          }}
-        >
-          <PendingWorkTile
-            count={openSiteTasks.length}
-            onOpen={() => setView({ name: "pending-work", from: { name: "staff-home" } })}
-          />
-
-          <StaffScheduleTile
-            count={myOpenTodos.length + openSiteTasks.length}
-            onOpen={() => setView({ name: "my-schedule", from: { name: "staff-home" } })}
-          />
-
-          <SiteVisitTile
-            count={allSites.filter((s) => s.is_confirmed !== "N").length}
-            onOpen={() => setView({ name: "site-visit-sites", from: { name: "staff-home" } })}
-          />
-
-          <ComplaintsTile
-            refreshKey={complaintsRefreshKey}
-            onOpen={() => setView({ name: "complaints-home", from: { name: "staff-home" } })}
-          />
-
-          {myOpenTodos.length > 0 && (
-            <button
-              onClick={() => setView({ name: "my-open-todos", from: { name: "staff-home" } })}
-              style={{ all: "unset", cursor: "pointer", display: "block" }}
-              aria-label={`My call tasks — ${myOpenTodos.length} open`}
-            >
-              <Card tile>
-                <TileLabel>My call tasks</TileLabel>
-                <div style={TILE_VALUE_ROW_STYLE}>
-                  <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length}</span>
-                </div>
-              </Card>
-            </button>
-          )}
-        </div>
-
-        {openSiteTasks.length === 0 && myOpenTodos.length === 0 && (
-          <p style={{ fontSize: 14, color: t.edge2, marginBottom: "1.5rem" }}>Nothing assigned right now.</p>
-        )}
-
-        <button
-          onClick={() => setView({ name: "sites-directory", from: { name: "staff-home" } })}
-          style={{ all: "unset", cursor: "pointer", fontSize: 13, fontWeight: 600, color: t.accent }}
-        >
-          All my sites →
-        </button>
+        <StaffHomePanel
+          openSiteTasks={openSiteTasks}
+          myOpenTodos={myOpenTodos}
+          sites={allSites}
+          complaintsRefreshKey={complaintsRefreshKey}
+          onOpenPendingWork={() => setView({ name: "pending-work", from: { name: "staff-home" } })}
+          onOpenSchedule={() => setView({ name: "my-schedule", from: { name: "staff-home" } })}
+          onOpenSiteVisit={() => setView({ name: "site-visit-sites", from: { name: "staff-home" } })}
+          onOpenComplaints={() => setView({ name: "complaints-home", from: { name: "staff-home" } })}
+          onOpenMyOpenTodos={() => setView({ name: "my-open-todos", from: { name: "staff-home" } })}
+          onOpenSitesDirectory={() => setView({ name: "sites-directory", from: { name: "staff-home" } })}
+        />
       </>
     );
 
-  if (view.name === "pending-work")
-    return shell(
+  if (view.name === "pending-work") {
+    const scopeId = view.forUserId || null;
+    const tasks =
+      scopeId && staffPanel?.userId === scopeId ? staffPanel.openSiteTasks : openSiteTasks;
+    return shellInStaffBookmark(
       <PendingWorkView
-        tasks={openSiteTasks}
+        tasks={tasks}
         onBack={() => setView(view.from ?? homeView)}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
       />
     );
+  }
 
-  if (view.name === "my-schedule")
-    return shell(
+  if (view.name === "my-schedule") {
+    const scopeId = view.forUserId || null;
+    const todos =
+      scopeId && staffPanel?.userId === scopeId ? staffPanel.myOpenTodos : myOpenTodos;
+    const tasks =
+      scopeId && staffPanel?.userId === scopeId ? staffPanel.openSiteTasks : openSiteTasks;
+    return shellInStaffBookmark(
       <MyScheduleView
-        todos={myOpenTodos}
-        siteTasks={openSiteTasks}
+        todos={todos}
+        siteTasks={tasks}
         onBack={() => setView(view.from ?? homeView)}
-        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-schedule" } })}
+        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-schedule", forUserId: scopeId } })}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
       />
     );
+  }
 
-  if (view.name === "my-open-todos")
-    return shell(
+  if (view.name === "my-open-todos") {
+    const scopeId = view.forUserId || null;
+    const todos =
+      scopeId && staffPanel?.userId === scopeId ? staffPanel.myOpenTodos : myOpenTodos;
+    return shellInStaffBookmark(
       <MyOpenTodosView
-        todos={myOpenTodos}
+        todos={todos}
         onBack={() => setView(view.from ?? homeView)}
-        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-open-todos" } })}
+        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-open-todos", forUserId: scopeId } })}
         onToggle={onToggle}
         busyIds={busyIds}
       />
     );
+  }
 
   // --- Staff field workflow (migration 0016): site visit -> category ->
   // installation checklist, and the site-level complaint form. ---
 
   if (view.name === "site-visit-sites")
-    return shell(
+    return shellInStaffBookmark(
       <SiteVisitSiteList
+        forUserId={view.forUserId || null}
         onBack={() => setView(view.from ?? homeView)}
-        onSelectSite={(site) => setView({ name: "site-visit-category", site, from: view })}
+        onSelectSite={(site) =>
+          setView({ name: "site-visit-category", site, from: view, forUserId: view.forUserId })
+        }
         onAddSite={() =>
-          setView({ name: "add-site", from: view, afterCreate: { name: "site-visit-category" } })
+          setView({
+            name: "add-site",
+            from: view,
+            afterCreate: { name: "site-visit-category" },
+            forUserId: view.forUserId,
+          })
         }
       />
     );
 
   if (view.name === "complaints-home")
-    return shell(
+    return shellInStaffBookmark(
       <ComplaintsHomeView
         refreshKey={complaintsRefreshKey}
+        forUserId={view.forUserId || null}
         onBack={() => setView(view.from ?? homeView)}
-        onAddComplaint={() => setView({ name: "complaint-sites", from: view })}
+        onAddComplaint={() =>
+          setView({ name: "complaint-sites", from: view, forUserId: view.forUserId })
+        }
         canAdd={me.role === "staff"}
-        canAssign={me.role !== "staff"}
+        canAssign={me.role !== "staff" && !view.forUserId}
         staffRoster={staffRoster}
         onAssignComplaint={onAssignComplaint}
       />
     );
 
   if (view.name === "complaint-sites")
-    return shell(
+    return shellInStaffBookmark(
       <SiteVisitSiteList
         title="New complaint"
         prompt="Which site is this about?"
         addLabel="Add new site"
-        onBack={() => setView(view.from ?? { name: "complaints-home", from: homeView })}
-        onSelectSite={(site) => setView({ name: "site-complaint", site, from: view })}
-        onAddSite={() => setView({ name: "add-site", from: view, afterCreate: { name: "site-complaint" } })}
+        forUserId={view.forUserId || null}
+        onBack={() =>
+          setView(
+            view.from ?? {
+              name: "complaints-home",
+              from: homeView,
+              forUserId: view.forUserId,
+            }
+          )
+        }
+        onSelectSite={(site) =>
+          setView({ name: "site-complaint", site, from: view, forUserId: view.forUserId })
+        }
+        onAddSite={() =>
+          setView({
+            name: "add-site",
+            from: view,
+            afterCreate: { name: "site-complaint" },
+            forUserId: view.forUserId,
+          })
+        }
       />
     );
 
   if (view.name === "site-visit-category")
-    return shell(
+    return shellInStaffBookmark(
       <SiteVisitCategoryGrid
         site={view.site}
         onBack={() => setView(view.from ?? homeView)}
         onOpenCategory={async (category) => {
+          const scopeId = view.forUserId || null;
           if (category === "complaints") {
-            setView({ name: "site-complaint", site: view.site, from: view });
+            setView({ name: "site-complaint", site: view.site, from: view, forUserId: scopeId });
             return;
           }
           // Skip the instance list — create a row and open the checklist.
@@ -943,14 +1100,20 @@ export default function SimpleBusinessManager() {
           setView({
             name: "installation",
             installation: created,
-            from: { name: "site-visit-category", site: view.site, from: view.from },
+            forUserId: scopeId,
+            from: {
+              name: "site-visit-category",
+              site: view.site,
+              from: view.from,
+              forUserId: scopeId,
+            },
           });
         }}
       />
     );
 
   if (view.name === "installation")
-    return shell(
+    return shellInStaffBookmark(
       <InstallationScreen
         installation={view.installation}
         onBack={() => setView(view.from ?? homeView)}
@@ -959,13 +1122,25 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "site-complaint")
-    return shell(
+    return shellInStaffBookmark(
       <SiteComplaintForm
         site={view.site}
-        onBack={() => setView(view.from ?? { name: "complaints-home", from: homeView })}
+        onBack={() =>
+          setView(
+            view.from ?? {
+              name: "complaints-home",
+              from: homeView,
+              forUserId: view.forUserId,
+            }
+          )
+        }
         onSubmitted={() => {
           setComplaintsRefreshKey((k) => k + 1);
-          setView({ name: "complaints-home", from: homeView });
+          setView({
+            name: "complaints-home",
+            from: homeView,
+            forUserId: view.forUserId,
+          });
         }}
       />
     );
@@ -976,44 +1151,48 @@ export default function SimpleBusinessManager() {
 
   return shell(
     <>
-      <AppHeader
-        me={me}
-        onLogout={onLogout}
-        onResetPin={onResetPin}
-        onUpdatePhone={onUpdatePhone}
-        customization={customization}
-        onCustomizationChange={onCustomizationChange}
-        onRequestReport={() => setView({ name: "app-request", from: { name: "home" } })}
-        onOpenMaintenanceSiteContact={() =>
-          setView({ name: "maintenance-site-contact", from: { name: "home" } })
-        }
-        right={
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <DeskConversationMic />
-            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
-          </div>
-        }
-      >
-        <StreakWall
-          days={monthDays}
-          onSelectDay={(date) => setView({ name: "day", date })}
-          selected={null}
-          year={calMonth.year}
-          month={calMonth.month}
-          yearOptions={yearOptions}
-          onChangeYear={(y) => goToMonth(y, calMonth.month)}
-          onChangeMonth={(m) => goToMonth(calMonth.year, m)}
-          onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
-          onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
-          todayIso={isoDate(today().getFullYear(), today().getMonth(), today().getDate())}
-        />
-      </AppHeader>
+      {adminHomeHeader}
 
-      {/* Home tile panel. 2 columns on a phone; auto-widens toward one
+      <HomeDashboardTabs homeTab={homeTab} staffTabs={staffWithOpenTodos} onSelect={goHomeTab} />
+
+      {homeTab !== "admin" ? (
+        staffPanelLoading ? (
+          <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+        ) : staffPanel?.userId === homeTab ? (
+          <StaffHomePanel
+            openSiteTasks={staffPanel.openSiteTasks}
+            myOpenTodos={staffPanel.myOpenTodos}
+            sites={staffPanel.sites}
+            complaintsRefreshKey={complaintsRefreshKey}
+            forUserId={homeTab}
+            onOpenPendingWork={() =>
+              setView({ name: "pending-work", forUserId: homeTab, from: { name: "home" } })
+            }
+            onOpenSchedule={() =>
+              setView({ name: "my-schedule", forUserId: homeTab, from: { name: "home" } })
+            }
+            onOpenSiteVisit={() =>
+              setView({ name: "site-visit-sites", forUserId: homeTab, from: { name: "home" } })
+            }
+            onOpenComplaints={() =>
+              setView({ name: "complaints-home", forUserId: homeTab, from: { name: "home" } })
+            }
+            onOpenMyOpenTodos={() =>
+              setView({ name: "my-open-todos", forUserId: homeTab, from: { name: "home" } })
+            }
+            onOpenSitesDirectory={() =>
+              setView({ name: "sites-directory", forUserId: homeTab, from: { name: "home" } })
+            }
+          />
+        ) : (
+          <p style={{ fontSize: 14, color: t.edge2 }}>Couldn’t load this staff dashboard.</p>
+        )
+      ) : (
+      /* Home tile panel. 2 columns on a phone; auto-widens toward one
           row as space allows. Every tile is fixed to --tile-height (see the
           Card `tile` variant) so the grid stays symmetrical regardless of
           content — list tiles (EscalationsTile) scroll internally instead
-          of growing taller than their neighbours. */}
+          of growing taller than their neighbours. */
       <div
         style={{
           display: "grid",
@@ -1099,6 +1278,7 @@ export default function SimpleBusinessManager() {
           </button>
         )}
       </div>
+      )}
     </>
   );
 }

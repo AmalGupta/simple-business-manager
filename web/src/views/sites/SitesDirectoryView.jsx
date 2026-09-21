@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
 import { t } from "../../theme.js";
-import { getCachedConfirmedSites, loadConfirmedSites, refreshConfirmedSites } from "../../lib/api.js";
+import { getCachedConfirmedSites, loadConfirmedSites, refreshConfirmedSites, fetchConfirmedSites } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { SitesGrid } from "./SitesGrid.jsx";
@@ -28,23 +28,32 @@ export function SitesDirectoryView({
   currentUser = null,
   onAssignTodo,
   onToggleTodo,
+  forUserId = null,
 }) {
-  const [sites, setSites] = useState(() => getCachedConfirmedSites());
+  const [sites, setSites] = useState(() => (forUserId ? null : getCachedConfirmedSites()));
   const [openTodosSite, setOpenTodosSite] = useState(null);
 
   const reloadSites = useCallback(() => {
+    if (forUserId) {
+      return fetchConfirmedSites({ forUserId })
+        .then((data) => setSites(data))
+        .catch((err) => {
+          console.error("[sbm] failed to refresh confirmed sites", err);
+        });
+    }
     return refreshConfirmedSites()
       .then((data) => setSites(data))
       .catch((err) => {
         console.error("[sbm] failed to refresh confirmed sites", err);
       });
-  }, []);
+  }, [forUserId]);
 
   useEffect(() => {
     let cancelled = false;
-    /* Instant paint from cache when fresh (per-view TTL in api.js);
-       otherwise falls through to a real fetch — see loadConfirmedSites. */
-    loadConfirmedSites()
+    const load = forUserId
+      ? fetchConfirmedSites({ forUserId })
+      : loadConfirmedSites();
+    load
       .then((data) => {
         if (!cancelled) setSites(data);
       })
@@ -55,7 +64,7 @@ export function SitesDirectoryView({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [forUserId]);
 
   return (
     /* Under inner_scrolls the grid sizes itself with height:100% (see
