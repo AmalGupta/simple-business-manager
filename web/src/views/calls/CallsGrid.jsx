@@ -429,10 +429,10 @@ export function CallsGrid({
         flex: narrow ? 1.2 : 1.3,
         minWidth: narrow ? 110 : 150,
         cellClass: "sbm-col-site",
-        valueGetter: (p) => p.data?.recorded_for_site_name || "—",
+        valueGetter: (p) => p.data?.recorded_for_site_name || (p.data?.uploaded_by_name ? "Desk" : "—"),
         cellRenderer: (p) => {
           const name = p.data?.recorded_for_site_name;
-          if (!name) return "—";
+          if (!name) return p.data?.uploaded_by_name ? "Desk" : "—";
           if (!onOpenSite) return name;
           return (
             <button
