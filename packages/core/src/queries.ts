@@ -4112,6 +4112,14 @@ export async function listMyOpenTodos(db: D1Database, userId: string): Promise<A
               COALESCE(
                 callers.name,
                 recorded_sites.name,
+                (
+                  SELECT sites.name FROM call_sites
+                  JOIN sites ON sites.id = call_sites.site_id
+                  WHERE call_sites.call_id = calls.id
+                    AND sites.is_confirmed IS NOT 'N'
+                  ORDER BY sites.name ASC
+                  LIMIT 1
+                ),
                 CASE WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'Desk conversation' END,
                 'Unknown caller'
               ) AS client_name,
