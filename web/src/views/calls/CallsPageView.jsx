@@ -431,7 +431,7 @@ export function CallsPageView({
   const isVoiceNotesTab = logTab === "voice_notes";
   const logHeading = isVoiceNotesTab ? "Voice note logs" : "Call logs";
   const emptyCopy = isVoiceNotesTab
-    ? "No site voice notes yet. Memos from sites, checklists, and complaints show up here."
+    ? "No voice notes yet. Desk conversations and memos from sites, checklists, and complaints show up here."
     : null;
 
   return (
