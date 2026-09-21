@@ -4047,6 +4047,38 @@ export interface DashboardSummary {
   calls_needing_action_count: number;
   /** Resolved Calls tile — admin ack count; 0 on the staff-scoped summary. */
   resolved_calls_count: number;
+  /**
+   * Admin home bookmark tabs — staff who currently have ≥1 open call todo.
+   * Empty on staff-scoped summaries.
+   */
+  staff_with_open_todos: StaffWithOpenTodosRow[];
+}
+
+export interface StaffWithOpenTodosRow {
+  id: string;
+  name: string;
+  open_todo_count: number;
+}
+
+/** Staff accounts with at least one open call todo assigned — admin home tabs. */
+export async function listStaffWithOpenCallTodos(db: D1Database): Promise<StaffWithOpenTodosRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT users.id AS id,
+              users.name AS name,
+              COUNT(*) AS open_todo_count
+       FROM todo_assignees
+       JOIN todos ON todos.id = todo_assignees.todo_id AND todos.status = 'open'
+       JOIN users ON users.id = todo_assignees.user_id AND users.role = 'staff'
+       GROUP BY users.id, users.name
+       ORDER BY users.name ASC`
+    )
+    .all<StaffWithOpenTodosRow>();
+  return (results ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    open_todo_count: Number(r.open_todo_count) || 0,
+  }));
 }
 
 export interface AssignedTodoRow {
@@ -4171,6 +4203,7 @@ export async function getDashboardSummary(
       callers_count: 0,
       calls_needing_action_count: 0,
       resolved_calls_count: 0,
+      staff_with_open_todos: [],
     };
   }
 
@@ -4189,6 +4222,7 @@ export async function getDashboardSummary(
     callsNeedingActionCount,
     resolvedCallsCount,
     my_open_todos,
+    staff_with_open_todos,
   ] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'open'`).first<{ n: number }>(),
     db
@@ -4206,6 +4240,7 @@ export async function getDashboardSummary(
     countCallsNeedingAction(db),
     countResolvedCalls(db),
     viewerUserId ? listMyOpenTodos(db, viewerUserId) : Promise.resolve([] as AssignedTodoRow[]),
+    listStaffWithOpenCallTodos(db),
   ]);
 
   return {
@@ -4224,5 +4259,6 @@ export async function getDashboardSummary(
     callers_count: callersRow?.n ?? 0,
     calls_needing_action_count: callsNeedingActionCount,
     resolved_calls_count: resolvedCallsCount,
+    staff_with_open_todos,
   };
 }

@@ -70,6 +70,7 @@ import { ACTIVE } from "../../packages/core/prompts";
 import { extractCall } from "../../packages/core/prompts/extract";
 import { scanCallForSites } from "../../packages/core/prompts/site-scan";
 import { requireSession } from "../lib/auth";
+import { resolveForUserId } from "../lib/for-user-scope";
 import { submitRecording } from "../lib/sarvam";
 import type { Env } from "../index";
 
@@ -332,13 +333,21 @@ export async function handleGetCallTranscripts(request: Request, env: Env): Prom
 /**
  * Home read model — live tile counts + small lists, no call transcripts.
  * Any logged-in role; staff get only their sites + open site tasks.
+ * Admin may pass ?for_user_id= to load that staff member's staff-home summary
+ * (admin home bookmark tabs).
  */
 export async function handleGetDashboardSummary(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const forUserId = session.user_role === "staff" ? session.user_id : null;
+  const scoped = await resolveForUserId(request, env, session);
+  if (scoped instanceof Response) return scoped;
+
+  if (scoped) {
+    return json(await getDashboardSummary(env.DB, scoped));
+  }
+
   const viewerUserId = session.user_role === "staff" ? null : session.user_id;
-  return json(await getDashboardSummary(env.DB, forUserId, viewerUserId));
+  return json(await getDashboardSummary(env.DB, null, viewerUserId));
 }
 
 /**
@@ -492,7 +501,9 @@ export async function handleAutoAssignTodos(request: Request, env: Env): Promise
 export async function handleGetSites(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const forUserId = session.user_role === "staff" ? session.user_id : null;
+  const scoped = await resolveForUserId(request, env, session);
+  if (scoped instanceof Response) return scoped;
+  const forUserId = scoped;
   const rows = await listSites(env.DB, forUserId);
   /* Contacts merged here rather than joined in SITE_ROW_SELECT, for the same
      reason handleGetConfirmedSites does it: a site has many, and flattening
@@ -550,11 +561,14 @@ export async function handleGetSitesAttention(request: Request, env: Env): Promi
   return json(await getSitesNeedingAttention(env.DB));
 }
 
-/** Same staff-vs-admin scoping as handleGetSites — see comment there. */
+/** Same staff-vs-admin scoping as handleGetSites — see comment there.
+ *  Admin may pass ?for_user_id= when viewing a staff home bookmark. */
 export async function handleGetConfirmedSites(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const forUserId = session.user_role === "staff" ? session.user_id : null;
+  const scoped = await resolveForUserId(request, env, session);
+  if (scoped instanceof Response) return scoped;
+  const forUserId = scoped;
   const [rows, unreadCounts] = await Promise.all([
     getConfirmedSitesSummary(env.DB, forUserId),
     getUnreadActivityCounts(env.DB, session.user_id, session.user_role),
@@ -855,20 +869,23 @@ export async function handleGetEscalations(request: Request, env: Env): Promise<
   return json(await listOpenEscalations(env.DB));
 }
 
-/** Complaints list — staff see complaints they filed or at their sites; admin sees all. */
+/** Complaints list — staff see complaints they filed or at their sites; admin sees all.
+ *  Admin may pass ?for_user_id= when viewing a staff home bookmark. */
 export async function handleGetComplaints(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const forUserId = session.user_role === "staff" ? session.user_id : null;
-  return json(await listComplaints(env.DB, forUserId));
+  const scoped = await resolveForUserId(request, env, session);
+  if (scoped instanceof Response) return scoped;
+  return json(await listComplaints(env.DB, scoped));
 }
 
 /** Open complaints count — home tile for staff and admin. */
 export async function handleGetComplaintsCount(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const forUserId = session.user_role === "staff" ? session.user_id : null;
-  return json({ count: await countOpenComplaints(env.DB, forUserId) });
+  const scoped = await resolveForUserId(request, env, session);
+  if (scoped instanceof Response) return scoped;
+  return json({ count: await countOpenComplaints(env.DB, scoped) });
 }
 
 /** Admin assigns a staff-filed complaint to a team member. */
