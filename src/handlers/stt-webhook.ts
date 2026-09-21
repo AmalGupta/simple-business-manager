@@ -225,12 +225,18 @@ export async function handleSarvamWebhook(
         ? [{ speaker_id: "unknown", transcript: result.transcript }]
         : [];
     const caller = call.client_id ? await getCallerById(env.DB, call.client_id) : null;
+    /* In-app recordings (desk conversation, site voice memo) always carry
+       uploaded_by_user_id — trusted like a staff caller; skip spam-scan. */
+    const trustedInApp = Boolean(call.uploaded_by_user_id);
 
-    if (caller?.category === "staff") {
+    if (caller?.category === "staff" || trustedInApp) {
       // Trusted — straight to extraction, no spam-check. Two independent
       // waitUntils, same as before this feature: a scan failure must never
       // block the extraction that actually produces the dashboard card.
-      ctx.waitUntil(runExtractionAndSiteScan(env, call, entries, caller.name));
+      const label =
+        caller?.name ??
+        (call.recorded_for_site_id ? null : trustedInApp ? "Desk conversation" : null);
+      ctx.waitUntil(runExtractionAndSiteScan(env, call, entries, label));
     } else {
       // 'client' category, or a legacy call with no linked caller — spam
       // check first. Collapsed into one waitUntil: a spam verdict has to

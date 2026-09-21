@@ -10,7 +10,7 @@ import { useRecorder } from "../../hooks/useRecorder.js";
 
    Capture itself lives in useRecorder so the mic can be used without
    this overlay; this component is just the chrome around it. */
-export function VoiceNoteModal({ onClose, onSave }) {
+export function VoiceNoteModal({ onClose, onSave, title = "Record voice note" }) {
   const { status, elapsedS, error, previewUrl, start, stop, save } = useRecorder();
 
   const handleSave = async () => {
@@ -27,7 +27,7 @@ export function VoiceNoteModal({ onClose, onSave }) {
   const ss = String(elapsedS % 60).padStart(2, "0");
 
   return (
-    <Modal label="Record voice note" title="Record voice note" onClose={onClose}>
+    <Modal label={title} title={title} onClose={onClose}>
       {status === "idle" && (
         <button
           onClick={start}
