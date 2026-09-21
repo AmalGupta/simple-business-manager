@@ -8,12 +8,12 @@ import { TileLabel } from "../../components/TileLabel.jsx";
 
 /* Home-panel Complaints tile — open staff-filed complaint count for staff
    and admin. Always shows the number (including 0). */
-export function ComplaintsTile({ onOpen, refreshKey = 0 }) {
+export function ComplaintsTile({ onOpen, refreshKey = 0, forUserId = null }) {
   const [count, setCount] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetchComplaintsCount()
+    fetchComplaintsCount({ forUserId: forUserId || undefined })
       .then((n) => {
         if (!cancelled) setCount(n);
       })
@@ -24,7 +24,7 @@ export function ComplaintsTile({ onOpen, refreshKey = 0 }) {
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
+  }, [refreshKey, forUserId]);
 
   return (
     <button

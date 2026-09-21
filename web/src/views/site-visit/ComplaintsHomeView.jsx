@@ -94,17 +94,18 @@ export function ComplaintsHomeView({
   canAssign = false,
   staffRoster = [],
   onAssignComplaint,
+  forUserId = null,
 }) {
   const [complaints, setComplaints] = useState(null);
 
   const load = useCallback(() => {
-    fetchComplaints()
+    fetchComplaints({ forUserId: forUserId || undefined })
       .then((data) => setComplaints(data))
       .catch((err) => {
         console.error("[sbm] failed to load complaints", err);
         setComplaints([]);
       });
-  }, []);
+  }, [forUserId]);
 
   useEffect(() => {
     load();

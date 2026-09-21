@@ -16,12 +16,13 @@ export function SiteVisitSiteList({
   title = "Site Visit",
   prompt = "Which site are you at?",
   addLabel = "Add new site",
+  forUserId = null,
 }) {
   const [sites, setSites] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetchConfirmedSites()
+    fetchConfirmedSites({ forUserId: forUserId || undefined })
       .then((data) => {
         if (!cancelled) setSites(data);
       })
@@ -32,7 +33,7 @@ export function SiteVisitSiteList({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [forUserId]);
 
   return (
     <div>
