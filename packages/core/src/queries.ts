@@ -893,6 +893,10 @@ export interface CallRow {
    * grid to label Voice Note vs Voice Call without a schema migration.
    */
   recorded_for_site_id: string | null;
+  /** Joined site name when recorded_for_site_id is set (Voice notes tab). */
+  recorded_for_site_name: string | null;
+  /** Logged-in uploader for voice notes — Note By column. */
+  uploaded_by_name: string | null;
   sites: string[];
   deadline: string | null;
   summary: string | null;
@@ -941,6 +945,8 @@ interface RawCallJoinRow {
   source: CallSource;
   call_type: CallType | null;
   recorded_for_site_id: string | null;
+  recorded_for_site_name: string | null;
+  uploaded_by_name: string | null;
   summary: string | null;
   key_takeaways: string | null;
   unresolved: string | null;
@@ -986,10 +992,14 @@ const CALL_SELECT = `
          transcripts.transcript AS transcript,
          CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
          COALESCE(callers.name, 'Unknown caller') AS client_name,
-         callers.phone AS client_phone
+         callers.phone AS client_phone,
+         uploaders.name AS uploaded_by_name,
+         recorded_sites.name AS recorded_for_site_name
   FROM calls
   LEFT JOIN callers ON calls.client_id = callers.id
   LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
+  LEFT JOIN users AS uploaders ON uploaders.id = calls.uploaded_by_user_id
+  LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
 `;
 
 /* Lean list for GET /api/calls — same joins/filters as CALL_SELECT but never
@@ -1001,10 +1011,14 @@ const CALL_LIST_SELECT = `
          NULL AS transcript,
          CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
          COALESCE(callers.name, 'Unknown caller') AS client_name,
-         callers.phone AS client_phone
+         callers.phone AS client_phone,
+         uploaders.name AS uploaded_by_name,
+         recorded_sites.name AS recorded_for_site_name
   FROM calls
   LEFT JOIN callers ON calls.client_id = callers.id
   LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
+  LEFT JOIN users AS uploaders ON uploaders.id = calls.uploaded_by_user_id
+  LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
 `;
 
 const TODO_SELECT = `
@@ -1116,6 +1130,8 @@ function toCallRow(
     customer_waiting: customerWaiting,
     call_type: c.call_type,
     recorded_for_site_id: c.recorded_for_site_id ?? null,
+    recorded_for_site_name: c.recorded_for_site_name ?? null,
+    uploaded_by_name: c.uploaded_by_name ?? null,
     sites,
     deadline: c.deadline,
     summary: c.summary,
