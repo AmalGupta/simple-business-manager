@@ -19,25 +19,35 @@ import { CallsGrid } from "./CallsGrid.jsx";
 import { CallDetailModal } from "./CallDetailModal.jsx";
 import { DrivePollStatus } from "./DrivePollStatus.jsx";
 
-const EMPTY_FILTERS = {
-  dateFrom: "",
-  dateTo: "",
-  callers: [],
-  importantOnly: false,
-  withTodosOnly: false,
-  entryTypes: [],
-};
+const LOG_TABS = [
+  { id: "calls", label: "Calls", entryType: "voice_call" },
+  { id: "voice_notes", label: "Voice notes", entryType: "voice_note" },
+];
+
+function filtersForTab(tabId, base = {}) {
+  const tab = LOG_TABS.find((t) => t.id === tabId) ?? LOG_TABS[0];
+  return {
+    dateFrom: base.dateFrom ?? "",
+    dateTo: base.dateTo ?? "",
+    callers: base.callers ?? [],
+    importantOnly: Boolean(base.importantOnly),
+    withTodosOnly: Boolean(base.withTodosOnly),
+    entryTypes: [tab.entryType],
+  };
+}
+
+const EMPTY_FILTERS = filtersForTab("calls");
 
 const PAGE_SIZE = 50;
 
+/** User-applied filters only — tab-owned entryTypes do not count. */
 function filtersActive(filters) {
   return Boolean(
     filters.dateFrom ||
       filters.dateTo ||
       (filters.callers?.length ?? 0) > 0 ||
       filters.importantOnly ||
-      filters.withTodosOnly ||
-      (filters.entryTypes?.length ?? 0) > 0
+      filters.withTodosOnly
   );
 }
 
@@ -99,6 +109,7 @@ export function CallsPageView({
   const [pageIndex, setPageIndex] = useState(0);
   const [activeKey, setActiveKey] = useState(null);
   const [loadError, setLoadError] = useState("");
+  const [logTab, setLogTab] = useState("calls");
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [callerOptions, setCallerOptions] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
@@ -398,11 +409,29 @@ export function CallsPageView({
     }
   };
 
+  const switchLogTab = (tabId) => {
+    if (tabId === logTab) return;
+    setLogTab(tabId);
+    setSelectedId(null);
+    setFilters((prev) => filtersForTab(tabId, prev));
+  };
+
+  const onFiltersChange = (next) => {
+    /* Tabs own entryTypes — filter bar must not clear or rewrite them. */
+    const tab = LOG_TABS.find((t) => t.id === logTab) ?? LOG_TABS[0];
+    setFilters({ ...next, entryTypes: [tab.entryType] });
+  };
+
   const serverOffset = pageIndex * PAGE_SIZE;
   const currentPages = activeKey ? cache.current.get(activeKey) : null;
   const hasServerNext = Boolean(currentPages?.[pageIndex]?.next_cursor);
   const initialLoading = rows === null;
   const noCallsAtAll = !initialLoading && total === 0 && !filtersActive(filters) && !fetching;
+  const isVoiceNotesTab = logTab === "voice_notes";
+  const logHeading = isVoiceNotesTab ? "Voice note logs" : "Call logs";
+  const emptyCopy = isVoiceNotesTab
+    ? "No site voice notes yet. Memos from sites, checklists, and complaints show up here."
+    : null;
 
   return (
     <div
@@ -415,6 +444,7 @@ export function CallsPageView({
         overflow: innerScrolls ? "hidden" : "visible",
       }}
     >
+      <style>{LOG_TABS_CSS}</style>
       <div style={{ flexShrink: 0, position: "sticky", top: 0, zIndex: 2, background: t.pane }}>
         <BackLink onClick={onBack}>Back</BackLink>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -429,72 +459,99 @@ export function CallsPageView({
         </div>
       </div>
 
-      <Card style={{ marginBottom: 0, padding: "10px 14px", flexShrink: 0 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-          <TileLabel>Drive sync</TileLabel>
-          <button
-            type="button"
-            onClick={onGetLatest}
-            disabled={pollBusy}
-            style={{
-              fontFamily: t.body,
-              fontSize: 13,
-              fontWeight: 600,
-              color: "#fff",
-              background: t.accent,
-              border: "none",
-              borderRadius: t.radiusButton,
-              padding: "8px 12px",
-              minHeight: 36,
-              cursor: pollBusy ? "wait" : "pointer",
-              opacity: pollBusy ? 0.7 : 1,
-            }}
-          >
-            Get latest calls
-          </button>
-          <label
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              fontSize: 13,
-              color: t.edge,
-              cursor: pollBusy ? "wait" : "pointer",
-              userSelect: "none",
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={pollEnabled}
+      <div className="sbm-calls-log-tabs" role="tablist" aria-label="Call and voice note logs">
+        {LOG_TABS.map((tab) => {
+          const selected = logTab === tab.id;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              className="sbm-calls-log-tab"
+              onClick={() => switchLogTab(tab.id)}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {!isVoiceNotesTab && (
+        <Card style={{ marginBottom: 0, padding: "10px 14px", flexShrink: 0 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
+            <TileLabel>Drive sync</TileLabel>
+            <button
+              type="button"
+              onClick={onGetLatest}
               disabled={pollBusy}
-              onChange={onTogglePolling}
-              style={{ width: 16, height: 16, accentColor: "var(--color-accent)" }}
-            />
-            Permanent polling
-          </label>
-          {pollStatus ? (
-            <span style={{ fontSize: 12, color: t.signal, flex: "1 1 120px" }}>{pollStatus}</span>
-          ) : null}
-          <DrivePollStatus progress={pollProgress} lastResult={pollMeta.lastResult} />
-        </div>
-      </Card>
+              style={{
+                fontFamily: t.body,
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#fff",
+                background: t.accent,
+                border: "none",
+                borderRadius: t.radiusButton,
+                padding: "8px 12px",
+                minHeight: 36,
+                cursor: pollBusy ? "wait" : "pointer",
+                opacity: pollBusy ? 0.7 : 1,
+              }}
+            >
+              Get latest calls
+            </button>
+            <label
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 13,
+                color: t.edge,
+                cursor: pollBusy ? "wait" : "pointer",
+                userSelect: "none",
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={pollEnabled}
+                disabled={pollBusy}
+                onChange={onTogglePolling}
+                style={{ width: 16, height: 16, accentColor: "var(--color-accent)" }}
+              />
+              Permanent polling
+            </label>
+            {pollStatus ? (
+              <span style={{ fontSize: 12, color: t.signal, flex: "1 1 120px" }}>{pollStatus}</span>
+            ) : null}
+            <DrivePollStatus progress={pollProgress} lastResult={pollMeta.lastResult} />
+          </div>
+        </Card>
+      )}
 
       {loadError && (
         <p style={{ fontSize: 14, color: t.signal, margin: 0, flexShrink: 0 }}>{loadError}</p>
       )}
 
       {initialLoading ? (
-        <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>Loading calls…</p>
+        <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>
+          {isVoiceNotesTab ? "Loading voice notes…" : "Loading calls…"}
+        </p>
       ) : noCallsAtAll ? (
-        <EmptyState />
+        emptyCopy ? (
+          <p style={{ fontSize: 14, color: t.edge2, margin: "12px 0 0" }}>{emptyCopy}</p>
+        ) : (
+          <EmptyState />
+        )
       ) : (
         <>
           <div style={{ flexShrink: 0, position: "sticky", top: 0, zIndex: 1, background: t.pane }}>
             <CallsFilterBar
               filters={filters}
               callerOptions={callerOptions}
-              onChange={setFilters}
+              onChange={onFiltersChange}
               resultCount={total}
+              resultNoun={isVoiceNotesTab ? "note" : "call"}
             />
           </div>
           <h2
@@ -507,7 +564,7 @@ export function CallsPageView({
               flexShrink: 0,
             }}
           >
-            Call / Voice Note Logs
+            {logHeading}
             {fetching ? (
               <span style={{ fontSize: 13, fontWeight: 500, color: t.edge2, marginLeft: 10 }}>Updating…</span>
             ) : null}
@@ -542,3 +599,34 @@ export function CallsPageView({
     </div>
   );
 }
+
+const LOG_TABS_CSS = `
+.sbm-calls-log-tabs {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--color-line);
+}
+.sbm-calls-log-tab {
+  appearance: none;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  margin: 0 0 -1px;
+  padding: 10px 16px;
+  font-family: var(--font-label), system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-slate);
+  cursor: pointer;
+}
+.sbm-calls-log-tab[aria-selected="true"] {
+  background: var(--color-surface);
+  border-color: var(--color-line);
+  color: var(--color-ink);
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+}
+`;
