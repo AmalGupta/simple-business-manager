@@ -641,6 +641,62 @@ export default function SimpleBusinessManager() {
     return <LoginScreen error={loginError} initialName={loginInitialName} />;
   }
 
+  const goHomeTab = (id) => {
+    setHomeTab(id);
+    setView({ name: "home" });
+  };
+
+  /* Same header + calendar as the admin home screen. Staff bookmark tile
+     pages reuse this so only the body under the tabs changes. */
+  const adminHomeHeader = (
+    <AppHeader
+      me={me}
+      onLogout={onLogout}
+      onResetPin={onResetPin}
+      onUpdatePhone={onUpdatePhone}
+      customization={customization}
+      onCustomizationChange={onCustomizationChange}
+      onRequestReport={() => setView({ name: "app-request", from: { name: "home" } })}
+      onOpenMaintenanceSiteContact={() =>
+        setView({ name: "maintenance-site-contact", from: { name: "home" } })
+      }
+      right={
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <DeskConversationMic />
+          <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
+        </div>
+      }
+    >
+      <StreakWall
+        days={monthDays}
+        onSelectDay={(date) => setView({ name: "day", date })}
+        selected={null}
+        year={calMonth.year}
+        month={calMonth.month}
+        yearOptions={yearOptions}
+        onChangeYear={(y) => goToMonth(y, calMonth.month)}
+        onChangeMonth={(m) => goToMonth(calMonth.year, m)}
+        onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
+        onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
+        todayIso={isoDate(today().getFullYear(), today().getMonth(), today().getDate())}
+      />
+    </AppHeader>
+  );
+
+  /** Admin viewing a staff bookmark: keep header + tabs; swap body only. */
+  const shellInStaffBookmark = (content, opts) => {
+    const scopeId = view.forUserId || null;
+    if (!scopeId || me.role === "staff") return shell(content, opts);
+    return shell(
+      <>
+        {adminHomeHeader}
+        <HomeDashboardTabs homeTab={scopeId} staffTabs={staffWithOpenTodos} onSelect={goHomeTab} />
+        {content}
+      </>,
+      opts
+    );
+  };
+
   if (view.name === "call" && fetchedCall === undefined) {
     return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
   }
@@ -779,7 +835,7 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "sites-directory")
-    return shell(
+    return shellInStaffBookmark(
       <>
         {me.role === "staff" && (
           <AppHeader
@@ -795,7 +851,14 @@ export default function SimpleBusinessManager() {
         <SitesDirectoryView
           onBack={() => setView(view.from ?? homeView)}
           onOpenSite={(site) => setView({ name: "site", site, from: view })}
-          onAddSite={() => setView({ name: "add-site", from: view, afterCreate: { name: "site" } })}
+          onAddSite={() =>
+            setView({
+              name: "add-site",
+              from: view,
+              afterCreate: { name: "site" },
+              forUserId: view.forUserId,
+            })
+          }
           isHome={me.role === "staff" && (!view.from || view.from.name === "staff-home")}
           innerScrolls={innerScrolls}
           horizontalScrolls={horizontalScrolls}
@@ -812,17 +875,28 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "add-site")
-    return shell(
+    return shellInStaffBookmark(
       <AddSiteScreen
         defaultAssignedBy={me?.name ?? ""}
         onBack={() => setView(view.from ?? homeView)}
         onCreate={createSiteAndRefresh}
         onDone={(site) => {
+          const scopeId = view.forUserId || null;
           const next = view.afterCreate?.name;
           if (next === "site-visit-category") {
-            setView({ name: "site-visit-category", site, from: view.from ?? homeView });
+            setView({
+              name: "site-visit-category",
+              site,
+              from: view.from ?? homeView,
+              forUserId: scopeId,
+            });
           } else if (next === "site-complaint") {
-            setView({ name: "site-complaint", site, from: view.from ?? homeView });
+            setView({
+              name: "site-complaint",
+              site,
+              from: view.from ?? homeView,
+              forUserId: scopeId,
+            });
           } else {
             setView({ name: "site", site: site.name, from: view.from ?? homeView });
           }
@@ -901,7 +975,7 @@ export default function SimpleBusinessManager() {
     const scopeId = view.forUserId || null;
     const tasks =
       scopeId && staffPanel?.userId === scopeId ? staffPanel.openSiteTasks : openSiteTasks;
-    return shell(
+    return shellInStaffBookmark(
       <PendingWorkView
         tasks={tasks}
         onBack={() => setView(view.from ?? homeView)}
@@ -916,7 +990,7 @@ export default function SimpleBusinessManager() {
       scopeId && staffPanel?.userId === scopeId ? staffPanel.myOpenTodos : myOpenTodos;
     const tasks =
       scopeId && staffPanel?.userId === scopeId ? staffPanel.openSiteTasks : openSiteTasks;
-    return shell(
+    return shellInStaffBookmark(
       <MyScheduleView
         todos={todos}
         siteTasks={tasks}
@@ -931,7 +1005,7 @@ export default function SimpleBusinessManager() {
     const scopeId = view.forUserId || null;
     const todos =
       scopeId && staffPanel?.userId === scopeId ? staffPanel.myOpenTodos : myOpenTodos;
-    return shell(
+    return shellInStaffBookmark(
       <MyOpenTodosView
         todos={todos}
         onBack={() => setView(view.from ?? homeView)}
@@ -946,24 +1020,33 @@ export default function SimpleBusinessManager() {
   // installation checklist, and the site-level complaint form. ---
 
   if (view.name === "site-visit-sites")
-    return shell(
+    return shellInStaffBookmark(
       <SiteVisitSiteList
         forUserId={view.forUserId || null}
         onBack={() => setView(view.from ?? homeView)}
-        onSelectSite={(site) => setView({ name: "site-visit-category", site, from: view, forUserId: view.forUserId })}
+        onSelectSite={(site) =>
+          setView({ name: "site-visit-category", site, from: view, forUserId: view.forUserId })
+        }
         onAddSite={() =>
-          setView({ name: "add-site", from: view, afterCreate: { name: "site-visit-category" }, forUserId: view.forUserId })
+          setView({
+            name: "add-site",
+            from: view,
+            afterCreate: { name: "site-visit-category" },
+            forUserId: view.forUserId,
+          })
         }
       />
     );
 
   if (view.name === "complaints-home")
-    return shell(
+    return shellInStaffBookmark(
       <ComplaintsHomeView
         refreshKey={complaintsRefreshKey}
         forUserId={view.forUserId || null}
         onBack={() => setView(view.from ?? homeView)}
-        onAddComplaint={() => setView({ name: "complaint-sites", from: view, forUserId: view.forUserId })}
+        onAddComplaint={() =>
+          setView({ name: "complaint-sites", from: view, forUserId: view.forUserId })
+        }
         canAdd={me.role === "staff"}
         canAssign={me.role !== "staff" && !view.forUserId}
         staffRoster={staffRoster}
@@ -972,26 +1055,44 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "complaint-sites")
-    return shell(
+    return shellInStaffBookmark(
       <SiteVisitSiteList
         title="New complaint"
         prompt="Which site is this about?"
         addLabel="Add new site"
         forUserId={view.forUserId || null}
-        onBack={() => setView(view.from ?? { name: "complaints-home", from: homeView })}
-        onSelectSite={(site) => setView({ name: "site-complaint", site, from: view })}
-        onAddSite={() => setView({ name: "add-site", from: view, afterCreate: { name: "site-complaint" } })}
+        onBack={() =>
+          setView(
+            view.from ?? {
+              name: "complaints-home",
+              from: homeView,
+              forUserId: view.forUserId,
+            }
+          )
+        }
+        onSelectSite={(site) =>
+          setView({ name: "site-complaint", site, from: view, forUserId: view.forUserId })
+        }
+        onAddSite={() =>
+          setView({
+            name: "add-site",
+            from: view,
+            afterCreate: { name: "site-complaint" },
+            forUserId: view.forUserId,
+          })
+        }
       />
     );
 
   if (view.name === "site-visit-category")
-    return shell(
+    return shellInStaffBookmark(
       <SiteVisitCategoryGrid
         site={view.site}
         onBack={() => setView(view.from ?? homeView)}
         onOpenCategory={async (category) => {
+          const scopeId = view.forUserId || null;
           if (category === "complaints") {
-            setView({ name: "site-complaint", site: view.site, from: view });
+            setView({ name: "site-complaint", site: view.site, from: view, forUserId: scopeId });
             return;
           }
           // Skip the instance list — create a row and open the checklist.
@@ -999,14 +1100,20 @@ export default function SimpleBusinessManager() {
           setView({
             name: "installation",
             installation: created,
-            from: { name: "site-visit-category", site: view.site, from: view.from },
+            forUserId: scopeId,
+            from: {
+              name: "site-visit-category",
+              site: view.site,
+              from: view.from,
+              forUserId: scopeId,
+            },
           });
         }}
       />
     );
 
   if (view.name === "installation")
-    return shell(
+    return shellInStaffBookmark(
       <InstallationScreen
         installation={view.installation}
         onBack={() => setView(view.from ?? homeView)}
@@ -1015,13 +1122,25 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "site-complaint")
-    return shell(
+    return shellInStaffBookmark(
       <SiteComplaintForm
         site={view.site}
-        onBack={() => setView(view.from ?? { name: "complaints-home", from: homeView })}
+        onBack={() =>
+          setView(
+            view.from ?? {
+              name: "complaints-home",
+              from: homeView,
+              forUserId: view.forUserId,
+            }
+          )
+        }
         onSubmitted={() => {
           setComplaintsRefreshKey((k) => k + 1);
-          setView({ name: "complaints-home", from: homeView });
+          setView({
+            name: "complaints-home",
+            from: homeView,
+            forUserId: view.forUserId,
+          });
         }}
       />
     );
@@ -1032,40 +1151,9 @@ export default function SimpleBusinessManager() {
 
   return shell(
     <>
-      <AppHeader
-        me={me}
-        onLogout={onLogout}
-        onResetPin={onResetPin}
-        onUpdatePhone={onUpdatePhone}
-        customization={customization}
-        onCustomizationChange={onCustomizationChange}
-        onRequestReport={() => setView({ name: "app-request", from: { name: "home" } })}
-        onOpenMaintenanceSiteContact={() =>
-          setView({ name: "maintenance-site-contact", from: { name: "home" } })
-        }
-        right={
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <DeskConversationMic />
-            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
-          </div>
-        }
-      >
-        <StreakWall
-          days={monthDays}
-          onSelectDay={(date) => setView({ name: "day", date })}
-          selected={null}
-          year={calMonth.year}
-          month={calMonth.month}
-          yearOptions={yearOptions}
-          onChangeYear={(y) => goToMonth(y, calMonth.month)}
-          onChangeMonth={(m) => goToMonth(calMonth.year, m)}
-          onPrevMonth={() => goToMonth(calMonth.year, calMonth.month - 1)}
-          onNextMonth={() => goToMonth(calMonth.year, calMonth.month + 1)}
-          todayIso={isoDate(today().getFullYear(), today().getMonth(), today().getDate())}
-        />
-      </AppHeader>
+      {adminHomeHeader}
 
-      <HomeDashboardTabs homeTab={homeTab} staffTabs={staffWithOpenTodos} onSelect={setHomeTab} />
+      <HomeDashboardTabs homeTab={homeTab} staffTabs={staffWithOpenTodos} onSelect={goHomeTab} />
 
       {homeTab !== "admin" ? (
         staffPanelLoading ? (
