@@ -233,9 +233,7 @@ export async function handleSarvamWebhook(
       // Trusted — straight to extraction, no spam-check. Two independent
       // waitUntils, same as before this feature: a scan failure must never
       // block the extraction that actually produces the dashboard card.
-      const label =
-        caller?.name ??
-        (call.recorded_for_site_id ? null : trustedInApp ? "Desk conversation" : null);
+      const label = caller?.name ?? null;
       ctx.waitUntil(runExtractionAndSiteScan(env, call, entries, label));
     } else {
       // 'client' category, or a legacy call with no linked caller — spam
