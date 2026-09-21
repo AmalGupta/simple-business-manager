@@ -731,6 +731,12 @@ export async function saveExtraction(
     );
   }
 
+  /* Desk / site voice memos set uploaded_by_user_id — that recorder is
+     assigned_by when we auto-match staff from spoken owners. Phone/
+     Drive calls leave it NULL (no human assigner in-app). */
+  const call = await getCallById(db, callId);
+  const assignedByUserId = call?.uploaded_by_user_id ?? null;
+
   for (const todo of extraction.todos) {
     const matched = matchStaffByOwner(todo.owner, staff);
     const todoId = crypto.randomUUID();
@@ -746,9 +752,9 @@ export async function saveExtraction(
       statements.push(
         db
           .prepare(
-            `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at) VALUES (?, ?, NULL, datetime('now'))`
+            `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at) VALUES (?, ?, ?, datetime('now'))`
           )
-          .bind(todoId, matched.id)
+          .bind(todoId, matched.id, assignedByUserId)
       );
     }
   }

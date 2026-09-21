@@ -8,6 +8,7 @@ import { TileLabel } from "./components/TileLabel.jsx";
 import { StatCard } from "./components/StatCard.jsx";
 import { TILE_VALUE_ROW_STYLE, TILE_NUMBER_STYLE } from "./styles.js";
 import { AppHeader } from "./components/AppHeader.jsx";
+import { DeskConversationMic } from "./components/DeskConversationMic.jsx";
 import { LoginScreen } from "./views/auth/LoginScreen.jsx";
 import { StaffTile } from "./views/staff/StaffTile.jsx";
 import { WorkflowTilesRow } from "./views/home/WorkflowTilesRow.jsx";
@@ -986,7 +987,12 @@ export default function SimpleBusinessManager() {
         onOpenMaintenanceSiteContact={() =>
           setView({ name: "maintenance-site-contact", from: { name: "home" } })
         }
-        right={<span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>}
+        right={
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <DeskConversationMic />
+            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>{fmtDate(new Date().toISOString())}</span>
+          </div>
+        }
       >
         <StreakWall
           days={monthDays}

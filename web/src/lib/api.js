@@ -566,6 +566,15 @@ export async function postSiteVoiceNote(siteId, blob, fileName) {
   return res.json();
 }
 
+/** Admin-home desk conversation — STT + extraction + staff auto-assign. */
+export async function postDeskVoiceNote(blob, fileName) {
+  const fd = new FormData();
+  fd.append("recording", blob, fileName);
+  const res = await fetch(`/api/desk-voice-note`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(`POST /api/desk-voice-note → ${res.status}`);
+  return res.json();
+}
+
 /* Calls Needing Action carousel (migration 0025) — GET/PATCH on /api/calls/*
    use the X-SBM-Key mechanism like the rest of the calls API; the voice-note
    upload/stream routes below are session-cookie-only, same as site voice
