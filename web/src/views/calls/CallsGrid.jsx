@@ -68,6 +68,20 @@ const GRID_CSS = `
   font-size: 11px;
   color: var(--color-ink);
 }
+.sbm-calls-site-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-accent);
+  cursor: pointer;
+  text-align: left;
+}
+.sbm-calls-site-link:hover {
+  text-decoration: underline;
+}
 .sbm-calls-grid .ag-grid-viewport {
   overflow-y: auto !important;
   overscroll-behavior: contain;
@@ -328,6 +342,9 @@ export function CallsGrid({
   rows,
   selectedId,
   onSelect,
+  onOpenSite = null,
+  /** "calls" | "voice_notes" — Voice notes tab renames Caller → Note By and adds Site. */
+  logTab = "calls",
   serverPagination = null,
   dimmed = false,
   innerScrolls = false,
@@ -335,6 +352,7 @@ export function CallsGrid({
 }) {
   const gridRef = useRef(null);
   const serverMode = Boolean(serverPagination);
+  const voiceNotesMode = logTab === "voice_notes";
   const [pageSize, setPageSize] = useState(serverMode ? rows?.length || DEFAULT_PAGE_SIZE : DEFAULT_PAGE_SIZE);
   const [pageState, setPageState] = useState({ page: 0, pageCount: 1, rowCount: 0 });
   const [narrow, setNarrow] = useState(
@@ -390,16 +408,50 @@ export function CallsGrid({
         sort: "desc",
       },
       {
-        headerName: "Caller",
-        colId: "caller",
+        headerName: voiceNotesMode ? "Note By" : "Caller",
+        colId: voiceNotesMode ? "note_by" : "caller",
         flex: narrow ? 1.1 : 1,
         minWidth: narrow ? 100 : 140,
         cellClass: "sbm-col-caller",
-        valueGetter: (p) => p.data?.meta?.caller ?? "Unknown caller",
+        valueGetter: (p) =>
+          voiceNotesMode
+            ? p.data?.uploaded_by_name || p.data?.meta?.caller || "—"
+            : p.data?.meta?.caller ?? "Unknown caller",
         wrapText: !horizontalScrolls,
         autoHeight: !horizontalScrolls,
       },
-      {
+    ];
+
+    if (voiceNotesMode) {
+      cols.push({
+        headerName: "Site",
+        colId: "site",
+        flex: narrow ? 1.2 : 1.3,
+        minWidth: narrow ? 110 : 150,
+        cellClass: "sbm-col-site",
+        valueGetter: (p) => p.data?.recorded_for_site_name || "—",
+        cellRenderer: (p) => {
+          const name = p.data?.recorded_for_site_name;
+          if (!name) return "—";
+          if (!onOpenSite) return name;
+          return (
+            <button
+              type="button"
+              className="sbm-calls-site-link"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSite(name);
+              }}
+            >
+              {name}
+            </button>
+          );
+        },
+        wrapText: !horizontalScrolls,
+        autoHeight: !horizontalScrolls,
+      });
+    } else {
+      cols.push({
         headerName: "Type",
         colId: "type",
         width: narrow ? 104 : 118,
@@ -410,8 +462,9 @@ export function CallsGrid({
         comparator: (a, b) => (a || "").localeCompare(b || ""),
         wrapText: !horizontalScrolls,
         autoHeight: !horizontalScrolls,
-      },
-    ];
+      });
+    }
+
     if (!narrow) {
       cols.push({
         headerName: "Summary",
@@ -426,7 +479,7 @@ export function CallsGrid({
       });
     }
     return cols;
-  }, [narrow, serverMode, serverPagination?.offset, horizontalScrolls]);
+  }, [narrow, serverMode, serverPagination?.offset, horizontalScrolls, voiceNotesMode, onOpenSite]);
 
   const defaultColDef = useMemo(
     () => ({

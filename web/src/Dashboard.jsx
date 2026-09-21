@@ -644,6 +644,7 @@ export default function SimpleBusinessManager() {
         onPark={onPark}
         busyIds={busyIds}
         onCallsChanged={() => refreshCalendar(calMonth.year, calMonth.month)}
+        onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: { name: "calls" } })}
         innerScrolls={innerScrolls}
         horizontalScrolls={horizontalScrolls}
       />,
