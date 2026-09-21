@@ -8,12 +8,15 @@ export const ENTRY_TYPE_LABEL = {
 };
 
 /**
- * Voice Note = site memo / complaint / measurement / checklist recording
- * (`recorded_for_site_id` set at upload). Everything else (Drive poll, phone
- * upload) is a Voice Call. Derived at read time — no migration.
+ * Voice Note = in-app memo: site page / checklist / complaint
+ * (`recorded_for_site_id`) or desk conversation (`uploaded_by_*`).
+ * Drive poll and phone `/upload` stay Voice Call. Derived at read time.
  */
 export function recordingEntryType(call) {
-  return call?.recorded_for_site_id ? "voice_note" : "voice_call";
+  if (call?.recorded_for_site_id || call?.uploaded_by_user_id || call?.uploaded_by_name) {
+    return "voice_note";
+  }
+  return "voice_call";
 }
 
 /**

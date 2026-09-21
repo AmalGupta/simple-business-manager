@@ -889,8 +889,8 @@ export interface CallRow {
   call_type: CallType | null;
   /**
    * Set when this row is a site voice memo (site page, complaints, measurements,
-   * installation checklist). NULL for Drive / phone uploads — used by the Calls
-   * grid to label Voice Note vs Voice Call without a schema migration.
+   * installation checklist). Desk conversations leave this NULL but set
+   * uploaded_by_user_id — both count as Voice Note on the Calls page tabs.
    */
   recorded_for_site_id: string | null;
   /** Joined site name when recorded_for_site_id is set (Voice notes tab). */
@@ -1221,8 +1221,13 @@ function buildCallListWhere(filters: CallListFilters): { sql: string; binds: unk
   }
   const types = filters.entryTypes?.length ? filters.entryTypes : [];
   if (types.length === 1) {
-    if (types[0] === "voice_note") clauses.push("calls.recorded_for_site_id IS NOT NULL");
-    else clauses.push("calls.recorded_for_site_id IS NULL");
+    /* Voice notes = in-app recordings: site memos (recorded_for_site_id) and
+       desk conversations (uploaded_by_user_id, no Drive/phone caller). */
+    if (types[0] === "voice_note") {
+      clauses.push("(calls.recorded_for_site_id IS NOT NULL OR calls.uploaded_by_user_id IS NOT NULL)");
+    } else {
+      clauses.push("calls.recorded_for_site_id IS NULL AND calls.uploaded_by_user_id IS NULL");
+    }
   }
 
   return { sql: `WHERE ${clauses.join(" AND ")}`, binds };
@@ -4098,11 +4103,17 @@ export async function listMyOpenTodos(db: D1Database, userId: string): Promise<A
               todos.text AS text,
               todos.due_date AS due_date,
               todos.status AS status,
-              COALESCE(callers.name, 'Unknown caller') AS client_name,
+              COALESCE(
+                callers.name,
+                recorded_sites.name,
+                CASE WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'Desk conversation' END,
+                'Unknown caller'
+              ) AS client_name,
               calls.recorded_at AS recorded_at
        FROM todos
        JOIN calls ON calls.id = todos.call_id
        LEFT JOIN callers ON callers.id = calls.client_id
+       LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
        WHERE todos.status = 'open'
          AND EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?)
        ORDER BY (todos.due_date IS NULL), todos.due_date ASC, calls.recorded_at DESC`
