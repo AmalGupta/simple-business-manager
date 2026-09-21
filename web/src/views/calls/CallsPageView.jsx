@@ -101,6 +101,7 @@ export function CallsPageView({
   onPark,
   busyIds,
   onCallsChanged,
+  onOpenSite = null,
   innerScrolls = false,
   horizontalScrolls = false,
 }) {
@@ -573,6 +574,8 @@ export function CallsPageView({
             rows={rows ?? []}
             selectedId={selectedId}
             onSelect={setSelectedId}
+            onOpenSite={onOpenSite}
+            logTab={logTab}
             innerScrolls={innerScrolls}
             horizontalScrolls={horizontalScrolls}
             serverPagination={{
