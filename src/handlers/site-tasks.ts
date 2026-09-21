@@ -16,6 +16,7 @@ import {
   type SessionWithUser,
 } from "@sbm/core";
 import { requireSession } from "../lib/auth";
+import { resolveForUserId } from "../lib/for-user-scope";
 import type { Env } from "../index";
 
 function json(data: unknown, status = 200): Response {
@@ -48,8 +49,9 @@ export async function handleGetSiteTasks(request: Request, env: Env, siteId: str
 export async function handleListOpenSiteTasks(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const forUserId = session.user_role === "staff" ? session.user_id : null;
-  return json(await listOpenSiteTasks(env.DB, forUserId));
+  const scoped = await resolveForUserId(request, env, session);
+  if (scoped instanceof Response) return scoped;
+  return json(await listOpenSiteTasks(env.DB, scoped));
 }
 
 /** The handoff picker after marking a stage done — every still-unassigned stage at that site. Staff never see admin-only intake stages. */

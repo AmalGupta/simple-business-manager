@@ -140,9 +140,11 @@ export async function fetchCallTranscripts() {
   return fetchJSON("/api/calls/transcripts");
 }
 
-/** Home tiles + small lists — no call transcripts. Role-scoped server-side. */
-export async function fetchDashboardSummary() {
-  return fetchJSON("/api/dashboard/summary");
+/** Home tiles + small lists — no call transcripts. Role-scoped server-side.
+ *  Admin may pass forUserId to load a staff member's staff-home summary. */
+export async function fetchDashboardSummary({ forUserId } = {}) {
+  const q = forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
+  return fetchJSON(`/api/dashboard/summary${q}`);
 }
 
 /* Single-call fetch, on demand — the bulk fetchCalls() list is never loaded
@@ -166,8 +168,9 @@ export async function fetchSites() {
   return fetchJSON("/api/sites");
 }
 
-export async function fetchConfirmedSites() {
-  return fetchJSON("/api/sites/confirmed");
+export async function fetchConfirmedSites({ forUserId } = {}) {
+  const q = forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
+  return fetchJSON(`/api/sites/confirmed${q}`);
 }
 
 /* Sites Directory has one shape (no filters), so a single-key cache. */
@@ -717,9 +720,11 @@ export async function fetchCallsCount() {
   return fetchJSON("/api/calls/count");
 }
 
-/** Open (assigned, not done) site tasks — `staff` gets their own only, admin/superadmin get every one, scoped server-side. */
-export async function fetchOpenSiteTasks() {
-  return fetchJSON("/api/site-tasks/open");
+/** Open (assigned, not done) site tasks — `staff` gets their own only, admin/superadmin get every one, scoped server-side.
+ *  Admin may pass forUserId when viewing a staff home bookmark. */
+export async function fetchOpenSiteTasks({ forUserId } = {}) {
+  const q = forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
+  return fetchJSON(`/api/site-tasks/open${q}`);
 }
 
 /** All 23 stages for one site — the admin "View work timeline" popup. */
@@ -809,9 +814,11 @@ export async function postInstallationUpdateMedia(updateId, file) {
   return res.json();
 }
 
-/** Complaints list — staff (scoped) or admin (all). Session-only. */
-export async function fetchComplaints() {
-  const res = await fetch("/api/complaints", { credentials: "same-origin" });
+/** Complaints list — staff (scoped) or admin (all). Session-only.
+ *  Admin may pass forUserId when viewing a staff home bookmark. */
+export async function fetchComplaints({ forUserId } = {}) {
+  const q = forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
+  const res = await fetch(`/api/complaints${q}`, { credentials: "same-origin" });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `GET /api/complaints → ${res.status}`);
@@ -820,8 +827,9 @@ export async function fetchComplaints() {
 }
 
 /** Open complaints count — home tile. */
-export async function fetchComplaintsCount() {
-  const res = await fetch("/api/complaints/count", { credentials: "same-origin" });
+export async function fetchComplaintsCount({ forUserId } = {}) {
+  const q = forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
+  const res = await fetch(`/api/complaints/count${q}`, { credentials: "same-origin" });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `GET /api/complaints/count → ${res.status}`);
