@@ -16,7 +16,7 @@ import "./CallActionCard.css";
    collapsible transcript and per-todo assign + voice-note controls instead
    of a toggle/park control (this card isn't where an individual todo gets
    marked done). Carousel stretch keeps sibling cards the same height with
-   Resolve pinned to the bottom — no inner card scrollbars. */
+   no inner card scrollbars; Resolve lives in the header (top-right). */
 export function CallActionCard({
   call,
   staffRoster,
@@ -46,9 +46,20 @@ export function CallActionCard({
   return (
     <div className="cna-card">
       <div className="cna-card__header">
-        <p className="cna-card__eyebrow">Call</p>
-        <h3 className="cna-card__title">{call.client_name || "Unknown caller"}</h3>
-        <div className="cna-card__meta">{fmtDate(dateIso)}</div>
+        <div className="cna-card__header-text">
+          <p className="cna-card__eyebrow">Call</p>
+          <h3 className="cna-card__title">{call.client_name || "Unknown caller"}</h3>
+          <div className="cna-card__meta">{fmtDate(dateIso)}</div>
+        </div>
+        <button
+          type="button"
+          className="cna-card__resolve"
+          onClick={handleResolve}
+          disabled={resolving}
+          style={{ ...PRIMARY_BUTTON_STYLE, opacity: resolving ? 0.6 : 1 }}
+        >
+          {resolving ? "Resolving…" : "Resolve"}
+        </button>
       </div>
 
       {call.summary ? <p className="cna-card__summary">{call.summary}</p> : null}
@@ -118,17 +129,6 @@ export function CallActionCard({
             </div>
           ))
         )}
-      </div>
-
-      <div className="cna-card__footer">
-        <button
-          type="button"
-          onClick={handleResolve}
-          disabled={resolving}
-          style={{ ...PRIMARY_BUTTON_STYLE, opacity: resolving ? 0.6 : 1 }}
-        >
-          {resolving ? "Resolving…" : "Resolve"}
-        </button>
       </div>
 
       {siteTodo ? (
