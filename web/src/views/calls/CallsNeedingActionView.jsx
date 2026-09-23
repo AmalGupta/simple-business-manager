@@ -694,10 +694,23 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
   return (
     <div>
       <style>{`
+        .cna-carousel-shell {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .cna-carousel-nav {
+          display: flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 8px;
+        }
         .cna-carousel {
           display: flex;
+          align-items: stretch;
           gap: ${CARD_GAP}px;
           overflow-x: auto;
+          overflow-y: visible;
           scroll-snap-type: x mandatory;
           scroll-behavior: smooth;
           padding-bottom: 8px;
@@ -706,6 +719,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
         .cna-carousel > * {
           scroll-snap-align: start;
           flex: 0 0 100%;
+          /* stretch (default with align-items: stretch) equalizes row height */
         }
         @media (min-width: 768px) {
           .cna-carousel > * { flex: 0 0 calc((100% - ${CARD_GAP * 2}px) / 3); }
@@ -765,22 +779,37 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
       )}
 
       {count > 0 && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            aria-label="Previous"
-            onClick={() => scrollByPage(-1)}
-            disabled={atStart}
-            style={{
-              ...iconButtonStyle(atStart),
-              background: t.white,
-              border: `1px solid ${t.frost}`,
-              color: atStart ? t.frost : t.edge,
-            }}
-          >
-            <ChevronLeft size={16} />
-          </button>
+        <div className="cna-carousel-shell">
+          <div className="cna-carousel-nav">
+            <button
+              aria-label="Previous"
+              onClick={() => scrollByPage(-1)}
+              disabled={atStart}
+              style={{
+                ...iconButtonStyle(atStart),
+                background: t.white,
+                border: `1px solid ${t.frost}`,
+                color: atStart ? t.frost : t.edge,
+              }}
+            >
+              <ChevronLeft size={16} />
+            </button>
+            <button
+              aria-label="Next"
+              onClick={() => scrollByPage(1)}
+              disabled={atEnd}
+              style={{
+                ...iconButtonStyle(atEnd),
+                background: t.white,
+                border: `1px solid ${t.frost}`,
+                color: atEnd ? t.frost : t.edge,
+              }}
+            >
+              <ChevronRight size={16} />
+            </button>
+          </div>
 
-          <div ref={carouselRef} className="cna-carousel" style={{ flex: 1 }}>
+          <div ref={carouselRef} className="cna-carousel">
             {items.map((call) => (
               <CallActionCard
                 key={call.id}
@@ -795,20 +824,6 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
               />
             ))}
           </div>
-
-          <button
-            aria-label="Next"
-            onClick={() => scrollByPage(1)}
-            disabled={atEnd}
-            style={{
-              ...iconButtonStyle(atEnd),
-              background: t.white,
-              border: `1px solid ${t.frost}`,
-              color: atEnd ? t.frost : t.edge,
-            }}
-          >
-            <ChevronRight size={16} />
-          </button>
         </div>
       )}
 

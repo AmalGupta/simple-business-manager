@@ -15,7 +15,8 @@ import "./CallActionCard.css";
    but built to sit as one of N cards in a scrolling row, with a
    collapsible transcript and per-todo assign + voice-note controls instead
    of a toggle/park control (this card isn't where an individual todo gets
-   marked done). Fixed height keeps adjacent cards even; only todos scroll. */
+   marked done). Carousel stretch keeps sibling cards the same height with
+   Resolve pinned to the bottom — no inner card scrollbars. */
 export function CallActionCard({
   call,
   staffRoster,
@@ -100,6 +101,7 @@ export function CallActionCard({
                         {todo.site_id ? "Change site" : "Assign to Site"}
                       </button>
                       <TodoVoiceNoteButton
+                        compact
                         todoId={todo.id}
                         existingNote={voiceNotesByTodoId?.get(todo.id)}
                         onUpload={onAddVoiceNote}
@@ -107,6 +109,11 @@ export function CallActionCard({
                     </>
                   }
                 />
+                {voiceNotesByTodoId?.get(todo.id) ? (
+                  <div className="cna-card__todo-voice-player">
+                    <AudioPlayer src={`/api/todo-voice-notes/${voiceNotesByTodoId.get(todo.id).id}`} />
+                  </div>
+                ) : null}
               </div>
             </div>
           ))
