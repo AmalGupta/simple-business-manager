@@ -2,23 +2,22 @@
    hairline border, one radius — no shadows/tints, per
    docs/DESIGN_LANGUAGE.md "Surface".
 
-   Always fixed height so adjacent carousel cards stay even: header /
-   summary / audio chrome and Resolve footer are pinned; only the todos
-   region scrolls. Independent of site customization.inner_scrolls. */
+   No inner scrollbars: cards grow with content. The carousel uses
+   align-items: stretch so siblings in a row share the tallest card's
+   height; Resolve sits at the bottom via margin-top: auto. */
 
 .cna-card {
-  --cna-card-height: min(560px, calc(100dvh - 280px));
   display: flex;
   flex-direction: column;
-  height: var(--cna-card-height);
-  min-height: 0;
-  overflow: hidden;
+  /* Cross-size set by .cna-carousel align-items: stretch. */
+  overflow: visible;
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
   padding: 16px;
   font-family: var(--font-body);
   color: var(--color-ink);
+  box-sizing: border-box;
 }
 
 .cna-card__header {
@@ -106,8 +105,8 @@
 .cna-card__transcript {
   margin: 8px 0 0;
   padding: 10px 12px;
-  max-height: 120px;
-  overflow-y: auto;
+  max-height: none;
+  overflow: visible;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
@@ -116,8 +115,6 @@
   color: var(--color-ink);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-line) transparent;
 }
 
 .cna-card__todos-label {
@@ -126,23 +123,10 @@
 }
 
 .cna-card__todos {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
+  overflow: visible;
   border-top: 1px solid var(--color-line);
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-line) transparent;
-}
-
-.cna-card__todos::-webkit-scrollbar,
-.cna-card__transcript::-webkit-scrollbar {
-  width: 6px;
-}
-
-.cna-card__todos::-webkit-scrollbar-thumb,
-.cna-card__transcript::-webkit-scrollbar-thumb {
-  background: var(--color-line);
-  border-radius: 3px;
 }
 
 .cna-card__todo-row {
@@ -211,7 +195,7 @@
 
 .cna-card__footer {
   flex-shrink: 0;
-  margin-top: 12px;
+  margin-top: auto;
   padding-top: 12px;
   border-top: 1px solid var(--color-line);
   display: flex;
