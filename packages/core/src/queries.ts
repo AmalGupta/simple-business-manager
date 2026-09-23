@@ -179,6 +179,8 @@ export type CallerBucket = "saved" | "unsaved" | "spam";
 export interface CallerLinkedSite {
   id: string;
   name: string;
+  /** Composed display label — see composeSiteNameBeingUsed. NULL until details exist. */
+  site_name_being_used: string | null;
 }
 
 /** Contacts directory row — callers list plus site links from caller_sites. */
@@ -265,11 +267,14 @@ export async function getLinkedSitesByCallerIds(
   callerIds: string[]
 ): Promise<Map<string, CallerLinkedSite[]>> {
   const map = new Map<string, CallerLinkedSite[]>();
-  const rows = await queryAllByIdChunks<{ caller_id: string; id: string; name: string }>(
-    db,
-    callerIds,
-    (placeholders) =>
-      `SELECT caller_sites.caller_id AS caller_id, sites.id AS id, sites.name AS name
+  const rows = await queryAllByIdChunks<{
+    caller_id: string;
+    id: string;
+    name: string;
+    site_name_being_used: string | null;
+  }>(db, callerIds, (placeholders) =>
+      `SELECT caller_sites.caller_id AS caller_id, sites.id AS id, sites.name AS name,
+              sites.site_name_being_used AS site_name_being_used
        FROM caller_sites
        JOIN sites ON sites.id = caller_sites.site_id
        WHERE caller_sites.caller_id IN (${placeholders})
@@ -277,7 +282,7 @@ export async function getLinkedSitesByCallerIds(
   );
   for (const row of rows ?? []) {
     const list = map.get(row.caller_id) ?? [];
-    list.push({ id: row.id, name: row.name });
+    list.push({ id: row.id, name: row.name, site_name_being_used: row.site_name_being_used });
     map.set(row.caller_id, list);
   }
   return map;

@@ -8,12 +8,16 @@ import {
   fetchTodoAssignSiteOptions,
   loadConfirmedSites,
 } from "../../lib/api.js";
+import { SiteDisplayName, siteDisplayName, siteSearchText } from "../sites/sitesGridChrome.jsx";
 
 /**
  * Assign a site to one CNA todo. Suggested sites come from the call's
  * contact → caller_sites. Picking a non-suggested site asks whether to
  * also link that site to the contact; No confirms call-only assignment.
  * The parent call always gets call_sites when the todo is assigned.
+ *
+ * Lists use the composed display name (site_name_being_used) — same label
+ * the client knows from the Sites directory.
  */
 export function AssignTodoSiteModal({ todo, onClose, onAssigned }) {
   const [loading, setLoading] = useState(true);
@@ -55,9 +59,9 @@ export function AssignTodoSiteModal({ todo, onClose, onAssigned }) {
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    const list = sites.filter((s) => s?.id && s?.name);
+    const list = sites.filter((s) => s?.id && (s?.name || s?.site_name_being_used));
     if (!needle) return list;
-    return list.filter((s) => String(s.name).toLowerCase().includes(needle));
+    return list.filter((s) => siteSearchText(s).includes(needle));
   }, [sites, q]);
 
   const commit = useCallback(
@@ -96,10 +100,10 @@ export function AssignTodoSiteModal({ todo, onClose, onAssigned }) {
   const suggestedSites = options?.suggested_sites ?? [];
   const associatePrompt =
     suggestedSites.length > 0
-      ? `Do you want to associate this site (${pendingSite?.name}) in addition to ${suggestedSites
-          .map((s) => s.name)
+      ? `Do you want to associate this site (${siteDisplayName(pendingSite)}) in addition to ${suggestedSites
+          .map((s) => siteDisplayName(s))
           .join(", ")} to the contact ${contactName}? If you do, you will be able to view this site linked in the contacts directory.`
-      : `Do you want to associate this site (${pendingSite?.name}) to the contact ${contactName}? If you do, you will be able to view this site linked in the contacts directory.`;
+      : `Do you want to associate this site (${siteDisplayName(pendingSite)}) to the contact ${contactName}? If you do, you will be able to view this site linked in the contacts directory.`;
 
   if (step === "associate" && pendingSite) {
     return (
@@ -195,7 +199,9 @@ export function AssignTodoSiteModal({ todo, onClose, onAssigned }) {
                     onClick={() => onPickSite(site)}
                     style={siteRowStyle(true)}
                   >
-                    {site.name}
+                    <span style={{ minWidth: 0 }}>
+                      <SiteDisplayName site={site} />
+                    </span>
                     {options.current_site_id === site.id ? (
                       <span style={{ fontSize: 12, color: t.edge2, fontWeight: 600 }}>Current</span>
                     ) : null}
@@ -250,7 +256,9 @@ export function AssignTodoSiteModal({ todo, onClose, onAssigned }) {
                     onClick={() => onPickSite(site)}
                     style={siteRowStyle(suggestedIds.has(site.id))}
                   >
-                    <span>{site.name}</span>
+                    <span style={{ minWidth: 0 }}>
+                      <SiteDisplayName site={site} />
+                    </span>
                     {suggestedIds.has(site.id) ? (
                       <span style={{ fontSize: 11, color: t.accent, fontWeight: 700 }}>Suggested</span>
                     ) : null}
