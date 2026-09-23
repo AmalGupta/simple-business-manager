@@ -135,6 +135,17 @@ CREATE TABLE call_sites (
   PRIMARY KEY (call_id, site_id)
 );
 
+-- migration 0038: forward-looking heat for the sites directory. Not backfilled —
+-- touchSiteActivity writes on each site-scoped event after deploy. See
+-- packages/core/src/queries.ts.
+CREATE TABLE site_activity_summary (
+  site_id TEXT PRIMARY KEY NOT NULL REFERENCES sites(id),
+  last_activity_at TEXT NOT NULL,
+  last_source TEXT,
+  last_ref_id TEXT
+);
+CREATE INDEX idx_site_activity_summary_at ON site_activity_summary (last_activity_at DESC);
+
 -- "Associated sites" on a caller — migration 0022. Mirrors call_sites
 -- exactly. Schema only for now; nothing populates it yet, linking logic is
 -- a later feature.
