@@ -21,7 +21,7 @@ import { SiteTimeline } from "./SiteTimeline.jsx";
 import { AddPeopleModal } from "./AddPeopleModal.jsx";
 import { SiteDetailsModal } from "./SiteDetailsModal.jsx";
 import { WorkTimelinePopup } from "./WorkTimelinePopup.jsx";
-import { siteHeaderDisplayName } from "./sitesGridChrome.jsx";
+import { siteDisplayName } from "./sitesGridChrome.jsx";
 
 /* ------------------------------------------------------------------
    Site view — drilldown from Tile 3, the sites directory, or the
@@ -185,7 +185,7 @@ export function SiteView({
           lineHeight: 1.35,
         }}
       >
-        {siteHeaderDisplayName(siteRecord) || site}
+        {siteDisplayName(siteRecord) || site}
       </h1>
 
       {/* Staff have no visibility into the Sites-list red highlight (that's

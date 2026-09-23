@@ -212,43 +212,16 @@ export const SITES_GRID_CSS = `
 `;
 
 /* The site's composed name and the raw one are interchangeable by design
-   (migration 0031): `sites.name` stays the pipeline's match key, while
-   site_name_being_used — "#244, IAS-PCS | CL. Raj Kamal Ji" — is what these
-   two grids show once someone has filled the details in. A site with no
-   details has no composed name and keeps showing its own.
+   (migration 0031 / 0037): `sites.name` stays the pipeline's match key, while
+   site_name_being_used — e.g. "NOBEL Aurelia | SECTOR 88-MOHALI" or
+   "#244, IAS-PCS | CL. Raj Kamal Ji | phone" — is what these grids and the
+   SiteView header show once details exist. A site with no details has no
+   composed name and keeps showing its own.
    ------------------------------------------------------------------ */
 const CLIENT_SEPARATOR = " | CL. ";
 
 export function siteDisplayName(site) {
   return site?.site_name_being_used?.trim() || site?.name || "";
-}
-
-/** Site drilldown title — full label, not the truncated grid cell.
- *  Prefers House No | Address | Client Name | Phone when those fields
- *  exist; otherwise the composed grid name (`site_name_being_used`) with
- *  phone appended, then the pipeline `name`. */
-export function siteHeaderDisplayName(site) {
-  if (!site) return "";
-  const clean = (value) => (typeof value === "string" && value.trim() ? value.trim() : "");
-  const houseRaw = clean(site.house_no);
-  const house = houseRaw.replace(/^(?:#|h\.?\s?no\.?|house\s?no\.?)\s*(?=\S)/i, "") || houseRaw;
-  const sector = clean(site.sector);
-  const city = clean(site.city);
-  const locality = sector && city ? `${sector}-${city}` : sector || city;
-  const address = clean(site.address) || locality;
-  const client = clean(site.poc_name);
-  const phone = clean(site.poc_contact_number);
-  const structured = [house, address, client, phone].filter(Boolean);
-  /* Need more than a lone client/phone so we don't drop the site name half. */
-  if (structured.length >= 2 && (house || address)) {
-    return structured.join(" | ");
-  }
-  const composed = clean(site.site_name_being_used);
-  if (composed) {
-    return phone && !composed.includes(phone) ? `${composed} | ${phone}` : composed;
-  }
-  if (structured.length > 0) return structured.join(" | ");
-  return clean(site.name);
 }
 
 /** Both names, so typing either the H.No or the original site name finds the row. */
