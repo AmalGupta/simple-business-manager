@@ -21,6 +21,7 @@ import { SiteTimeline } from "./SiteTimeline.jsx";
 import { AddPeopleModal } from "./AddPeopleModal.jsx";
 import { SiteDetailsModal } from "./SiteDetailsModal.jsx";
 import { WorkTimelinePopup } from "./WorkTimelinePopup.jsx";
+import { siteHeaderDisplayName } from "./sitesGridChrome.jsx";
 
 /* ------------------------------------------------------------------
    Site view — drilldown from Tile 3, the sites directory, or the
@@ -173,8 +174,18 @@ export function SiteView({
     <div>
       <BackLink onClick={onBack}>Back</BackLink>
 
-      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
-        {site}
+      <h1
+        style={{
+          fontFamily: t.display,
+          fontSize: 22,
+          fontWeight: 500,
+          color: t.edge,
+          margin: "0 0 1.25rem",
+          overflowWrap: "anywhere",
+          lineHeight: 1.35,
+        }}
+      >
+        {siteHeaderDisplayName(siteRecord) || site}
       </h1>
 
       {/* Staff have no visibility into the Sites-list red highlight (that's
