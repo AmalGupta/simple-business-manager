@@ -4,6 +4,19 @@ import { fmtShort } from "../../lib/dates.js";
 import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { suggestAssignee } from "../../lib/assignment.js";
 
+const COMPACT_PRIMARY = {
+  ...PRIMARY_BUTTON_STYLE,
+  minHeight: 32,
+  padding: "0 10px",
+  fontSize: 12,
+};
+
+const COMPACT_SECONDARY = {
+  ...SMALL_SECONDARY_BUTTON_STYLE,
+  minHeight: 32,
+  padding: "0 10px",
+};
+
 /* Inline assign-or-reassign control for one todo, modeled on
    StageAssignRow.jsx's interaction pattern for site_tasks. The staff roster
    is already loaded app-wide by the time this renders, so — unlike
@@ -18,13 +31,17 @@ import { suggestAssignee } from "../../lib/assignment.js";
 
    `currentUser` enables a one-tap "Assign to me" for the logged-in admin
    (staff roster alone never includes them). Claiming merges the current
-   user into the existing assignee set. */
+   user into the existing assignee set.
+
+   `compact` (CNA cards): one primary action + secondary siblings in a wrap-
+   stable toolbar so 3-up carousel columns stay usable. */
 export function TodoAssignControl({
   todo,
   staffRoster,
   onAssign,
   currentUser = null,
   alwaysEditing = false,
+  compact = false,
   /** Optional trailing controls (e.g. voice-note mic) rendered in the
    *  collapsed action row so they wrap with Assign/Assign-to-me on narrow
    *  screens instead of colliding in a sibling flex row. */
@@ -42,6 +59,7 @@ export function TodoAssignControl({
 
   const suggested = useMemo(() => suggestAssignee(todo.owner, assignablePeople), [todo.owner, assignablePeople]);
   const assignedToMe = Boolean(currentUser?.id && assignees.some((a) => a.id === currentUser.id));
+  const canClaim = Boolean(currentUser?.id && !assignedToMe);
 
   const [editing, setEditing] = useState(alwaysEditing);
   const [checkedIds, setCheckedIds] = useState(() => {
@@ -117,21 +135,46 @@ export function TodoAssignControl({
     }
   };
 
+  const statusLabel =
+    assignees.length > 0
+      ? `Assigned to ${assignees.map((a) => a.name).join(", ")}`
+      : suggested
+        ? `Suggested: ${suggested.name}`
+        : "Unassigned";
+  const statusWithDue = todo.due_date ? `${statusLabel} · due ${fmtShort(todo.due_date)}` : statusLabel;
+  const assignLabel = assignees.length > 0 ? "Reassign" : "Assign";
+
   if (!editing) {
-    const label =
-      assignees.length > 0
-        ? `Assigned to ${assignees.map((a) => a.name).join(", ")}`
-        : suggested
-          ? `Suggested: ${suggested.name}`
-          : "Unassigned";
+    if (compact) {
+      /* One primary: Assign to me when claimable, else Assign/Reassign.
+         Site + voice arrive via extraActions as secondary siblings. */
+      return (
+        <div className="cna-todo-toolbar">
+          <span className="cna-todo-toolbar__status">{statusWithDue}</span>
+          {canClaim ? (
+            <button
+              type="button"
+              onClick={assignToMe}
+              disabled={claiming}
+              style={{ ...COMPACT_PRIMARY, opacity: claiming ? 0.6 : 1 }}
+            >
+              {claiming ? "Assigning…" : "Assign to me"}
+            </button>
+          ) : null}
+          <button type="button" onClick={() => setEditing(true)} style={canClaim ? COMPACT_SECONDARY : COMPACT_PRIMARY}>
+            {assignLabel}
+          </button>
+          {extraActions}
+          {error ? <span style={{ flex: "1 1 100%", fontSize: 12, color: t.signal }}>{error}</span> : null}
+        </div>
+      );
+    }
+
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4, minWidth: 0, width: "100%" }}>
-        <span style={{ fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>
-          {label}
-          {todo.due_date && ` · due ${fmtShort(todo.due_date)}`}
-        </span>
+        <span style={{ fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>{statusWithDue}</span>
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
-          {currentUser?.id && !assignedToMe && (
+          {canClaim ? (
             <button
               type="button"
               onClick={assignToMe}
@@ -140,19 +183,24 @@ export function TodoAssignControl({
             >
               {claiming ? "Assigning…" : "Assign to me"}
             </button>
-          )}
+          ) : null}
           <button type="button" onClick={() => setEditing(true)} style={SMALL_SECONDARY_BUTTON_STYLE}>
-            {assignees.length > 0 ? "Reassign" : "Assign"}
+            {assignLabel}
           </button>
           {extraActions}
         </div>
-        {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+        {error ? <span style={{ fontSize: 12, color: t.signal }}>{error}</span> : null}
       </div>
     );
   }
 
+  const editShellClass = compact ? "cna-todo-toolbar" : undefined;
+  const editShellStyle = compact
+    ? { display: "flex", flexDirection: "column", gap: 6, width: "100%" }
+    : { display: "flex", flexDirection: "column", gap: 6, marginTop: 6 };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+    <div className={editShellClass} style={editShellStyle}>
       {assignablePeople.length === 0 ? (
         <p style={{ fontSize: 12, color: t.edge2, margin: 0 }}>No staff yet — add one from the Staff page first.</p>
       ) : (
@@ -167,20 +215,28 @@ export function TodoAssignControl({
           ))}
         </div>
       )}
-      {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
+      {error ? <span style={{ fontSize: 12, color: t.signal }}>{error}</span> : null}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         <button
+          type="button"
           onClick={submit}
           disabled={saving || assignablePeople.length === 0}
-          style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12, opacity: saving || assignablePeople.length === 0 ? 0.6 : 1 }}
+          style={{
+            ...(compact ? COMPACT_PRIMARY : { ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12 }),
+            opacity: saving || assignablePeople.length === 0 ? 0.6 : 1,
+          }}
         >
           {saving ? "Saving…" : "Save"}
         </button>
-        {!alwaysEditing && (
-          <button onClick={() => setEditing(false)} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 34 }}>
+        {!alwaysEditing ? (
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            style={compact ? COMPACT_SECONDARY : { ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 34 }}
+          >
             Cancel
           </button>
-        )}
+        ) : null}
         {extraActions}
       </div>
     </div>

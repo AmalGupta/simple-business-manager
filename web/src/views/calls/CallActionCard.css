@@ -2,42 +2,49 @@
    hairline border, one radius — no shadows/tints, per
    docs/DESIGN_LANGUAGE.md "Surface".
 
-   Default (customization.inner_scrolls off): card grows with content, no
-   inner vertical scrollbar. Opt-in [data-inner-scrolls="1"] restores the
-   fixed-height + internal todos/transcript scroll pattern. */
+   Always fixed height so adjacent carousel cards stay even: header /
+   summary / audio chrome and Resolve footer are pinned; only the todos
+   region scrolls. Independent of site customization.inner_scrolls. */
 
 .cna-card {
+  --cna-card-height: min(560px, calc(100dvh - 280px));
   display: flex;
   flex-direction: column;
+  height: var(--cna-card-height);
+  min-height: 0;
+  overflow: hidden;
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
-  padding: 1rem 1.25rem;
+  padding: 16px;
   font-family: var(--font-body);
   color: var(--color-ink);
-  overflow: visible;
-  height: auto;
-  min-height: 0;
-}
-
-[data-inner-scrolls="1"] .cna-card {
-  --cna-card-height: 560px;
-  height: var(--cna-card-height);
-  overflow: hidden;
 }
 
 .cna-card__header {
   flex-shrink: 0;
+  margin-bottom: 12px;
+}
+
+.cna-card__eyebrow {
+  margin: 0 0 4px;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink);
 }
 
 .cna-card__title {
-  margin: 0 0 2px;
+  margin: 0 0 4px;
   font-family: var(--font-display);
   font-size: 17px;
   font-weight: 500;
-  color: var(--color-ink);
+  color: var(--color-ink-emphasis, var(--color-ink));
   overflow-wrap: anywhere;
   word-break: break-word;
+  line-height: 1.25;
 }
 
 .cna-card__meta {
@@ -45,39 +52,31 @@
   color: var(--color-slate);
 }
 
-.cna-card__section-label {
-  margin: 12px 0 4px;
-  font-size: 12px;
-  color: var(--color-slate);
-  flex-shrink: 0;
-}
-
 .cna-card__summary {
-  margin: 0;
+  margin: 0 0 12px;
   font-size: 13px;
   line-height: 1.55;
   color: var(--color-ink);
   flex-shrink: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
-}
-
-[data-inner-scrolls="1"] .cna-card__summary {
   display: -webkit-box;
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
 
-.cna-card__audio {
+.cna-card__media {
   flex-shrink: 0;
-  height: 44px;
-  padding: 4px 8px;
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  background: var(--color-canvas);
+  margin-bottom: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line);
+}
+
+.cna-card__audio {
   display: flex;
   align-items: center;
+  min-height: 40px;
 }
 
 .cna-card__audio audio {
@@ -86,69 +85,77 @@
 
 .cna-card__transcript-toggle {
   all: unset;
+  box-sizing: border-box;
   cursor: pointer;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
-  color: var(--color-slate);
   margin-top: 12px;
-  flex-shrink: 0;
+  font-family: var(--font-label);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-ink);
+}
+
+.cna-card__transcript-toggle:hover {
+  color: var(--color-accent);
 }
 
 .cna-card__transcript {
-  margin: 6px 0 0;
-  padding: 10px;
-  max-height: none;
-  overflow: visible;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  max-height: 120px;
+  overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-word;
   overflow-wrap: anywhere;
   font-size: 12px;
   line-height: 1.6;
   color: var(--color-ink);
-  background: var(--color-canvas);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-card);
-  flex-shrink: 0;
-}
-
-[data-inner-scrolls="1"] .cna-card__transcript {
-  max-height: 140px;
-  overflow-y: auto;
-}
-
-.cna-card__todos {
-  flex: 0 0 auto;
-  min-height: 0;
-  overflow: visible;
-  margin-top: 12px;
-  border-top: 1px solid var(--color-line);
-}
-
-[data-inner-scrolls="1"] .cna-card__todos {
-  flex: 1;
-  overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: var(--color-line) transparent;
 }
 
-[data-inner-scrolls="1"] .cna-card__todos::-webkit-scrollbar {
+.cna-card__todos-label {
+  flex-shrink: 0;
+  margin-bottom: 4px;
+}
+
+.cna-card__todos {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--color-line);
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+.cna-card__todos::-webkit-scrollbar,
+.cna-card__transcript::-webkit-scrollbar {
   width: 6px;
 }
 
-[data-inner-scrolls="1"] .cna-card__todos::-webkit-scrollbar-thumb {
+.cna-card__todos::-webkit-scrollbar-thumb,
+.cna-card__transcript::-webkit-scrollbar-thumb {
   background: var(--color-line);
   border-radius: 3px;
 }
 
 .cna-card__todo-row {
-  padding: 10px 0;
+  padding: 12px 0;
   border-bottom: 1px solid var(--color-line);
 }
 
+.cna-card__todo-row:last-child {
+  border-bottom: none;
+}
+
 .cna-card__todo-text {
-  margin: 0 0 6px;
+  margin: 0 0 8px;
   font-size: 13px;
   line-height: 1.5;
   color: var(--color-ink);
@@ -157,10 +164,18 @@
 }
 
 .cna-card__todo-site {
+  display: inline-block;
   margin: 0 0 8px;
-  font-size: 12px;
+  max-width: 100%;
+  padding: 2px 8px;
+  font-size: 11px;
   font-weight: 600;
+  line-height: 1.4;
   color: var(--color-accent);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .cna-card__todo-controls {
@@ -169,6 +184,23 @@
   align-items: stretch;
   gap: 8px;
   min-width: 0;
+}
+
+/* Compact wrap-stable action toolbar inside each todo row. */
+.cna-card__todo-controls .cna-todo-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+}
+
+.cna-card__todo-controls .cna-todo-toolbar__status {
+  flex: 1 1 100%;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-slate);
 }
 
 .cna-card__empty {
