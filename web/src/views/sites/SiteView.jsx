@@ -7,6 +7,7 @@ import {
   fetchSiteTimeline,
   fetchSiteContacts,
   patchSite,
+  patchCaller,
   postSiteTeamMembers,
   postSiteContacts,
   deleteSiteContact,
@@ -21,7 +22,7 @@ import { SiteTimeline } from "./SiteTimeline.jsx";
 import { AddPeopleModal } from "./AddPeopleModal.jsx";
 import { SiteDetailsModal } from "./SiteDetailsModal.jsx";
 import { WorkTimelinePopup } from "./WorkTimelinePopup.jsx";
-import { siteDisplayName } from "./sitesGridChrome.jsx";
+import { siteDetailsPrefill, siteDisplayName } from "./sitesGridChrome.jsx";
 
 /* ------------------------------------------------------------------
    Site view — drilldown from Tile 3, the sites directory, or the
@@ -36,6 +37,7 @@ export function SiteView({
   onBack,
   onOpen,
   onSiteUpdated,
+  onSiteIdentityChanged,
   autoEditDetails = false,
   canManage = true,
   myOpenTasks = [],
@@ -136,14 +138,26 @@ export function SiteView({
 
   /* `patch` arrives pre-diffed by the modal — only fields the admin
      actually changed — so this stays a straight pass-through and the
-     site_edits audit trail doesn't record untouched fields. Errors
-     propagate so the dialog can show them and keep the form open with
-     the entered values intact. */
-  const saveDetails = async (patch) => {
+     site_edits audit trail doesn't record untouched fields. Linked
+     contact rows with caller_id also patch the Callers Directory so the
+     directory and the site POC/display stay aligned. Errors propagate so
+     the dialog can show them and keep the form open with the entered
+     values intact. */
+  const saveDetails = async (patch, { contactUpdates = [] } = {}) => {
     if (!siteRecord?.id) return;
     setDetailsSaved(false);
+    const renamedTo = typeof patch.name === "string" ? patch.name.trim() : null;
     await patchSite(siteRecord.id, patch);
+    for (const update of contactUpdates) {
+      await patchCaller(update.caller_id, { name: update.name, phone: update.phone });
+    }
+    if (contactUpdates.length > 0) {
+      setContacts(await fetchSiteContacts(siteRecord.id));
+    }
     await onSiteUpdated?.();
+    if (renamedTo && renamedTo !== site) {
+      onSiteIdentityChanged?.(renamedTo);
+    }
     setDetailsSaved(true);
   };
 
@@ -261,7 +275,7 @@ export function SiteView({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {isBlankSite ? "Assign new site" : "Add more site details"}
+                    {isBlankSite ? "Assign new site" : "Edit site details"}
                   </button>
                 </div>
               ) : undefined
@@ -420,7 +434,10 @@ export function SiteView({
 
       {canManage && editingDetails && (
         <SiteDetailsModal
-          site={siteRecord}
+          site={siteDetailsPrefill(siteRecord, contacts ?? [])}
+          title="Edit site details"
+          intro="The name shown in lists is rebuilt from these fields when you save."
+          editableName
           onClose={() => setEditingDetails(false)}
           onSave={saveDetails}
         />

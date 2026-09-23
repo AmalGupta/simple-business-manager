@@ -18,6 +18,7 @@ import {
   SiteDisplayName,
   TextFilter,
   daysAgo,
+  siteDetailsPrefill,
   siteDisplayName,
   siteSearchText,
   windowFor,
@@ -423,10 +424,9 @@ export function SitesReviewGrid({
 
   const openDetails = useCallback(
     (site) =>
-      setDetailsSite({
-        ...site,
-        contacts: contactsBySite[site.id] ?? site.contacts ?? [],
-      }),
+      setDetailsSite(
+        siteDetailsPrefill(site, contactsBySite[site.id] ?? site.contacts ?? [])
+      ),
     [contactsBySite]
   );
 
@@ -698,7 +698,7 @@ export function SitesReviewGrid({
           extraPatch={{ is_confirmed: "Y" }}
           editableName
           onClose={() => setDetailsSite(null)}
-          onSave={(patch) => onDetailsSaved(detailsSite, patch)}
+          onSave={(patch, meta) => onDetailsSaved(detailsSite, patch, meta)}
         />
       )}
     </>

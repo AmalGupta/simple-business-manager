@@ -229,6 +229,83 @@ export function siteSearchText(site) {
   return `${siteDisplayName(site)} ${site?.name ?? ""}`.toLowerCase();
 }
 
+/** True when the site has structured display inputs (or linked contacts) —
+ *  Edit site details should pre-fill those fields. Bare pipeline name only
+ *  → not in syntax → leave H.No/sector/city/contacts blank in the dialog. */
+export function siteHasDisplaySyntax(site) {
+  if (!site) return false;
+  if ((site.contacts ?? []).length > 0) return true;
+  return Boolean(
+    site.house_no?.trim() ||
+      site.sector?.trim() ||
+      site.city?.trim() ||
+      site.address?.trim() ||
+      site.poc_name?.trim() ||
+      site.poc_contact_number?.trim()
+  );
+}
+
+/**
+ * Record passed into SiteDetailsModal. When not in display syntax, clears
+ * structured fields so the form opens blank for unidentified values while
+ * keeping the pipeline identity name.
+ */
+export function siteDetailsPrefill(site, contacts = null) {
+  if (!site) return site;
+  const linked = contacts ?? site.contacts ?? [];
+  const withContacts = { ...site, contacts: linked };
+  if (siteHasDisplaySyntax(withContacts)) return withContacts;
+  return {
+    ...withContacts,
+    house_no: "",
+    sector: "",
+    city: "",
+    address: "",
+    poc_name: "",
+    poc_contact_number: "",
+    contacts: [],
+  };
+}
+
+function splitCsv(value) {
+  if (!value?.trim()) return [];
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/** Rows for the multi-contact editor: linked callers first, else POC blob split. */
+export function siteContactEditorRows(site) {
+  const linked = site?.contacts ?? [];
+  if (linked.length > 0) {
+    return linked.map((c) => ({
+      key: c.caller_id,
+      caller_id: c.caller_id,
+      name: c.name ?? "",
+      phone: c.phone ?? "",
+    }));
+  }
+  const names = splitCsv(site?.poc_name);
+  const phones = splitCsv(site?.poc_contact_number);
+  const n = Math.max(names.length, phones.length, 1);
+  return Array.from({ length: n }, (_, i) => ({
+    key: `row-${i}`,
+    caller_id: null,
+    name: names[i] ?? "",
+    phone: phones[i] ?? "",
+  }));
+}
+
+/** Join editor rows back into sites.poc_* for composeSiteNameBeingUsed. */
+export function joinContactEditorRows(rows) {
+  const filled = (rows ?? []).filter((r) => r.name?.trim() || r.phone?.trim());
+  return {
+    poc_name: filled.map((r) => r.name.trim()).filter(Boolean).join(", ") || null,
+    poc_contact_number: filled.map((r) => r.phone.trim()).filter(Boolean).join(", ") || null,
+  };
+}
+
 /* "CL." is the bold marker in the spec, but the cell around it is already
    700 and the body face stops at 600 — a heavier weight would render
    identically. So the client half carries the contrast instead: slate at

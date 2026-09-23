@@ -748,6 +748,11 @@ export default function SimpleBusinessManager() {
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "site", site: view.site, from: view.from } })}
         onSiteUpdated={refreshSites}
+        onSiteIdentityChanged={(nextName) =>
+          setView((current) =>
+            current.name === "site" ? { ...current, site: nextName, autoEdit: false } : current
+          )
+        }
         autoEditDetails={Boolean(view.autoEdit)}
         canManage={me.role !== "staff"}
         myOpenTasks={openSiteTasks.filter((tk) => tk.site_name === view.site)}
