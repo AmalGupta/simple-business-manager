@@ -4162,7 +4162,7 @@ export async function listMyOpenTodos(db: D1Database, userId: string): Promise<A
        LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
        WHERE todos.status = 'open'
          AND EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?)
-       ORDER BY (todos.due_date IS NULL), todos.due_date ASC, calls.recorded_at DESC`
+       ORDER BY calls.recorded_at DESC, todos.id DESC`
     )
     .bind(userId)
     .all<AssignedTodoRow>();
