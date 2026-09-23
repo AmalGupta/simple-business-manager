@@ -61,9 +61,10 @@ function byCallDate(a, b) {
   return (a.recorded_at ?? "") < (b.recorded_at ?? "") ? -1 : 1;
 }
 
+/** Cards visible at once — max 3 so CNA action toolbars stay usable. Keep
+ *  in sync with `.cna-carousel` breakpoints below. */
 function computeVisibleCount() {
   if (typeof window === "undefined" || !window.matchMedia) return 1;
-  if (window.matchMedia("(min-width: 1024px)").matches) return 4;
   if (window.matchMedia("(min-width: 768px)").matches) return 3;
   return 1;
 }
@@ -139,8 +140,8 @@ function iconButtonStyle(disabled) {
    on the card that was at its left edge so the reader doesn't get slid off
    the day they picked.
 
-   The remaining screen is a CSS scroll-snap carousel: 4 cards desktop, 3
-   tablet, 1 mobile. */
+   The remaining screen is a CSS scroll-snap carousel: 3 cards from tablet
+   up, 1 mobile — 4-up left action toolbars too narrow. */
 export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssignTodo, onResolved, onBack }) {
   // Paint instantly from the cache Dashboard.jsx warmed on home-page load,
   // before any effect runs. The mount fetch below still happens, but it's
@@ -708,9 +709,6 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
         }
         @media (min-width: 768px) {
           .cna-carousel > * { flex: 0 0 calc((100% - ${CARD_GAP * 2}px) / 3); }
-        }
-        @media (min-width: 1024px) {
-          .cna-carousel > * { flex: 0 0 calc((100% - ${CARD_GAP * 3}px) / 4); }
         }
       `}</style>
 
