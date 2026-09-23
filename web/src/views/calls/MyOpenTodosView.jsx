@@ -7,12 +7,13 @@ import { TodoRow } from "../../components/TodoRow.jsx";
 /* Staff personal queue — open call todos assigned to this user.
    Staff can mark done; parking is admin-only. */
 export function MyOpenTodosView({ todos, onBack, onOpenCall, onToggle, busyIds }) {
+  /* Newest call first — matches listMyOpenTodos (recorded_at DESC). */
   const sorted = useMemo(
     () =>
       [...todos].sort((a, b) => {
-        const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity;
-        const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity;
-        return ad - bd;
+        const at = a.recorded_at ? new Date(a.recorded_at).getTime() : 0;
+        const bt = b.recorded_at ? new Date(b.recorded_at).getTime() : 0;
+        return bt - at;
       }),
     [todos]
   );
