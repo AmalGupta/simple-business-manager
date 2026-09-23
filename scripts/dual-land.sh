@@ -3,8 +3,11 @@
 # Land commit(s) that are already on a release/* branch onto develop
 # (or the reverse). Prefer fast-forward; fall back to cherry-pick.
 #
+# Also: print dual-MR titles with Environment tags (see --titles).
+#
 # Usage:
 #   scripts/dual-land.sh <commit>... [--from release/0.0.1] [--to develop] [--push]
+#   scripts/dual-land.sh --titles "SBM-123: short summary"
 #   scripts/dual-land.sh --help
 #
 # Defaults: --from = current branch if it matches release/*, else the
@@ -20,6 +23,7 @@ FROM_BRANCH=""
 TO_BRANCH="develop"
 PUSH=false
 COMMITS=()
+TITLES_SUMMARY=""
 
 usage() {
   cat <<'EOF'
@@ -30,6 +34,17 @@ Land commit(s) from a release/* branch onto develop (FF or cherry-pick).
 
   scripts/dual-land.sh <commit>... [--from release/0.0.1] [--to develop] [--push]
 
+  Print Environment-tagged MR titles (and suggested merge-commit subjects):
+
+  scripts/dual-land.sh --titles "SBM-123: short summary"
+
+    → [UAT] SBM-123: short summary   # MR → release/* (UAT)
+    → [dev] SBM-123: short summary   # MR → develop (dev)
+
+  Use those strings as `gh pr create --title`. GitHub’s default merge
+  commit subject follows the PR title, so the Environment tag shows up
+  in both the MR list and the merge commit.
+
 Defaults: --from = current release/* (else newest local release/*); --to = develop.
 Does not push unless --push is passed.
 EOF
@@ -39,9 +54,30 @@ EOF
 die() { echo "dual-land: FATAL: $*" >&2; exit 1; }
 log() { echo "dual-land: $*"; }
 
+# Map long-lived base → Environment tag for MR / merge-commit titles.
+env_tag_for_base() {
+  case "$1" in
+    develop) echo "dev" ;;
+    release/*) echo "UAT" ;;
+    *) die "no Environment tag for base '$1' (expected develop or release/*)" ;;
+  esac
+}
+
+print_dual_mr_titles() {
+  local summary="$1"
+  [[ -n "$summary" ]] || die "--titles needs a summary like 'SBM-123: fix …'"
+  # Strip a leading [dev]/[UAT] if the caller already added one.
+  summary=$(printf '%s' "$summary" | sed -E 's/^\[(dev|UAT)\][[:space:]]+//')
+  printf '[UAT] %s\n' "$summary"
+  printf '[dev] %s\n' "$summary"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help) usage ;;
+    --titles)
+      [[ $# -ge 2 ]] || die "--titles needs a summary string"
+      TITLES_SUMMARY="$2"; shift 2 ;;
     --from)
       [[ $# -ge 2 ]] || die "--from needs a branch name"
       FROM_BRANCH="$2"; shift 2 ;;
@@ -54,7 +90,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ ${#COMMITS[@]} -gt 0 ]] || die "pass one or more commit SHAs (see --help)"
+if [[ -n "$TITLES_SUMMARY" ]]; then
+  print_dual_mr_titles "$TITLES_SUMMARY"
+  exit 0
+fi
+
+[[ ${#COMMITS[@]} -gt 0 ]] || die "pass one or more commit SHAs, or --titles (see --help)"
 
 if [[ -z "$FROM_BRANCH" ]]; then
   CURRENT=$(git branch --show-current)
@@ -98,6 +139,7 @@ cleanup() { git checkout -q "$START" 2>/dev/null || true; }
 trap cleanup EXIT
 
 log "from=$FROM_BRANCH  to=$TO_BRANCH  commits=${#ORDERED[@]}"
+log "target Environment tag: [$(env_tag_for_base "$TO_BRANCH")] (for any follow-up MR → $TO_BRANCH)"
 
 git checkout "$TO_BRANCH"
 git pull --ff-only "origin" "$TO_BRANCH" 2>/dev/null || true
