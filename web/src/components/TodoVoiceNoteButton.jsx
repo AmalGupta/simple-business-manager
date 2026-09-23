@@ -8,41 +8,58 @@ import { VoiceNoteModal } from "../views/sites/VoiceNoteModal.jsx";
    a quick raw-audio clip (no transcription, unlike call recordings) and
    attaches it to the todo for the assigned staff member to play back.
    Reuses VoiceNoteModal's MediaRecorder capture (site voice memos) rather
-   than a second recording implementation. */
-export function TodoVoiceNoteButton({ todoId, existingNote, onUpload }) {
+   than a second recording implementation.
+
+   `compact` (CNA): mic only in the action row; existing playback renders
+   below so Assign / Site / mic stay on one line. */
+export function TodoVoiceNoteButton({ todoId, existingNote, onUpload, compact = false }) {
   const [recording, setRecording] = useState(false);
 
   const save = async (blob, fileName) => {
     await onUpload(todoId, blob, fileName);
   };
 
+  const mic = (
+    <button
+      type="button"
+      onClick={() => setRecording(true)}
+      aria-label={existingNote ? "Re-record voice note" : "Add voice note"}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 32,
+        height: 32,
+        flexShrink: 0,
+        border: `1px solid ${t.frost}`,
+        borderRadius: t.radiusButton,
+        background: t.white,
+        color: t.edge2,
+        cursor: "pointer",
+      }}
+    >
+      <Mic size={14} />
+    </button>
+  );
+
+  if (compact) {
+    return (
+      <>
+        {mic}
+        {recording ? <VoiceNoteModal onClose={() => setRecording(false)} onSave={save} /> : null}
+      </>
+    );
+  }
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, minWidth: 0, maxWidth: "100%" }}>
-      {existingNote && (
+      {existingNote ? (
         <div style={{ flex: "1 1 120px", minWidth: 0, maxWidth: 160 }}>
           <AudioPlayer src={`/api/todo-voice-notes/${existingNote.id}`} />
         </div>
-      )}
-      <button
-        onClick={() => setRecording(true)}
-        aria-label={existingNote ? "Re-record voice note" : "Add voice note"}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          width: 32,
-          height: 32,
-          flexShrink: 0,
-          border: `1px solid ${t.frost}`,
-          borderRadius: t.radiusButton,
-          background: t.white,
-          color: t.edge2,
-          cursor: "pointer",
-        }}
-      >
-        <Mic size={14} />
-      </button>
-      {recording && <VoiceNoteModal onClose={() => setRecording(false)} onSave={save} />}
+      ) : null}
+      {mic}
+      {recording ? <VoiceNoteModal onClose={() => setRecording(false)} onSave={save} /> : null}
     </div>
   );
 }
