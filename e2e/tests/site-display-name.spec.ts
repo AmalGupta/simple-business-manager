@@ -76,20 +76,50 @@ test.describe("Site display name", () => {
     expect(row.site_name_being_used).toBe(`${row.name} | CL. RAJ KAMAL JI`);
   });
 
-  test("a sector or city alone does not replace the name", async ({ page }) => {
+  test("a sector or city alone is appended after the site name", async ({ page }) => {
     await loginAsAdmin(page);
     const cityOnly = await page.request.post("/api/sites", {
       headers: { "X-SBM-Key": sbmApiKey() },
       data: { name: `E2E City Only ${Date.now()}`, city: "AIRPORT ROAD" },
     });
-    expect((await cityOnly.json()).site_name_being_used).toBeNull();
+    const cityOnlyRow = await cityOnly.json();
+    expect(cityOnlyRow.site_name_being_used).toBe(`${cityOnlyRow.name} | AIRPORT ROAD`);
 
     const withClient = await page.request.post("/api/sites", {
       headers: { "X-SBM-Key": sbmApiKey() },
       data: { name: `E2E City Client ${Date.now()}`, city: "AIRPORT ROAD", poc_name: "Tushar" },
     });
     const row = await withClient.json();
-    expect(row.site_name_being_used).toBe(`${row.name} | CL. Tushar`);
+    expect(row.site_name_being_used).toBe(`${row.name} | AIRPORT ROAD | CL. Tushar`);
+  });
+
+  test("phone is appended and site header matches the grid display name", async ({ page }) => {
+    await loginAsAdmin(page);
+    const storedName = `E2E Phone ${Date.now()}`;
+    const created = await page.request.post("/api/sites", {
+      headers: { "X-SBM-Key": sbmApiKey() },
+      data: {
+        name: storedName,
+        house_no: "244",
+        sector: "IAS",
+        city: "PCS",
+        poc_name: "Raj Kamal Ji",
+        poc_contact_number: "9872139600",
+      },
+    });
+    expect(created.ok()).toBeTruthy();
+    const site = await created.json();
+    const expected = "#244, IAS-PCS | CL. Raj Kamal Ji | 9872139600";
+    expect(site.site_name_being_used).toBe(expected);
+
+    await page.reload();
+    await expect(page.getByText("Simple Business Manager")).toBeVisible();
+    await page.getByRole("button", { name: /^\d+ confirmed sites?/ }).click();
+    await page.getByPlaceholder("Search name…").fill(storedName);
+    await expect(page.locator(".ag-row")).toHaveCount(1);
+    await expect(page.locator(".ag-row").first()).toContainText(expected);
+    await page.locator(".ag-row").first().click();
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText(expected);
   });
 
   // Operators type the label into the field — real UAT rows hold "H.NO 244".

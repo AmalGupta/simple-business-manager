@@ -2043,42 +2043,81 @@ export const SITE_CLIENT_SEPARATOR = " | CL. ";
 const HOUSE_NO_PREFIX = /^(?:#|h\.?\s?no\.?|house\s?no\.?)\s*(?=\S)/i;
 
 /**
- * The name the site tables show — "#244, IAS-PCS | CL. Raj Kamal Ji": the
- * address an operator recognises, then whose site it is. Written to
- * sites.site_name_being_used on every create and detail edit rather than
- * composed at render, so the two names are interchangeable — SQL can sort
- * and search on this one while `name` stays the pipeline's match key
- * (upsertSiteByName conflicts on it, and the extraction roster reads it).
+ * The name the site tables and SiteView header show — one string in
+ * `sites.site_name_being_used`, e.g.
+ *   "Twin Tower MARBELLA GRAND | NEW CHANDIGARH | CL. Malik Ji | 8288099919"
+ *   "#244, IAS-PCS | CL. Raj Kamal Ji | 9872139600"
+ *   "NOBEL Aurelia | SECTOR 88-MOHALI"
  *
- * NULL when the site carries none of these details: a site discovered from
- * a call is just its name until someone fills the details form in.
+ * Rules (keep in step with migration 0037):
+ * - Full house + locality → `#house, locality` is the address identity (do
+ *   not also prepend `sites.name`).
+ * - Partial locality/address alone must not *replace* the name; when used,
+ *   prepend `sites.name` so Twin Tower / Nobel / AGI keep their identity.
+ * - Client is joined with ` | CL. `.
+ * - Phone is appended with ` | ` when set.
+ * - NULL when there is nothing beyond a bare pipeline name.
+ *
+ * `name` stays the pipeline match key; this column is display-only.
  */
 export function composeSiteNameBeingUsed(site: {
   name?: string | null;
   house_no?: string | null;
   sector?: string | null;
   city?: string | null;
+  address?: string | null;
   poc_name?: string | null;
+  poc_contact_number?: string | null;
 }): string | null {
   const clean = (value?: string | null) => (value?.trim() ? value.trim() : null);
+  const name = clean(site.name);
   const houseNo = clean(clean(site.house_no)?.replace(HOUSE_NO_PREFIX, ""));
   const sector = clean(site.sector);
   const city = clean(site.city);
   const client = clean(site.poc_name);
-
-  /* Replacing the name costs the operator whatever only the name carried, so
-     the address has to be a full one: a house number AND a locality. UAT shows
-     both halves of that. Six sites hold a locality alone, which turned two
-     different sites into "AIRPORT ROAD" and two more into "NEW CHANDIGARH";
-     and "H.NO 244 IAS Society" holds a house number alone, where composing
-     "#244" drops the society nobody typed into a field. Either way the site
-     keeps its own name and only picks up the client suffix. */
+  const phone = clean(site.poc_contact_number);
+  const freeform = clean(site.address);
   const locality = sector && city ? `${sector}-${city}` : (sector ?? city);
-  const address = houseNo && locality ? `#${houseNo}, ${locality}` : null;
-  if (!address && !client) return null;
+  const fullAddress = houseNo && locality ? `#${houseNo}, ${locality}` : null;
+  /* Partial address from details — never a lone house number (that drops
+     society text that only `name` carried). */
+  const partialAddress = fullAddress ? null : (freeform ?? locality ?? null);
 
-  const left = address ?? clean(site.name) ?? "";
-  return client ? `${left}${SITE_CLIENT_SEPARATOR}${client}` : left;
+  let metaSyntax: string | null = null;
+  if (fullAddress) {
+    metaSyntax = client ? `${fullAddress}${SITE_CLIENT_SEPARATOR}${client}` : fullAddress;
+  } else if (partialAddress && client) {
+    metaSyntax = `${partialAddress}${SITE_CLIENT_SEPARATOR}${client}`;
+  } else if (partialAddress) {
+    metaSyntax = partialAddress;
+  }
+
+  let display: string | null = null;
+  if (fullAddress) {
+    /* Full address replaces name by design — same as migration 0032. */
+    display = metaSyntax;
+  } else if (metaSyntax) {
+    /* Prepend pipeline name when metadata alone would drop site identity. */
+    if (
+      name &&
+      metaSyntax !== name &&
+      !metaSyntax.startsWith(`${name} |`) &&
+      !metaSyntax.startsWith(`${name}${SITE_CLIENT_SEPARATOR}`)
+    ) {
+      display = `${name} | ${metaSyntax}`;
+    } else {
+      display = metaSyntax;
+    }
+  } else if (client && name) {
+    display = `${name}${SITE_CLIENT_SEPARATOR}${client}`;
+  }
+
+  if (!display) return null;
+
+  if (phone && !display.includes(phone)) {
+    display = `${display} | ${phone}`;
+  }
+  return display;
 }
 
 /** Display name for a new site — explicit name wins, else H.No + sector + city. */
@@ -2169,7 +2208,15 @@ const SITE_PATCH_FIELDS = [
 type SitePatchField = (typeof SITE_PATCH_FIELDS)[number];
 
 /** The patch fields composeSiteNameBeingUsed reads, so a change to any of them rebuilds it. */
-const SITE_DISPLAY_NAME_INPUTS = ["name", "house_no", "sector", "city", "poc_name"] as const;
+const SITE_DISPLAY_NAME_INPUTS = [
+  "name",
+  "house_no",
+  "sector",
+  "city",
+  "address",
+  "poc_name",
+  "poc_contact_number",
+] as const;
 
 /**
  * One dynamic patch for everything editable on a site: confirmation status
@@ -2199,9 +2246,16 @@ export async function updateSite(
     const touchesDisplayName = fields.some((f) => (SITE_DISPLAY_NAME_INPUTS as readonly string[]).includes(f));
     const previous = touchesDisplayName
       ? await db
-          .prepare(`SELECT name, house_no, sector, city, poc_name FROM sites WHERE id = ?`)
+          .prepare(
+            `SELECT name, house_no, sector, city, address, poc_name, poc_contact_number FROM sites WHERE id = ?`
+          )
           .bind(id)
-          .first<Pick<SiteRow, "name" | "house_no" | "sector" | "city" | "poc_name">>()
+          .first<
+            Pick<
+              SiteRow,
+              "name" | "house_no" | "sector" | "city" | "address" | "poc_name" | "poc_contact_number"
+            >
+          >()
       : null;
 
     const assignments = fields.map((f) => `${f} = ?`);
