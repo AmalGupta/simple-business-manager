@@ -655,6 +655,55 @@ export async function upsertSite(
 }
 
 /**
+ * Forward-looking site heat for the directory (migration 0038). No historical
+ * backfill — only events after deploy write rows. Bumps last_activity_at only
+ * forward so a late/old timestamp cannot reorder a hotter site downward.
+ */
+export type SiteActivitySource =
+  | "call"
+  | "media"
+  | "team"
+  | "edit"
+  | "task"
+  | "complaint"
+  | "installation"
+  | "shortage"
+  | "site_created";
+
+export async function touchSiteActivity(
+  db: D1Database,
+  siteId: string,
+  opts?: { at?: string | null; source?: SiteActivitySource | null; refId?: string | null }
+): Promise<void> {
+  const at = opts?.at?.trim() ? opts.at.trim() : null;
+  const source = opts?.source ?? null;
+  const refId = opts?.refId ?? null;
+  await db
+    .prepare(
+      `INSERT INTO site_activity_summary (site_id, last_activity_at, last_source, last_ref_id)
+       VALUES (?, coalesce(?, datetime('now')), ?, ?)
+       ON CONFLICT(site_id) DO UPDATE SET
+         last_activity_at = CASE
+           WHEN excluded.last_activity_at >= site_activity_summary.last_activity_at
+           THEN excluded.last_activity_at
+           ELSE site_activity_summary.last_activity_at
+         END,
+         last_source = CASE
+           WHEN excluded.last_activity_at >= site_activity_summary.last_activity_at
+           THEN excluded.last_source
+           ELSE site_activity_summary.last_source
+         END,
+         last_ref_id = CASE
+           WHEN excluded.last_activity_at >= site_activity_summary.last_activity_at
+           THEN excluded.last_ref_id
+           ELSE site_activity_summary.last_ref_id
+         END`
+    )
+    .bind(siteId, at, source, refId)
+    .run();
+}
+
+/**
  * Upserts each name into `sites` and links it to the call. Used by both the
  * main extraction (saveExtraction, inline) and the Haiku site scan
  * (packages/core/prompts/site-scan.ts) — the latter calls this directly
@@ -669,6 +718,9 @@ export async function linkCallToSites(db: D1Database, callId: string, siteNames:
       db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId)
     )
   );
+  const call = await db.prepare(`SELECT recorded_at FROM calls WHERE id = ?`).bind(callId).first<{ recorded_at: string }>();
+  const at = call?.recorded_at ?? null;
+  await Promise.all(siteIds.map((siteId) => touchSiteActivity(db, siteId, { at, source: "call", refId: callId })));
 }
 
 /**
@@ -678,6 +730,8 @@ export async function linkCallToSites(db: D1Database, callId: string, siteNames:
  */
 export async function linkCallToSiteExplicit(db: D1Database, callId: string, siteId: string): Promise<void> {
   await db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId).run();
+  const call = await db.prepare(`SELECT recorded_at FROM calls WHERE id = ?`).bind(callId).first<{ recorded_at: string }>();
+  await touchSiteActivity(db, siteId, { at: call?.recorded_at ?? null, source: "call", refId: callId });
 }
 
 /**
@@ -770,6 +824,8 @@ export async function saveExtraction(
   }
 
   await db.batch(statements);
+  const at = call?.recorded_at ?? null;
+  await Promise.all(siteIds.map((siteId) => touchSiteActivity(db, siteId, { at, source: "call", refId: callId })));
 }
 
 /**
@@ -2326,6 +2382,7 @@ export async function updateSite(
       );
     }
     await db.batch(statements);
+    await touchSiteActivity(db, id, { source: "edit", refId: id });
   }
   const row = await db.prepare(`${SITE_ROW_SELECT} WHERE sites.id = ?`).bind(id).first<SiteRow>();
   return row ?? null;
@@ -2401,6 +2458,7 @@ export async function createSite(
         .bind(crypto.randomUUID(), id, actorUserId ?? null),
     ]);
     await seedSiteTasks(db, id);
+    await touchSiteActivity(db, id, { source: "site_created", refId: id });
     const row = await db.prepare(`${SITE_ROW_SELECT} WHERE sites.id = ?`).bind(id).first<SiteRow>();
     site = row!;
   }
@@ -2617,6 +2675,7 @@ export async function addSiteTeamMember(
     )
     .bind(id, siteId, name, contactNumber, addedBy ?? null, memberUserId ?? null)
     .run();
+  await touchSiteActivity(db, siteId, { source: "team", refId: id });
   return { id, name, contact_number: contactNumber, user_id: memberUserId ?? null };
 }
 
@@ -2672,6 +2731,7 @@ export async function addSiteTeamMembers(
     rows.push({ id, name: user.name, contact_number: contactNumber, user_id: user.id });
   }
   if (statements.length > 0) await db.batch(statements);
+  if (rows.length > 0) await touchSiteActivity(db, siteId, { source: "team", refId: rows[0].id });
   return { added: rows, skipped };
 }
 
@@ -2901,7 +2961,7 @@ export interface ConfirmedSiteRow {
   site_name_being_used: string | null;
   open_count: number;
   target_closure_date: string | null;
-  /** Most recent entry of any kind on this site — see the activity CTE below. NULL for a site nothing has happened on yet. */
+  /** Most recent post-deploy site event — from site_activity_summary (migration 0038). NULL until something touches the site after this shipped. */
   last_activity_at: string | null;
   /** Who the site was first heard from, joined through sites.discovered_from_call_id (migration 0028). */
   discovered_from_caller_name: string | null;
@@ -2917,8 +2977,8 @@ export interface ConfirmedSiteRow {
  * count — the directory reached from the sites tile's "N confirmed sites"
  * rollup, distinct from getSitesNeedingAttention: this lists ALL confirmed
  * sites regardless of whether anything's overdue or blocked, sites with
- * zero calls included. Alphabetical — it's a reference list, not a triage
- * queue.
+ * zero calls included. Ordered by forward-looking heat
+ * (site_activity_summary), hottest first; untouched sites sink to the bottom.
  */
 /**
  * `forUserId` (a `staff` session — see listSites above) drops the
@@ -2940,50 +3000,28 @@ export async function getConfirmedSitesSummary(db: D1Database, forUserId?: strin
          SELECT site_id FROM site_tasks WHERE assigned_to_user_id = ?
        )`
     : "";
-  /* `activity` is the same four sources getSiteTimeline composes and
-     getUnreadActivityCounts unions — calls linked via call_sites,
-     site_media, site_team_members, site_edits. Two deliberate differences
-     from the unread version:
-
-     - No `uploaded_by_user_id IS NOT NULL` filter on the calls branch.
-       That predicate is there because an unread count has to attribute an
-       entry to an actor; "when did anything last happen here" doesn't, and
-       keeping it would make a Drive-ingested call with no uploader invisible
-       to this column.
-     - Soft-deleted calls are excluded. A spam call is hidden everywhere else
-       in the app, so it must not be what makes a site look recently active. */
+  /* last_activity_at comes from site_activity_summary (migration 0038), not
+     a read-time UNION of timeline tables. Rows appear only when a write path
+     calls touchSiteActivity after deploy — no historical backfill. */
   const stmt = db.prepare(
-    `WITH activity AS (
-       SELECT call_sites.site_id AS site_id, calls.recorded_at AS created_at
-       FROM call_sites JOIN calls ON calls.id = call_sites.call_id
-       WHERE calls.deleted_at IS NULL
-       UNION ALL
-       SELECT site_id, created_at FROM site_media
-       UNION ALL
-       SELECT site_id, created_at FROM site_team_members
-       UNION ALL
-       SELECT site_id, created_at FROM site_edits
-     ),
-     last_activity AS (
-       SELECT site_id, MAX(created_at) AS last_at FROM activity GROUP BY site_id
-     )
-     SELECT sites.id AS id, sites.name AS name, sites.site_name_being_used AS site_name_being_used,
+    `SELECT sites.id AS id, sites.name AS name, sites.site_name_being_used AS site_name_being_used,
             sites.target_closure_date AS target_closure_date,
             COALESCE(SUM(CASE WHEN todos.status = 'open' AND calls_for_open.id IS NOT NULL THEN 1 ELSE 0 END), 0) AS open_count,
-            last_activity.last_at AS last_activity_at,
+            site_activity_summary.last_activity_at AS last_activity_at,
             callers.name AS discovered_from_caller_name,
             substr(COALESCE(disc.recording_date, disc.recorded_at), 1, 10) AS discovered_from_call_date
      FROM sites
      LEFT JOIN call_sites ON call_sites.site_id = sites.id
      LEFT JOIN calls calls_for_open ON calls_for_open.id = call_sites.call_id AND calls_for_open.deleted_at IS NULL
      LEFT JOIN todos ON todos.call_id = calls_for_open.id
-     LEFT JOIN last_activity ON last_activity.site_id = sites.id
+     LEFT JOIN site_activity_summary ON site_activity_summary.site_id = sites.id
      LEFT JOIN calls disc ON disc.id = sites.discovered_from_call_id
      LEFT JOIN callers ON callers.id = disc.client_id
      WHERE ${confirmedClause} ${scoped}
-     GROUP BY sites.id, sites.name, sites.site_name_being_used, sites.target_closure_date, last_activity.last_at,
+     GROUP BY sites.id, sites.name, sites.site_name_being_used, sites.target_closure_date,
+              site_activity_summary.last_activity_at,
               callers.name, substr(COALESCE(disc.recording_date, disc.recorded_at), 1, 10)
-     ORDER BY sites.name ASC`
+     ORDER BY site_activity_summary.last_activity_at DESC NULLS LAST, sites.name ASC`
   );
   const { results } = await (forUserId ? stmt.bind(forUserId, forUserId) : stmt).all<ConfirmedSiteRow>();
   return results;
@@ -3196,6 +3234,7 @@ export async function createEscalation(db: D1Database, input: NewEscalationInput
     )
     .run();
   const row = await db.prepare(`SELECT * FROM escalations WHERE id = ?`).bind(id).first<Escalation>();
+  if (input.siteId) await touchSiteActivity(db, input.siteId, { source: "complaint", refId: id });
   return row!;
 }
 
@@ -3529,6 +3568,7 @@ export async function addSiteMedia(db: D1Database, input: NewSiteMediaInput): Pr
       input.installationUpdateId ?? null
     )
     .run();
+  await touchSiteActivity(db, input.siteId, { source: "media", refId: id });
   return (await getSiteMediaById(db, id))!;
 }
 
@@ -3868,7 +3908,9 @@ export async function assignSiteTask(
     ? stmt.bind(input.assignedToUserId, input.assignedByUserId, input.dueDate, id)
     : stmt.bind(input.assignedToUserId, input.assignedByUserId, id);
   await bound.run();
-  return getSiteTaskById(db, id);
+  const row = await getSiteTaskById(db, id);
+  if (row) await touchSiteActivity(db, row.site_id, { source: "task", refId: id });
+  return row;
 }
 
 export async function completeSiteTask(db: D1Database, id: string, completedByUserId: string): Promise<SiteTaskRow | null> {
@@ -3876,7 +3918,9 @@ export async function completeSiteTask(db: D1Database, id: string, completedByUs
     .prepare(`UPDATE site_tasks SET status = 'done', completed_at = datetime('now'), completed_by_user_id = ? WHERE id = ?`)
     .bind(completedByUserId, id)
     .run();
-  return getSiteTaskById(db, id);
+  const row = await getSiteTaskById(db, id);
+  if (row) await touchSiteActivity(db, row.site_id, { source: "task", refId: id });
+  return row;
 }
 
 // ---------------------------------------------------------------------------
@@ -3899,6 +3943,7 @@ export async function createInstallation(
     .prepare(`INSERT INTO installations (id, site_id, label, created_by, category) VALUES (?, ?, ?, ?, ?)`)
     .bind(id, siteId, label, createdBy, category)
     .run();
+  await touchSiteActivity(db, siteId, { source: "installation", refId: id });
   const row = await db.prepare(`SELECT * FROM installations WHERE id = ?`).bind(id).first<Installation>();
   return row!;
 }
@@ -3980,7 +4025,9 @@ export async function createInstallationUpdate(db: D1Database, input: NewInstall
     )
     .bind(input.id, input.installationId, input.category, input.voiceNoteCallId, input.reportedByUserId)
     .run();
-  return (await getInstallationUpdateById(db, input.id))!;
+  const row = await getInstallationUpdateById(db, input.id);
+  if (row) await touchSiteActivity(db, row.site_id, { source: "installation", refId: input.id });
+  return row!;
 }
 
 export interface NewMaterialShortageInput {
@@ -4001,6 +4048,7 @@ export async function createMaterialShortage(db: D1Database, input: NewMaterialS
     )
     .bind(id, input.siteId, input.installationId ?? null, input.installationUpdateId ?? null, input.description ?? null, input.reportedByUserId)
     .run();
+  await touchSiteActivity(db, input.siteId, { source: "shortage", refId: id });
   const row = await db.prepare(`SELECT * FROM material_shortages WHERE id = ?`).bind(id).first<MaterialShortage>();
   return row!;
 }
