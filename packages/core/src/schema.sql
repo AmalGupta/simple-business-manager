@@ -103,17 +103,14 @@ CREATE TABLE sites (
   -- by hand through createSite. The caller name and date shown on the review
   -- screen are joined through this, not copied — see SITE_ROW_SELECT.
   discovered_from_call_id TEXT REFERENCES calls(id),
-  -- migration 0031, corrected by 0032: what the site tables show — "#244,
-  -- IAS-PCS | CL. Raj Kamal Ji", composed from house_no/sector/city/poc_name
-  -- by composeSiteNameBeingUsed on every create and detail edit. The address
-  -- half needs a house number and a locality: half an address is not worth
-  -- the name it replaces — a lone sector turned two different sites into
-  -- "AIRPORT ROAD", and a lone house number dropped the "IAS Society" that
-  -- only the name carried. Deliberately a
-  -- second column rather than a rewrite of `name`: `name` stays the
-  -- pipeline's match key (upsertSiteByName conflicts on it) and the two are
-  -- interchangeable wherever one reads better than the other. NULL while a
-  -- site has none of those details.
+  -- migration 0031, corrected by 0032 / 0037: what the site tables and
+  -- SiteView header show. Composed by composeSiteNameBeingUsed from
+  -- house_no/sector/city/address/poc_name/poc_contact_number (and sites.name
+  -- when partial locality would otherwise drop identity). Full house+locality
+  -- still replaces name as the address left half; partial locality alone is
+  -- appended after the name (not instead of it). Phone is appended when set.
+  -- `name` stays the pipeline match key. NULL while a site has none of those
+  -- details.
   site_name_being_used TEXT
 );
 
