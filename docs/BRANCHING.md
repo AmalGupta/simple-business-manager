@@ -33,6 +33,8 @@ The same ticket must land on **both** long-lived lines via **two pull requests**
 
 ### Preferred sequence (UAT-bound bugfix / hotfix)
 
+MR titles **must** start with an Environment tag — `[UAT]` for `release/*`, `[dev]` for `develop` — so the PR list and the default merge-commit subject show which line the change targets. Print both with `scripts/dual-land.sh --titles "SBM-123: …"`.
+
 ```bash
 git fetch origin
 git checkout -b bugfix/SBM-123-short-slug origin/release/0.0.1
@@ -41,14 +43,14 @@ git push -u origin HEAD
 
 # 1) MR into release (UAT)
 gh pr create --base release/0.0.1 --head bugfix/SBM-123-short-slug \
-  --title "SBM-123: …" --body "## Summary\n- …\n\n## Test plan\n- [ ] …"
+  --title "[UAT] SBM-123: …" --body "## Summary\n- …\n\n## Test plan\n- [ ] …"
 
 # 2) Second branch for develop (same commits)
 git checkout -b bugfix/SBM-123-short-slug-develop origin/develop
 git cherry-pick <sha-on-feature-branch>...   # or rebase onto develop if clean
 git push -u origin HEAD
 gh pr create --base develop --head bugfix/SBM-123-short-slug-develop \
-  --title "SBM-123: … (develop)" --body "Pair of release MR #<n>."
+  --title "[dev] SBM-123: …" --body "Pair of release MR #<n>."
 ```
 
 If histories allow a single tip to open against both bases without rewriting, still create **two** PRs (GitHub requires one base per PR).
@@ -61,9 +63,16 @@ Branch from `develop`, open **MR → develop** only. When the release train shou
 
 `scripts/dual-land.sh` cherry-picks/FF commits between `release/*` and `develop` when the user explicitly wants that instead of (or after) MRs — e.g. emergency hotfix already merged on one side. Prefer **dual MRs** for normal work. See skill `dual-land-bugfix`.
 
+```bash
+scripts/dual-land.sh --titles "SBM-123: short summary"
+# → [UAT] SBM-123: short summary
+# → [dev] SBM-123: short summary
+```
+
 ## Agent rules of thumb
 
 - Name the branch with `SBM-<id>` before coding.
 - Raise **both** MRs when the change belongs on UAT and dev; return the PR URLs.
+- Prefix MR titles with `[UAT]` or `[dev]` (`scripts/dual-land.sh --titles "…"`).
 - Do not push `develop` / `release/*` directly unless the user asks for that exception.
 - Deploy mapping is fixed: **develop → dev**, **release → UAT**. Do not deploy UAT from `develop` or dev from `release/*` unless the user overrides.
