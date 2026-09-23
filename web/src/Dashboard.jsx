@@ -669,7 +669,9 @@ export default function SimpleBusinessManager() {
     >
       <StreakWall
         days={monthDays}
-        onSelectDay={(date) => setView({ name: "day", date })}
+        onSelectDay={(date) =>
+          setView({ name: "calls-needing-action", focusDate: date, from: { name: "home" } })
+        }
         selected={null}
         year={calMonth.year}
         month={calMonth.month}
@@ -923,6 +925,7 @@ export default function SimpleBusinessManager() {
       <CallsNeedingActionView
         staffRoster={staffRoster}
         currentUser={me}
+        initialFocusDate={view.focusDate ?? null}
         onAssignTodo={onAssignTodo}
         onResolved={() => {
           setCallsNeedingActionCount((n) => Math.max(0, n - 1));
