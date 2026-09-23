@@ -146,26 +146,29 @@ export function TodoAssignControl({
 
   if (!editing) {
     if (compact) {
-      /* One primary: Assign to me when claimable, else Assign/Reassign.
-         Site + voice arrive via extraActions as secondary siblings. */
+      /* Status above; action buttons stay on one row (Assign to me / Assign /
+         Site / mic). Voice playback, when present, sits below so it cannot
+         break the button row. */
       return (
         <div className="cna-todo-toolbar">
           <span className="cna-todo-toolbar__status">{statusWithDue}</span>
-          {canClaim ? (
-            <button
-              type="button"
-              onClick={assignToMe}
-              disabled={claiming}
-              style={{ ...COMPACT_PRIMARY, opacity: claiming ? 0.6 : 1 }}
-            >
-              {claiming ? "Assigning…" : "Assign to me"}
+          <div className="cna-todo-toolbar__actions">
+            {canClaim ? (
+              <button
+                type="button"
+                onClick={assignToMe}
+                disabled={claiming}
+                style={{ ...COMPACT_PRIMARY, opacity: claiming ? 0.6 : 1 }}
+              >
+                {claiming ? "Assigning…" : "Assign to me"}
+              </button>
+            ) : null}
+            <button type="button" onClick={() => setEditing(true)} style={canClaim ? COMPACT_SECONDARY : COMPACT_PRIMARY}>
+              {assignLabel}
             </button>
-          ) : null}
-          <button type="button" onClick={() => setEditing(true)} style={canClaim ? COMPACT_SECONDARY : COMPACT_PRIMARY}>
-            {assignLabel}
-          </button>
-          {extraActions}
-          {error ? <span style={{ flex: "1 1 100%", fontSize: 12, color: t.signal }}>{error}</span> : null}
+            {extraActions}
+          </div>
+          {error ? <span style={{ fontSize: 12, color: t.signal }}>{error}</span> : null}
         </div>
       );
     }
