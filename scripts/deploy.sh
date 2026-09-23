@@ -221,6 +221,12 @@ pnpm build
 
 if ! $SKIP_MIGRATE; then
   run "Applying D1 migrations..." npx wrangler d1 migrations apply "$DB_NAME" "${WRANGLER_ENV_ARGS[@]}" --remote
+  # Migration 0037 is a marker only — remote D1 OOMs on the set-based
+  # recomputation (SQLITE_NOMEM). Idempotent per-row backfill matches
+  # composeSiteNameBeingUsed.
+  if [[ "$ENV_NAME" == "dev" || "$ENV_NAME" == "uat" ]]; then
+    run "Backfilling site display names ($ENV_NAME)..." node scripts/backfill-site-display-names.mjs "$ENV_NAME"
+  fi
 fi
 
 run "Deploying..." npx wrangler deploy "${WRANGLER_ENV_ARGS[@]}"
