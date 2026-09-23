@@ -142,7 +142,15 @@ function iconButtonStyle(disabled) {
 
    The remaining screen is a CSS scroll-snap carousel: 3 cards from tablet
    up, 1 mobile — 4-up left action toolbars too narrow. */
-export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssignTodo, onResolved, onBack }) {
+export function CallsNeedingActionView({
+  staffRoster,
+  currentUser = null,
+  /** ISO day from the home StreakWall — open scrolled to that date instead of today. */
+  initialFocusDate = null,
+  onAssignTodo,
+  onResolved,
+  onBack,
+}) {
   // Paint instantly from the cache Dashboard.jsx warmed on home-page load,
   // before any effect runs. The mount fetch below still happens, but it's
   // TTL-aware, so a warm cache costs no round trip and merges to a no-op.
@@ -357,13 +365,24 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     await ensureRange(from, addDaysIso(oldest, -1));
   }, [ensureRange, lookback]);
 
-  // Opening: cards for the last CNA_WINDOW_DAYS days, then focus today
-  // (display strategy #1), alongside the two lookback-wide aggregates. All
-  // three go out together — the cards are the only one the first paint waits
-  // on, and neither aggregate is on the path to showing them.
+  // Opening: cards for the last CNA_WINDOW_DAYS days (widened to cover a
+  // home-calendar focus date when that day sits outside the default window),
+  // then focus today — or initialFocusDate when opened from a day click.
+  // Alongside: the two lookback-wide aggregates. All three go out together —
+  // the cards are the only one the first paint waits on, and neither
+  // aggregate is on the path to showing them.
   useEffect(() => {
     const { dateFrom, dateTo } = defaultCallsNeedingActionWindow();
-    const cards = ensureRange(dateFrom, dateTo);
+    const requested =
+      typeof initialFocusDate === "string" && /^\d{4}-\d{2}-\d{2}/.test(initialFocusDate)
+        ? initialFocusDate.slice(0, 10)
+        : null;
+    const withinLookback =
+      requested && requested >= lookback.dateFrom && requested <= lookback.dateTo ? requested : null;
+    const focusTarget = withinLookback ?? dateTo;
+    const loadFrom = withinLookback && withinLookback < dateFrom ? withinLookback : dateFrom;
+
+    const cards = ensureRange(loadFrom, dateTo);
     const counts = ensureCounts(lookback.dateFrom, lookback.dateTo).finally(() => {
       countsReady.current = true;
     });
@@ -372,8 +391,8 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
       // Focus goes through the same request/nonce path as a day click so that
       // it still lands if the fetch resolves after this effect.
       focusNonce.current += 1;
-      setFocusRequest({ date: dateTo, nonce: focusNonce.current });
-      setFocusDate(dateTo);
+      setFocusRequest({ date: focusTarget, nonce: focusNonce.current });
+      setFocusDate(focusTarget);
     });
 
     // Nothing in the opening days: land on the most recent day inside the
@@ -381,8 +400,10 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     // empty carousel can't widen its own way out of this — the edge observer
     // needs a card to observe — so without the fallback a quiet week left the
     // view showing "nothing needs action in these days" with 100+ waiting a
-    // fortnight back (SBM-26).
+    // fortnight back (SBM-26). Skip when the home calendar asked for a
+    // specific day — focusOnDate already loads that day (possibly empty).
     const settled = Promise.all([cards, counts]).then(([added]) => {
+      if (withinLookback) return focusOnDate(withinLookback);
       if (added !== 0) return undefined;
       const latest = previousDayWithCalls(
         dayCountsRef.current,
@@ -400,7 +421,7 @@ export function CallsNeedingActionView({ staffRoster, currentUser = null, onAssi
     // right depends on the lookback total, and an empty opening window is only
     // really empty once the fallback above has had its turn.
     Promise.all([settled, total]).finally(() => setOpening(false));
-  }, [ensureRange, ensureCounts, focusOnDate, lookback]);
+  }, [ensureRange, ensureCounts, focusOnDate, lookback, initialFocusDate]);
 
   // Consumes one focus request. Depends on `items` too, so a request made
   // while the carousel was still empty lands as soon as the cards exist; the
