@@ -27,7 +27,8 @@ ModuleRegistry.registerModules([AllCommunityModule]);
    whose other categories are staff, family and spam; none of those is a
    site contact. Filtering to one category also makes it small enough to
    load whole and filter in the browser, which is what makes typing feel
-   instant.
+   instant. Linked sites are not hydrated here — that is Contacts-directory
+   only; this picker only needs id / name / phone.
    ------------------------------------------------------------------ */
 
 const CONTACTS_GRID_CSS = `

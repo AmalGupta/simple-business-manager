@@ -58,6 +58,7 @@ function parsePositiveInt(value: string | null, max: number): number | null | un
  * Contacts directory tabs (saved = named contacts, unsaved = phone-only labels).
  * `?siteId=` narrows saved rows linked to one site via caller_sites.
  * `?linked_sites=1` on Saved: only contacts with any site link (paginated total respects this).
+ * `?include_linked_sites=1`: hydrate each row's linked_sites (Contacts directory Sites column).
  * site. `?q=` (substring on name or phone) and `?limit=`/`?offset=` were added
  * for the site-contacts picker, which can't load the whole directory.
  */
@@ -83,6 +84,7 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
 
   const siteId = url.searchParams.get("siteId")?.trim() || undefined;
   const linkedSitesOnly = url.searchParams.get("linked_sites") === "1";
+  const includeLinkedSites = url.searchParams.get("include_linked_sites") === "1";
 
   const q = url.searchParams.get("q")?.trim() || undefined;
 
@@ -97,6 +99,7 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
     ...(bucket ? { bucket } : {}),
     siteId,
     ...(linkedSitesOnly ? { linkedSitesOnly: true } : {}),
+    ...(includeLinkedSites ? { includeLinkedSites: true } : {}),
     q,
     limit,
     offset,

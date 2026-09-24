@@ -209,6 +209,12 @@ export interface CallerListOpts {
   siteId?: string;
   /** Contacts directory: only rows with at least one caller_sites link. */
   linkedSitesOnly?: boolean;
+  /**
+   * Hydrate `linked_sites` per row (extra IN-chunk queries). Only the
+   * Contacts directory needs this for its Sites column — pickers
+   * (Associate contacts, Add people) pass false / omit.
+   */
+  includeLinkedSites?: boolean;
   /** Case-insensitive substring match on name or phone. */
   q?: string;
   limit?: number;
@@ -322,6 +328,12 @@ export async function listCallers(db: D1Database, opts?: CallerListOpts): Promis
   const { results } = await (allBinds.length ? stmt.bind(...allBinds) : stmt).all<CallerRow>();
   const rows = results ?? [];
   if (rows.length === 0) return [];
+  /* Linked sites are display-only for the Contacts directory grid. Associate
+     contacts / Add people load thousands of clients and never show the
+     Sites column — skipping this avoids ~N/100 extra D1 round-trips. */
+  if (!opts?.includeLinkedSites) {
+    return rows.map((row) => ({ ...row, linked_sites: [] }));
+  }
   const sitesByCaller = await getLinkedSitesByCallerIds(
     db,
     rows.map((r) => r.id)

@@ -447,12 +447,22 @@ export async function postResetStaffPin(id) {
    is a ~3.3k-row phone-contacts import, too big to load whole. Omitting them
    keeps the original full-category behaviour the Callers Directory relies on.
    Response is { items, total, counts }, where `total` ignores the page window. */
-export async function fetchCallers({ category, bucket, siteId, linkedSitesOnly, q, limit, offset } = {}) {
+export async function fetchCallers({
+  category,
+  bucket,
+  siteId,
+  linkedSitesOnly,
+  includeLinkedSites,
+  q,
+  limit,
+  offset,
+} = {}) {
   const params = new URLSearchParams();
   if (category) params.set("category", category);
   if (bucket) params.set("bucket", bucket);
   if (siteId) params.set("siteId", siteId);
   if (linkedSitesOnly) params.set("linked_sites", "1");
+  if (includeLinkedSites) params.set("include_linked_sites", "1");
   if (q) params.set("q", q);
   if (limit !== undefined) params.set("limit", String(limit));
   if (offset !== undefined) params.set("offset", String(offset));
@@ -467,6 +477,7 @@ function contactsDirectoryCacheKey(opts) {
     bucket: opts.bucket ?? "",
     siteId: opts.siteId ?? "",
     linkedSitesOnly: opts.linkedSitesOnly ? "1" : "",
+    includeLinkedSites: opts.includeLinkedSites ? "1" : "",
     q: opts.q ?? "",
     limit: opts.limit ?? "",
     offset: opts.offset ?? "",
