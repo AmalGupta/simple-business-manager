@@ -90,9 +90,9 @@ export default function SimpleBusinessManager() {
   const [callersCount, setCallersCount] = useState(0);
   const [callsNeedingActionCount, setCallsNeedingActionCount] = useState(0);
   const [resolvedCallsCount, setResolvedCallsCount] = useState(0);
-  /* Home parked tile — from GET /api/dashboard/summary. Open/closed-today
-     tiles were removed in favour of Resolved Calls. */
+  /* Home parked / open-today tiles — from GET /api/dashboard/summary. */
   const [parkedCount, setParkedCount] = useState(0);
+  const [openTodayCount, setOpenTodayCount] = useState(0);
   const [confirmedCount, setConfirmedCount] = useState(0);
   const [unconfirmedCount, setUnconfirmedCount] = useState(0);
   /* Open (assigned, not done) site tasks — scoped server-side to "mine" for
@@ -176,6 +176,7 @@ export default function SimpleBusinessManager() {
     setCallsNeedingActionCount(0);
     setResolvedCallsCount(0);
     setParkedCount(0);
+    setOpenTodayCount(0);
     setConfirmedCount(0);
     setUnconfirmedCount(0);
     setOpenSiteTasks([]);
@@ -191,6 +192,7 @@ export default function SimpleBusinessManager() {
       setConfirmedCount(summary.confirmed_count ?? 0);
       setUnconfirmedCount(summary.unconfirmed_count ?? 0);
       setParkedCount(summary.parked_count ?? 0);
+      setOpenTodayCount(summary.open_today ?? 0);
       setCallsCount(summary.calls_count ?? 0);
       setCallersCount(summary.callers_count ?? 0);
       setCallsNeedingActionCount(summary.calls_needing_action_count ?? 0);
@@ -438,6 +440,8 @@ export default function SimpleBusinessManager() {
     try {
       const summary = await fetchDashboardSummary();
       setMyOpenTodos(summary.my_open_todos ?? []);
+      setOpenTodayCount(summary.open_today ?? 0);
+      setParkedCount(summary.parked_count ?? 0);
       setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
       setHomeTab((tab) => {
         if (tab === "admin") return tab;
@@ -458,6 +462,33 @@ export default function SimpleBusinessManager() {
     }
     return updated;
   }, [homeTab]);
+
+  const onTodoSiteAssigned = useCallback(async (result) => {
+    const updated = result?.todo;
+    if (updated?.id) {
+      setMyOpenTodos((prev) =>
+        prev.map((td) =>
+          td.id === updated.id
+            ? {
+                ...td,
+                ...updated,
+                site_id: result.site_id ?? updated.site_id,
+                site_name: result.site_name ?? updated.site_name,
+                assignees: updated.assignees ?? td.assignees,
+              }
+            : td
+        )
+      );
+    }
+    setTodoRefreshKey((k) => k + 1);
+    try {
+      const summary = await fetchDashboardSummary();
+      setMyOpenTodos(summary.my_open_todos ?? []);
+      setOpenTodayCount(summary.open_today ?? 0);
+    } catch (err) {
+      console.error("[sbm] failed to refresh after todo site assign", err);
+    }
+  }, []);
 
   /* Load staff-scoped summary when admin selects a staff home bookmark. */
   useEffect(() => {
@@ -1013,6 +1044,7 @@ export default function SimpleBusinessManager() {
     const scopeId = view.forUserId || null;
     const todos =
       scopeId && staffPanel?.userId === scopeId ? staffPanel.myOpenTodos : myOpenTodos;
+    const manage = me.role !== "staff";
     return shellInStaffBookmark(
       <MyOpenTodosView
         todos={todos}
@@ -1020,6 +1052,11 @@ export default function SimpleBusinessManager() {
         onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-open-todos", forUserId: scopeId } })}
         onToggle={onToggle}
         busyIds={busyIds}
+        canManage={manage}
+        staffRoster={staffRoster}
+        currentUser={me}
+        onAssign={manage ? onAssignTodo : undefined}
+        onTodoSiteAssigned={manage ? onTodoSiteAssigned : undefined}
       />
     );
   }
@@ -1254,7 +1291,7 @@ export default function SimpleBusinessManager() {
             onOpen={() => setView({ name: "resolved-calls", from: { name: "home" } })}
           />
         )}
-        {myOpenTodos.length > 0 && (
+        {(me.role === "admin" || me.role === "superadmin" || myOpenTodos.length > 0) && (
           <button
             onClick={() => setView({ name: "my-open-todos", from: { name: "home" } })}
             style={{ all: "unset", cursor: "pointer", display: "block" }}
@@ -1266,6 +1303,15 @@ export default function SimpleBusinessManager() {
                 <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length}</span>
               </div>
             </Card>
+          </button>
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && openTodayCount > 0 && (
+          <button
+            onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label={`Open today — ${openTodayCount}`}
+          >
+            <StatCard value={openTodayCount} label="open today" />
           </button>
         )}
         <ComplaintsTile
