@@ -772,6 +772,13 @@ export async function saveExtraction(
 ): Promise<void> {
   const siteNames = [...new Set(extraction.sites.map((s) => s.trim()).filter(Boolean))];
   const siteIds = await Promise.all(siteNames.map((name) => upsertSite(db, name, callId)));
+  /* name → id for resolving todos[].site (v7). Case-insensitive lookup so
+     roster drift in spelling/case still hits the call-level upsert. */
+  const siteIdByName = new Map<string, string>();
+  for (let i = 0; i < siteNames.length; i++) {
+    siteIdByName.set(siteNames[i].toLowerCase(), siteIds[i]);
+  }
+  const linkedSiteIds = new Set(siteIds);
   const staff = await listStaffRoster(db);
 
   const statements = [
@@ -794,6 +801,16 @@ export async function saveExtraction(
       ),
   ];
 
+  const linkCallSite = (siteId: string) => {
+    if (linkedSiteIds.has(siteId)) return;
+    linkedSiteIds.add(siteId);
+    statements.push(
+      db
+        .prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`)
+        .bind(callId, siteId)
+    );
+  };
+
   for (const siteId of siteIds) {
     statements.push(
       db
@@ -807,25 +824,54 @@ export async function saveExtraction(
      Drive calls leave it NULL (no human assigner in-app). */
   const call = await getCallById(db, callId);
   const assignedByUserId = call?.uploaded_by_user_id ?? null;
+  const soleCallSiteId = siteIds.length === 1 ? siteIds[0] : null;
+  const recordedForSiteId = call?.recorded_for_site_id ?? null;
+
+  const resolveTodoSiteId = async (spokenSite: string | undefined): Promise<string | null> => {
+    const trimmed = spokenSite?.trim() ?? "";
+    if (trimmed) {
+      const existing = siteIdByName.get(trimmed.toLowerCase());
+      if (existing) {
+        linkCallSite(existing);
+        return existing;
+      }
+      const id = await upsertSite(db, trimmed, callId);
+      siteIdByName.set(trimmed.toLowerCase(), id);
+      linkCallSite(id);
+      return id;
+    }
+    /* Fallbacks when the model left todos[].site empty: single call site,
+       else the site this voice memo was recorded for. */
+    if (soleCallSiteId) {
+      linkCallSite(soleCallSiteId);
+      return soleCallSiteId;
+    }
+    if (recordedForSiteId) {
+      linkCallSite(recordedForSiteId);
+      return recordedForSiteId;
+    }
+    return null;
+  };
 
   for (const todo of extraction.todos) {
     const matched = matchStaffByOwner(todo.owner, staff);
     /* Desk/site memos: owner "self" → claim for the recorder so My call tasks
        fills without a manual Assign-to-me. Phone/Drive calls leave self
-       unassigned (no uploaded_by); admins still see them via widened queue. */
+       unassigned (no uploaded_by); admins still see them via widened query. */
     const selfAssigneeId =
       !matched && assignedByUserId && normalizeOwnerName(todo.owner ?? "") === "self"
         ? assignedByUserId
         : null;
     const assigneeId = matched?.id ?? selfAssigneeId;
     const todoId = crypto.randomUUID();
+    const todoSiteId = await resolveTodoSiteId(todo.site);
     statements.push(
       db
         .prepare(
-          `INSERT INTO todos (id, call_id, owner, text, due_date, origin)
-           VALUES (?, ?, ?, ?, ?, 'llm')`
+          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id)
+           VALUES (?, ?, ?, ?, ?, 'llm', ?)`
         )
-        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null)
+        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null, todoSiteId)
     );
     if (assigneeId) {
       statements.push(
@@ -850,7 +896,9 @@ export async function saveExtraction(
 
   await db.batch(statements);
   const at = call?.recorded_at ?? null;
-  await Promise.all(siteIds.map((siteId) => touchSiteActivity(db, siteId, { at, source: "call", refId: callId })));
+  await Promise.all(
+    [...linkedSiteIds].map((siteId) => touchSiteActivity(db, siteId, { at, source: "call", refId: callId }))
+  );
 }
 
 /**
