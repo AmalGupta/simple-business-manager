@@ -141,10 +141,17 @@ export async function fetchCallTranscripts() {
 }
 
 /** Home tiles + small lists — no call transcripts. Role-scoped server-side.
- *  Admin may pass forUserId to load a staff member's staff-home summary. */
+ *  Admin may pass forUserId to load a staff member's staff-home summary.
+ *  Personal-queue rows are empty; use my_open_todos_count + fetchMyOpenTodos. */
 export async function fetchDashboardSummary({ forUserId } = {}) {
   const q = forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
   return fetchJSON(`/api/dashboard/summary${q}`);
+}
+
+/** Full My call tasks list (claims + site backfill). Admin may pass forUserId. */
+export async function fetchMyOpenTodos({ forUserId } = {}) {
+  const q = forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
+  return fetchJSON(`/api/my-open-todos${q}`);
 }
 
 /* Single-call fetch, on demand — the bulk fetchCalls() list is never loaded

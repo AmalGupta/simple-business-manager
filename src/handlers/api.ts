@@ -27,6 +27,7 @@ import {
   getCallerById,
   getConfirmedSitesSummary,
   getDashboardSummary,
+  listMyOpenTodos,
   getLatestVoiceNotesByTodoIds,
   getSitesNeedingAttention,
   getTodoById,
@@ -335,6 +336,9 @@ export async function handleGetCallTranscripts(request: Request, env: Env): Prom
  * Any logged-in role; staff get only their sites + open site tasks.
  * Admin may pass ?for_user_id= to load that staff member's staff-home summary
  * (admin home bookmark tabs).
+ *
+ * Personal-queue rows are not included (my_open_todos is empty); use
+ * my_open_todos_count for tiles and GET /api/my-open-todos for the full list.
  */
 export async function handleGetDashboardSummary(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
@@ -348,6 +352,34 @@ export async function handleGetDashboardSummary(request: Request, env: Env): Pro
 
   const viewerUserId = session.user_role === "staff" ? null : session.user_id;
   return json(await getDashboardSummary(env.DB, null, viewerUserId));
+}
+
+/**
+ * Full personal queue (My call tasks / My schedule). Lazy-claims name/alias
+ * matches and backfills site_id — deliberately not on the home summary path.
+ * Admin may pass ?for_user_id= when viewing a staff bookmark.
+ */
+export async function handleGetMyOpenTodos(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  const scoped = await resolveForUserId(request, env, session);
+  if (scoped instanceof Response) return scoped;
+
+  if (scoped) {
+    return json(await listMyOpenTodos(env.DB, scoped));
+  }
+
+  if (session.user_role === "staff") {
+    return json(await listMyOpenTodos(env.DB, session.user_id));
+  }
+
+  const user = await getUserById(env.DB, session.user_id);
+  return json(
+    await listMyOpenTodos(env.DB, session.user_id, {
+      includeIdentifiedForViewer: true,
+      viewerName: user?.name ?? null,
+    })
+  );
 }
 
 /**
