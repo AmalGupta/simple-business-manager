@@ -1,14 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { t } from "../../theme.js";
-import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
-import { TodoRow } from "../../components/TodoRow.jsx";
-import { TodoAssignControl } from "./TodoAssignControl.jsx";
 import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
+import {
+  OPEN_TODO_PAGE_SIZE,
+  OpenTodoCard,
+  OpenTodoLoadMore,
+  sortTodosByRecordedAtDesc,
+} from "./OpenTodoCard.jsx";
 
 /* Personal queue — open call todos for this user.
-   Staff: assignee-only, mark done.
+   Staff: assignee-only, mark done via TodoRow.
    Admin (canManage): also owner=self / name-matched; Assign to me / staff / site. */
 export function MyOpenTodosView({
   todos,
@@ -23,17 +26,20 @@ export function MyOpenTodosView({
   onTodoSiteAssigned,
 }) {
   const [siteTodo, setSiteTodo] = useState(null);
+  const [visibleCount, setVisibleCount] = useState(OPEN_TODO_PAGE_SIZE);
 
   /* Newest call first — matches listMyOpenTodos (recorded_at DESC). */
   const sorted = useMemo(
-    () =>
-      [...todos].sort((a, b) => {
-        const at = a.recorded_at ? new Date(a.recorded_at).getTime() : 0;
-        const bt = b.recorded_at ? new Date(b.recorded_at).getTime() : 0;
-        return bt - at;
-      }),
+    () => sortTodosByRecordedAtDesc(todos, (td) => td.recorded_at),
     [todos]
   );
+
+  useEffect(() => {
+    setVisibleCount(OPEN_TODO_PAGE_SIZE);
+  }, [todos]);
+
+  const paged = sorted.slice(0, visibleCount);
+  const remaining = Math.max(0, sorted.length - visibleCount);
 
   const emptyCopy = canManage
     ? "Nothing assigned to you or identified for you right now."
@@ -51,51 +57,26 @@ export function MyOpenTodosView({
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>{emptyCopy}</p>
         </Card>
       ) : (
-        <Card>
-          {sorted.map((td) => (
-            <div key={td.id} style={{ padding: "8px 10px 4px", borderBottom: `1px solid ${t.frost}` }}>
-              <button
-                type="button"
-                onClick={() => onOpenCall?.(td.call_id)}
-                style={{
-                  all: "unset",
-                  cursor: onOpenCall ? "pointer" : "default",
-                  fontFamily: t.display,
-                  fontSize: 13,
-                  fontWeight: 500,
-                  color: t.edge2,
-                  marginBottom: 2,
-                  display: "block",
-                }}
-              >
-                {td.client_name}
-              </button>
-              {td.site_name ? (
-                <span style={{ fontSize: 12, color: t.edge2, display: "block", marginBottom: 2 }}>{td.site_name}</span>
-              ) : null}
-              <TodoRow todo={td} onToggle={onToggle} busy={busyIds?.has(td.id)} />
-              {canManage && onAssign ? (
-                <div style={{ padding: "4px 0 8px 28px" }}>
-                  <TodoAssignControl
-                    todo={td}
-                    staffRoster={staffRoster}
-                    currentUser={currentUser}
-                    onAssign={onAssign}
-                    compact
-                    extraActions={
-                      <button
-                        type="button"
-                        onClick={() => setSiteTodo(td)}
-                        style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 32, padding: "0 10px" }}
-                      >
-                        {td.site_id ? "Change site" : "Assign to Site"}
-                      </button>
-                    }
-                  />
-                </div>
-              ) : null}
-            </div>
+        <Card style={{ padding: 0 }}>
+          {paged.map((td) => (
+            <OpenTodoCard
+              key={td.id}
+              todo={td}
+              callName={td.client_name}
+              recordedAt={td.recorded_at}
+              onOpenCall={onOpenCall}
+              onToggle={onToggle}
+              busy={busyIds?.has(td.id)}
+              staffRoster={staffRoster}
+              currentUser={currentUser}
+              onAssign={canManage && onAssign ? onAssign : undefined}
+              onRequestSiteAssign={canManage && onAssign ? setSiteTodo : undefined}
+            />
           ))}
+          <OpenTodoLoadMore
+            remaining={remaining}
+            onLoadMore={() => setVisibleCount((n) => n + OPEN_TODO_PAGE_SIZE)}
+          />
         </Card>
       )}
 

@@ -1612,7 +1612,25 @@ export async function listCallsByTodoStatus(
     )
     .bind(...binds, status, limit)
     .all<RawCallJoinRow>();
-  return hydrateCallRows(db, rawCalls ?? []);
+  const calls = await hydrateCallRows(db, rawCalls ?? []);
+  if (status === "open") {
+    const openTodos = calls.flatMap((c) =>
+      c.todos.filter((td) => td.status === "open").map((td) => ({ id: td.id, call_id: c.id, site_id: td.site_id }))
+    );
+    const filled = await backfillTodoSitesFromCallContext(db, openTodos);
+    if (filled.size > 0) {
+      for (const c of calls) {
+        for (const td of c.todos) {
+          const hit = filled.get(td.id);
+          if (hit) {
+            td.site_id = hit.site_id;
+            td.site_name = hit.site_name;
+          }
+        }
+      }
+    }
+  }
+  return calls;
 }
 
 /**
@@ -4323,6 +4341,73 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
 }
 
 /**
+ * Lazy persist for open todos still missing site_id — same fallbacks as
+ * saveExtraction v7 (no prompt change): exactly one call_sites row, else
+ * calls.recorded_for_site_id. Ensures call_sites when using recorded_for.
+ * Returns id → { site_id, site_name } for rows that were filled.
+ */
+export async function backfillTodoSitesFromCallContext(
+  db: D1Database,
+  todos: Array<{ id: string; call_id: string; site_id: string | null }>
+): Promise<Map<string, { site_id: string; site_name: string }>> {
+  const pending = todos.filter((t) => !t.site_id);
+  if (pending.length === 0) return new Map();
+
+  const callIds = [...new Set(pending.map((t) => t.call_id))];
+  const [siteLinks, callMeta] = await Promise.all([
+    queryAllByIdChunks<{ call_id: string; site_id: string }>(db, callIds, (ph) =>
+      `SELECT call_id, site_id FROM call_sites WHERE call_id IN (${ph})`
+    ),
+    queryAllByIdChunks<{ id: string; recorded_for_site_id: string | null }>(db, callIds, (ph) =>
+      `SELECT id, recorded_for_site_id FROM calls WHERE id IN (${ph})`
+    ),
+  ]);
+
+  const sitesByCall = new Map<string, string[]>();
+  for (const r of siteLinks) {
+    const list = sitesByCall.get(r.call_id) ?? [];
+    list.push(r.site_id);
+    sitesByCall.set(r.call_id, list);
+  }
+  const recordedFor = new Map(callMeta.map((c) => [c.id, c.recorded_for_site_id ?? null]));
+
+  const updates: Array<{ todoId: string; callId: string; siteId: string }> = [];
+  for (const t of pending) {
+    const links = sitesByCall.get(t.call_id) ?? [];
+    let siteId: string | null = null;
+    if (links.length === 1) siteId = links[0];
+    else if (recordedFor.get(t.call_id)) siteId = recordedFor.get(t.call_id)!;
+    if (siteId) updates.push({ todoId: t.id, callId: t.call_id, siteId });
+  }
+  if (updates.length === 0) return new Map();
+
+  /* Batch UPDATE + ensure call_sites (INSERT OR IGNORE). Skip touchSiteActivity —
+     these are historical associations; activity already exists from the call. */
+  const statements = [];
+  for (const u of updates) {
+    statements.push(
+      db.prepare(`UPDATE todos SET site_id = ? WHERE id = ? AND site_id IS NULL`).bind(u.siteId, u.todoId)
+    );
+    statements.push(
+      db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(u.callId, u.siteId)
+    );
+  }
+  await db.batch(statements);
+
+  const siteIds = [...new Set(updates.map((u) => u.siteId))];
+  const nameRows = await queryAllByIdChunks<{ id: string; name: string }>(db, siteIds, (ph) =>
+    `SELECT id, name FROM sites WHERE id IN (${ph})`
+  );
+  const nameById = new Map(nameRows.map((r) => [r.id, r.name]));
+  const out = new Map<string, { site_id: string; site_name: string }>();
+  for (const u of updates) {
+    const site_name = nameById.get(u.siteId);
+    if (site_name) out.set(u.todoId, { site_id: u.siteId, site_name });
+  }
+  return out;
+}
+
+/**
  * Open call todos for a user's personal queue.
  * Staff: assignee rows only.
  * Admin (`includeIdentifiedForViewer`): also owner=self / owner matching viewer name.
@@ -4389,6 +4474,19 @@ export async function listMyOpenTodos(
     .all<Omit<AssignedTodoRow, "assignees">>();
   const rows = results ?? [];
   if (rows.length === 0) return [];
+
+  const filled = await backfillTodoSitesFromCallContext(
+    db,
+    rows.map((r) => ({ id: r.id, call_id: r.call_id, site_id: r.site_id ?? null }))
+  );
+  for (const r of rows) {
+    const hit = filled.get(r.id);
+    if (hit) {
+      r.site_id = hit.site_id;
+      r.site_name = hit.site_name;
+    }
+  }
+
   const map = await getAssigneesByTodoIds(
     db,
     rows.map((r) => r.id)
