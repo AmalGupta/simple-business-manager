@@ -22,6 +22,7 @@ import {
   handleGetCallsCount,
   handleGetCallTranscripts,
   handleGetDashboardSummary,
+  handleGetMyOpenTodos,
   handleGetEscalations,
   handleGetSites,
   handlePostSite,
@@ -243,6 +244,11 @@ export default {
     if (url.pathname === "/api/dashboard/summary" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetDashboardSummary(request, env);
+    }
+
+    if (url.pathname === "/api/my-open-todos" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetMyOpenTodos(request, env);
     }
 
     const callMatch = url.pathname.match(/^\/api\/calls\/([^/]+)$/);
