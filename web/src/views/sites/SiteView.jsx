@@ -181,7 +181,8 @@ export function SiteView({
 
   const handleAssignTodo = async (todoId, staffId) => {
     if (!onAssignTodo) return;
-    await onAssignTodo(todoId, staffId);
+    const userIds = Array.isArray(staffId) ? staffId : staffId ? [staffId] : [];
+    await onAssignTodo(todoId, userIds);
     await loadTimeline();
   };
 
