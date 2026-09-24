@@ -836,6 +836,7 @@ export default function SimpleBusinessManager() {
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "open-todos" } })}
         onAssign={onAssignTodo}
+        onTodoSiteAssigned={onTodoSiteAssigned}
         status="open"
         refreshKey={todoRefreshKey}
       />
