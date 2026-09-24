@@ -1,6 +1,6 @@
 // All D1 access lives here — see docs/SCAFFOLDING.md §1 ("no SQL outside queries.ts").
 
-import { matchStaffByOwner, normalizeOwnerName } from "./assignment";
+import { matchStaffByOwner, normalizeOwnerName, type OwnerAliasMatch } from "./assignment";
 import { normalizeCallerPhone } from "./caller-category";
 import { SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import type {
@@ -186,6 +186,15 @@ export interface CallerLinkedSite {
 /** Contacts directory row — callers list plus site links from caller_sites. */
 export interface CallerDirectoryRow extends CallerRow {
   linked_sites: CallerLinkedSite[];
+  /** Present when `includeAliases` — preview for the Aliases column. */
+  aliases: string[];
+}
+
+export interface CallerAliasRow {
+  id: string;
+  caller_id: string;
+  alias: string;
+  created_at: string;
 }
 
 export interface CallerBucketCounts {
@@ -215,6 +224,8 @@ export interface CallerListOpts {
    * (Associate contacts, Add people) pass false / omit.
    */
   includeLinkedSites?: boolean;
+  /** Hydrate `aliases` per row (Contacts directory Aliases column). */
+  includeAliases?: boolean;
   /** Case-insensitive substring match on name or phone. */
   q?: string;
   limit?: number;
@@ -316,6 +327,28 @@ export async function countCallersByBucket(db: D1Database): Promise<CallerBucket
  * whole category at once, and changing that is out of scope here. Pass
  * `limit` to page (the site-contacts picker does).
  */
+/** Aliases for a page of callers — batched for the Contacts directory grid. */
+export async function getAliasesByCallerIds(
+  db: D1Database,
+  callerIds: string[]
+): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  const rows = await queryAllByIdChunks<{ caller_id: string; alias: string }>(
+    db,
+    callerIds,
+    (placeholders) =>
+      `SELECT caller_id, alias FROM caller_aliases
+       WHERE caller_id IN (${placeholders})
+       ORDER BY alias ASC`
+  );
+  for (const row of rows ?? []) {
+    const list = map.get(row.caller_id) ?? [];
+    list.push(row.alias);
+    map.set(row.caller_id, list);
+  }
+  return map;
+}
+
 export async function listCallers(db: D1Database, opts?: CallerListOpts): Promise<CallerDirectoryRow[]> {
   const { clause, binds } = callerFilterSql(opts);
   let sql = `${CALLER_SELECT} ${clause} ORDER BY callers.name ASC`;
@@ -328,19 +361,18 @@ export async function listCallers(db: D1Database, opts?: CallerListOpts): Promis
   const { results } = await (allBinds.length ? stmt.bind(...allBinds) : stmt).all<CallerRow>();
   const rows = results ?? [];
   if (rows.length === 0) return [];
-  /* Linked sites are display-only for the Contacts directory grid. Associate
-     contacts / Add people load thousands of clients and never show the
-     Sites column — skipping this avoids ~N/100 extra D1 round-trips. */
-  if (!opts?.includeLinkedSites) {
-    return rows.map((row) => ({ ...row, linked_sites: [] }));
-  }
-  const sitesByCaller = await getLinkedSitesByCallerIds(
-    db,
-    rows.map((r) => r.id)
-  );
+  /* Linked sites / aliases are display-only for the Contacts directory grid.
+     Associate contacts / Add people load thousands of clients and never show
+     those columns — skipping avoids ~N/100 extra D1 round-trips. */
+  const ids = rows.map((r) => r.id);
+  const [sitesByCaller, aliasesByCaller] = await Promise.all([
+    opts?.includeLinkedSites ? getLinkedSitesByCallerIds(db, ids) : Promise.resolve(null),
+    opts?.includeAliases ? getAliasesByCallerIds(db, ids) : Promise.resolve(null),
+  ]);
   return rows.map((row) => ({
     ...row,
-    linked_sites: sitesByCaller.get(row.id) ?? [],
+    linked_sites: sitesByCaller?.get(row.id) ?? [],
+    aliases: aliasesByCaller?.get(row.id) ?? [],
   }));
 }
 
@@ -402,6 +434,82 @@ export async function updateCaller(
 async function getCallerRow(db: D1Database, id: string): Promise<CallerRow | null> {
   const row = await db.prepare(`${CALLER_SELECT} WHERE callers.id = ?`).bind(id).first<CallerRow>();
   return row ?? null;
+}
+
+export async function listCallerAliases(db: D1Database, callerId: string): Promise<CallerAliasRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, caller_id, alias, created_at FROM caller_aliases
+       WHERE caller_id = ? ORDER BY alias ASC`
+    )
+    .bind(callerId)
+    .all<CallerAliasRow>();
+  return results ?? [];
+}
+
+/**
+ * Insert a trimmed alias. Empty rejected. Global uniqueness is on
+ * lower(trim(alias)); conflicts throw an Error whose message includes UNIQUE
+ * so handlers can map to 409.
+ */
+export async function addCallerAlias(
+  db: D1Database,
+  callerId: string,
+  alias: string
+): Promise<CallerAliasRow> {
+  const trimmed = alias.trim();
+  if (!trimmed) throw new Error("alias cannot be empty");
+  const caller = await getCallerById(db, callerId);
+  if (!caller) throw new Error("caller not found");
+  const id = crypto.randomUUID();
+  try {
+    await db
+      .prepare(`INSERT INTO caller_aliases (id, caller_id, alias) VALUES (?, ?, ?)`)
+      .bind(id, callerId, trimmed)
+      .run();
+  } catch (err) {
+    if (String(err).includes("UNIQUE")) {
+      throw new Error("UNIQUE constraint failed: alias already in use");
+    }
+    throw err;
+  }
+  const row = await db
+    .prepare(`SELECT id, caller_id, alias, created_at FROM caller_aliases WHERE id = ?`)
+    .bind(id)
+    .first<CallerAliasRow>();
+  return row!;
+}
+
+export async function deleteCallerAlias(
+  db: D1Database,
+  callerId: string,
+  aliasId: string
+): Promise<boolean> {
+  const result = await db
+    .prepare(`DELETE FROM caller_aliases WHERE id = ? AND caller_id = ?`)
+    .bind(aliasId, callerId)
+    .run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+/**
+ * Alias → linked staff user for extraction / auto-assign. Only rows whose
+ * contact has staff_user_id set (aliases on unlinked contacts never invent
+ * an assignee).
+ */
+export async function listOwnerAliasMatches(db: D1Database): Promise<OwnerAliasMatch[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT caller_aliases.alias AS alias,
+              callers.staff_user_id AS user_id,
+              users.name AS user_name
+       FROM caller_aliases
+       JOIN callers ON callers.id = caller_aliases.caller_id
+       JOIN users ON users.id = callers.staff_user_id
+       WHERE callers.staff_user_id IS NOT NULL`
+    )
+    .all<OwnerAliasMatch>();
+  return results ?? [];
 }
 
 /**
@@ -779,7 +887,7 @@ export async function saveExtraction(
     siteIdByName.set(siteNames[i].toLowerCase(), siteIds[i]);
   }
   const linkedSiteIds = new Set(siteIds);
-  const staff = await listStaffRoster(db);
+  const [staff, aliasRows] = await Promise.all([listStaffRoster(db), listOwnerAliasMatches(db)]);
 
   const statements = [
     db
@@ -854,7 +962,7 @@ export async function saveExtraction(
   };
 
   for (const todo of extraction.todos) {
-    const matched = matchStaffByOwner(todo.owner, staff);
+    const matched = matchStaffByOwner(todo.owner, staff, aliasRows);
     /* Desk/site memos: owner "self" → claim for the recorder so My call tasks
        fills without a manual Assign-to-me. Phone/Drive calls leave self
        unassigned (no uploaded_by); admins still see them via widened query. */
@@ -906,8 +1014,8 @@ export async function saveExtraction(
  * owner matches a staff name. Returns how many rows were updated.
  */
 export async function autoAssignOpenTodosByOwner(db: D1Database): Promise<number> {
-  const staff = await listStaffRoster(db);
-  if (staff.length === 0) return 0;
+  const [staff, aliasRows] = await Promise.all([listStaffRoster(db), listOwnerAliasMatches(db)]);
+  if (staff.length === 0 && aliasRows.length === 0) return 0;
   const { results } = await db
     .prepare(
       `SELECT todos.id AS id, todos.owner AS owner FROM todos
@@ -917,7 +1025,7 @@ export async function autoAssignOpenTodosByOwner(db: D1Database): Promise<number
     .all<{ id: string; owner: string }>();
   let updated = 0;
   for (const row of results ?? []) {
-    const matched = matchStaffByOwner(row.owner, staff);
+    const matched = matchStaffByOwner(row.owner, staff, aliasRows);
     if (!matched) continue;
     await db
       .prepare(
@@ -3495,6 +3603,8 @@ export interface StaffRosterRow {
   id: string;
   name: string;
   phone: string | null;
+  /** Contact aliases that resolve to this staff user (via callers.staff_user_id). */
+  aliases: string[];
 }
 
 /**
@@ -3504,12 +3614,29 @@ export interface StaffRosterRow {
  * needs. Deliberately not listStaffAndSelf: that query also decrypts every
  * row's PIN, which the dropdown never shows and which was making it slow
  * to open for no reason.
+ *
+ * `aliases` are aggregated from caller_aliases → callers where
+ * staff_user_id matches, so Assign suggestions can exact-match nicknames.
  */
 export async function listStaffRoster(db: D1Database): Promise<StaffRosterRow[]> {
-  const { results } = await db
-    .prepare(`SELECT id, name, phone FROM users WHERE role = 'staff' ORDER BY name ASC`)
-    .all<StaffRosterRow>();
-  return results;
+  const [{ results }, aliasRows] = await Promise.all([
+    db.prepare(`SELECT id, name, phone FROM users WHERE role = 'staff' ORDER BY name ASC`).all<{
+      id: string;
+      name: string;
+      phone: string | null;
+    }>(),
+    listOwnerAliasMatches(db),
+  ]);
+  const aliasesByUser = new Map<string, string[]>();
+  for (const row of aliasRows) {
+    const list = aliasesByUser.get(row.user_id) ?? [];
+    list.push(row.alias);
+    aliasesByUser.set(row.user_id, list);
+  }
+  return (results ?? []).map((row) => ({
+    ...row,
+    aliases: aliasesByUser.get(row.id) ?? [],
+  }));
 }
 
 export async function updateUserPhone(db: D1Database, userId: string, phone: string | null): Promise<void> {

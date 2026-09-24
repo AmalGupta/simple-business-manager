@@ -10,6 +10,10 @@ import {
   countCallersByCategory,
   countCallersByBucket,
   updateCaller,
+  getCallerById,
+  listCallerAliases,
+  addCallerAlias,
+  deleteCallerAlias,
   CALLER_CATEGORIES,
   type CallerBucket,
   type CallerCategory,
@@ -85,6 +89,7 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
   const siteId = url.searchParams.get("siteId")?.trim() || undefined;
   const linkedSitesOnly = url.searchParams.get("linked_sites") === "1";
   const includeLinkedSites = url.searchParams.get("include_linked_sites") === "1";
+  const includeAliases = url.searchParams.get("include_aliases") === "1";
 
   const q = url.searchParams.get("q")?.trim() || undefined;
 
@@ -100,6 +105,7 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
     siteId,
     ...(linkedSitesOnly ? { linkedSitesOnly: true } : {}),
     ...(includeLinkedSites ? { includeLinkedSites: true } : {}),
+    ...(includeAliases ? { includeAliases: true } : {}),
     q,
     limit,
     offset,
@@ -189,4 +195,57 @@ export async function handleUpdateCaller(request: Request, env: Env, id: string)
     if (String(err).includes("UNIQUE")) return json({ error: "a caller with that phone already exists" }, 409);
     return json({ error: `update failed: ${String(err)}` }, 500);
   }
+}
+
+/** GET /api/callers/:id/aliases — list aliases for one contact. */
+export async function handleListCallerAliases(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const caller = await getCallerById(env.DB, id);
+  if (!caller) return json({ error: "not found" }, 404);
+
+  const items = await listCallerAliases(env.DB, id);
+  return json({ items, staff_user_id: caller.staff_user_id });
+}
+
+/** POST /api/callers/:id/aliases — body `{ alias }`. */
+export async function handleAddCallerAlias(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const alias = typeof record.alias === "string" ? record.alias : "";
+
+  try {
+    const row = await addCallerAlias(env.DB, id, alias);
+    return json(row, 201);
+  } catch (err) {
+    const msg = String(err);
+    if (msg.includes("caller not found")) return json({ error: "not found" }, 404);
+    if (msg.includes("alias cannot be empty")) return json({ error: "alias is required" }, 400);
+    if (msg.includes("UNIQUE")) return json({ error: "that alias is already in use" }, 409);
+    return json({ error: `create failed: ${msg}` }, 500);
+  }
+}
+
+/** DELETE /api/callers/:id/aliases/:aliasId */
+export async function handleDeleteCallerAlias(
+  request: Request,
+  env: Env,
+  id: string,
+  aliasId: string
+): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const deleted = await deleteCallerAlias(env.DB, id, aliasId);
+  if (!deleted) return json({ error: "not found" }, 404);
+  return json({ ok: true });
 }

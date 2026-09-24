@@ -155,6 +155,19 @@ CREATE TABLE caller_sites (
   PRIMARY KEY (caller_id, site_id)
 );
 
+-- Contact aliases — migration 0039. Spoken todo.owner can match an alias and
+-- resolve to callers.staff_user_id for auto-assign. Global unique on
+-- lower(trim(alias)) so one nickname maps to one contact.
+CREATE TABLE caller_aliases (
+  id TEXT PRIMARY KEY,
+  caller_id TEXT NOT NULL REFERENCES callers(id) ON DELETE CASCADE,
+  alias TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (caller_id, alias)
+);
+CREATE UNIQUE INDEX idx_caller_aliases_alias_lower ON caller_aliases (lower(trim(alias)));
+CREATE INDEX idx_caller_aliases_caller ON caller_aliases(caller_id);
+
 -- Datetime, not date — "साढ़े दस बजे निकलियो", "कल सुबह अर्ली" — raw_phrase is
 -- kept alongside resolved_datetime so he can verify the system heard
 -- correctly at a glance. See docs/ADDITIONAL_FEATURES_M0.md.
