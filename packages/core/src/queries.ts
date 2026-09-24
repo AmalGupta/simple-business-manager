@@ -4357,8 +4357,14 @@ export interface DashboardSummary {
   sites: SiteRow[];
   staff_roster: StaffRosterRow[];
   open_site_tasks: SiteTaskRow[];
-  /** Open call todos assigned to this user — staff home tile; empty for admin summary. */
+  /**
+   * Full personal-queue rows — intentionally empty on the home summary hot
+   * path (use `my_open_todos_count` for tiles). Populate via listMyOpenTodos
+   * / GET /api/my-open-todos when opening My call tasks.
+   */
   my_open_todos: AssignedTodoRow[];
+  /** Accurate open personal-queue count for home tiles (read-only; no claims). */
+  my_open_todos_count: number;
   confirmed_count: number;
   unconfirmed_count: number;
   /** Callers Directory tile count — admin/superadmin only; 0 on the staff-scoped summary. */
@@ -4380,31 +4386,55 @@ export interface StaffWithOpenTodosRow {
   open_todo_count: number;
 }
 
-/** Staff accounts with open call todos assigned or identified by owner/alias. */
+/**
+ * Staff with ≥1 open call todo via assignee, owner-name, or contact alias.
+ * UNION of three indexed paths — avoids users × open-todos Cartesian JOIN.
+ */
 export async function listStaffWithOpenCallTodos(db: D1Database): Promise<StaffWithOpenTodosRow[]> {
   const { results } = await db
     .prepare(
-      `SELECT users.id AS id,
+      `WITH matched AS (
+         SELECT todo_assignees.user_id AS user_id, todos.id AS todo_id
+         FROM todo_assignees
+         JOIN todos ON todos.id = todo_assignees.todo_id AND todos.status = 'open'
+         JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL
+         JOIN users ON users.id = todo_assignees.user_id AND users.role = 'staff'
+
+         UNION
+
+         SELECT users.id AS user_id, todos.id AS todo_id
+         FROM users
+         JOIN todos ON todos.status = 'open'
+                    AND lower(trim(todos.owner)) = lower(trim(users.name))
+         JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL
+         WHERE users.role = 'staff'
+
+         UNION
+
+         SELECT users.id AS user_id, todos.id AS todo_id
+         FROM users
+         JOIN todos ON todos.status = 'open'
+                    AND lower(trim(todos.owner)) = 'tanzeem'
+         JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL
+         WHERE users.role = 'staff'
+           AND lower(trim(users.name)) = 'tanseem'
+
+         UNION
+
+         SELECT callers.staff_user_id AS user_id, todos.id AS todo_id
+         FROM caller_aliases
+         JOIN callers ON callers.id = caller_aliases.caller_id
+                      AND callers.staff_user_id IS NOT NULL
+         JOIN users ON users.id = callers.staff_user_id AND users.role = 'staff'
+         JOIN todos ON todos.status = 'open'
+                    AND lower(trim(todos.owner)) = lower(trim(caller_aliases.alias))
+         JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL
+       )
+       SELECT users.id AS id,
               users.name AS name,
-              COUNT(DISTINCT todos.id) AS open_todo_count
-       FROM users
-       JOIN todos ON todos.status = 'open'
-       JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL
-       WHERE users.role = 'staff'
-         AND (
-           EXISTS (
-             SELECT 1 FROM todo_assignees
-             WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = users.id
-           )
-           OR lower(trim(todos.owner)) = lower(trim(users.name))
-           OR (lower(trim(users.name)) = 'tanseem' AND lower(trim(todos.owner)) = 'tanzeem')
-           OR EXISTS (
-             SELECT 1 FROM caller_aliases
-             JOIN callers ON callers.id = caller_aliases.caller_id
-             WHERE callers.staff_user_id = users.id
-               AND lower(trim(caller_aliases.alias)) = lower(trim(todos.owner))
-           )
-         )
+              COUNT(DISTINCT matched.todo_id) AS open_todo_count
+       FROM matched
+       JOIN users ON users.id = matched.user_id
        GROUP BY users.id, users.name
        ORDER BY users.name ASC`
     )
@@ -4440,6 +4470,101 @@ export interface ListMyOpenTodosOptions {
   includeIdentifiedForViewer?: boolean;
   /** Optional override for name matching (defaults to users.name for userId). */
   viewerName?: string | null;
+  /**
+   * Lazy-claim name/alias matches into todo_assignees (needed for staff PATCH).
+   * Default true for the full list path; home summary uses countMyOpenTodos instead.
+   */
+  claimAssignees?: boolean;
+  /**
+   * Persist missing site_id from call_sites / recorded_for. Default true for
+   * the full list; skipped on the home summary hot path.
+   */
+  backfillSites?: boolean;
+}
+
+/** Shared owner/alias match clauses for countMyOpenTodos + listMyOpenTodos. */
+async function resolveMyOpenTodoMatch(
+  db: D1Database,
+  userId: string,
+  opts: ListMyOpenTodosOptions = {}
+): Promise<{ binds: unknown[]; whereSql: string }> {
+  const includeIdentified = Boolean(opts.includeIdentifiedForViewer);
+  const user = await getUserById(db, userId);
+  const nameNeedle =
+    opts.viewerName != null && opts.viewerName !== ""
+      ? normalizeOwnerName(opts.viewerName)
+      : user?.name
+        ? normalizeOwnerName(user.name)
+        : "";
+
+  const { results: aliasRows } = await db
+    .prepare(
+      `SELECT caller_aliases.alias AS alias
+       FROM caller_aliases
+       JOIN callers ON callers.id = caller_aliases.caller_id
+       WHERE callers.staff_user_id = ?`
+    )
+    .bind(userId)
+    .all<{ alias: string }>();
+  const aliasNeedles = [
+    ...new Set(
+      (aliasRows ?? [])
+        .map((r) => normalizeOwnerName(r.alias))
+        .filter((a) => a && a !== "self")
+    ),
+  ];
+
+  const binds: unknown[] = [userId];
+  const ownerClauses: string[] = [];
+  if (nameNeedle && nameNeedle !== "self") {
+    ownerClauses.push(`lower(trim(todos.owner)) = ?`);
+    binds.push(nameNeedle);
+    if (nameNeedle === "tanseem") {
+      ownerClauses.push(`lower(trim(todos.owner)) = 'tanzeem'`);
+    }
+  }
+  for (const alias of aliasNeedles) {
+    ownerClauses.push(`lower(trim(todos.owner)) = ?`);
+    binds.push(alias);
+  }
+
+  let identifiedClause = "";
+  if (includeIdentified) {
+    identifiedClause = ` OR lower(trim(todos.owner)) = 'self'`;
+  }
+  const ownerMatchSql = ownerClauses.length > 0 ? ` OR (${ownerClauses.join(" OR ")})` : "";
+
+  const whereSql = `todos.status = 'open'
+         AND calls.deleted_at IS NULL
+         AND (
+           EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?)
+           ${ownerMatchSql}
+           ${identifiedClause}
+         )`;
+
+  return { binds, whereSql };
+}
+
+/**
+ * Read-only open personal-queue count for home tiles.
+ * Same match rules as listMyOpenTodos; no site backfill, no assignee claims.
+ */
+export async function countMyOpenTodos(
+  db: D1Database,
+  userId: string,
+  opts: ListMyOpenTodosOptions = {}
+): Promise<number> {
+  const { binds, whereSql } = await resolveMyOpenTodoMatch(db, userId, opts);
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM todos
+       JOIN calls ON calls.id = todos.call_id
+       WHERE ${whereSql}`
+    )
+    .bind(...binds)
+    .first<{ n: number }>();
+  return Number(row?.n) || 0;
 }
 
 /** Open call todos linked to a site via call_sites, newest call first. */
@@ -4562,59 +4687,19 @@ export async function backfillTodoSitesFromCallContext(
  *
  * Admin (`includeIdentifiedForViewer`): also owner=self.
  *
- * Lazy-claims name/alias matches into todo_assignees so staff can mark done
- * (PATCH requires assignee).
+ * By default lazy-claims name/alias matches into todo_assignees so staff can
+ * mark done (PATCH requires assignee), and backfills missing site_id. Home
+ * summary should call countMyOpenTodos instead — keep claims/backfill for the
+ * My call tasks list path only.
  */
 export async function listMyOpenTodos(
   db: D1Database,
   userId: string,
   opts: ListMyOpenTodosOptions = {}
 ): Promise<AssignedTodoRow[]> {
-  const includeIdentified = Boolean(opts.includeIdentifiedForViewer);
-  const user = await getUserById(db, userId);
-  const nameNeedle =
-    opts.viewerName != null && opts.viewerName !== ""
-      ? normalizeOwnerName(opts.viewerName)
-      : user?.name
-        ? normalizeOwnerName(user.name)
-        : "";
-
-  const { results: aliasRows } = await db
-    .prepare(
-      `SELECT caller_aliases.alias AS alias
-       FROM caller_aliases
-       JOIN callers ON callers.id = caller_aliases.caller_id
-       WHERE callers.staff_user_id = ?`
-    )
-    .bind(userId)
-    .all<{ alias: string }>();
-  const aliasNeedles = [
-    ...new Set(
-      (aliasRows ?? [])
-        .map((r) => normalizeOwnerName(r.alias))
-        .filter((a) => a && a !== "self")
-    ),
-  ];
-
-  const binds: unknown[] = [userId];
-  const ownerClauses: string[] = [];
-  if (nameNeedle && nameNeedle !== "self") {
-    ownerClauses.push(`lower(trim(todos.owner)) = ?`);
-    binds.push(nameNeedle);
-    if (nameNeedle === "tanseem") {
-      ownerClauses.push(`lower(trim(todos.owner)) = 'tanzeem'`);
-    }
-  }
-  for (const alias of aliasNeedles) {
-    ownerClauses.push(`lower(trim(todos.owner)) = ?`);
-    binds.push(alias);
-  }
-
-  let identifiedClause = "";
-  if (includeIdentified) {
-    identifiedClause = ` OR lower(trim(todos.owner)) = 'self'`;
-  }
-  const ownerMatchSql = ownerClauses.length > 0 ? ` OR (${ownerClauses.join(" OR ")})` : "";
+  const claimAssignees = opts.claimAssignees !== false;
+  const backfillSites = opts.backfillSites !== false;
+  const { binds, whereSql } = await resolveMyOpenTodoMatch(db, userId, opts);
 
   const { results } = await db
     .prepare(
@@ -4646,13 +4731,7 @@ export async function listMyOpenTodos(
        LEFT JOIN callers ON callers.id = calls.client_id
        LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
        LEFT JOIN sites AS todo_sites ON todo_sites.id = todos.site_id
-       WHERE todos.status = 'open'
-         AND calls.deleted_at IS NULL
-         AND (
-           EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?)
-           ${ownerMatchSql}
-           ${identifiedClause}
-         )
+       WHERE ${whereSql}
        ORDER BY calls.recorded_at DESC, todos.id DESC`
     )
     .bind(...binds)
@@ -4660,34 +4739,47 @@ export async function listMyOpenTodos(
   const rows = results ?? [];
   if (rows.length === 0) return [];
 
-  const filled = await backfillTodoSitesFromCallContext(
-    db,
-    rows.map((r) => ({ id: r.id, call_id: r.call_id, site_id: r.site_id ?? null }))
-  );
-  for (const r of rows) {
-    const hit = filled.get(r.id);
-    if (hit) {
-      r.site_id = hit.site_id;
-      r.site_name = hit.site_name;
+  if (backfillSites) {
+    const filled = await backfillTodoSitesFromCallContext(
+      db,
+      rows.map((r) => ({ id: r.id, call_id: r.call_id, site_id: r.site_id ?? null }))
+    );
+    for (const r of rows) {
+      const hit = filled.get(r.id);
+      if (hit) {
+        r.site_id = hit.site_id;
+        r.site_name = hit.site_name;
+      }
     }
   }
 
-  /* Ensure name/alias-identified todos are claimable (staff PATCH requires assignee). */
-  await db.batch(
-    rows.map((r) =>
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at)
-           VALUES (?, ?, NULL, datetime('now'))`
-        )
-        .bind(r.id, userId)
-    )
-  );
-
-  const map = await getAssigneesByTodoIds(
+  let map = await getAssigneesByTodoIds(
     db,
     rows.map((r) => r.id)
   );
+
+  /* Claim only rows that matched by name/alias (or owner=self) and still lack
+     this user as assignee — avoid N INSERT OR IGNORE on every already-claimed row. */
+  if (claimAssignees) {
+    const toClaim = rows.filter((r) => !(map.get(r.id) ?? []).some((a) => a.id === userId));
+    if (toClaim.length > 0) {
+      await db.batch(
+        toClaim.map((r) =>
+          db
+            .prepare(
+              `INSERT OR IGNORE INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at)
+               VALUES (?, ?, NULL, datetime('now'))`
+            )
+            .bind(r.id, userId)
+        )
+      );
+      map = await getAssigneesByTodoIds(
+        db,
+        rows.map((r) => r.id)
+      );
+    }
+  }
+
   return rows.map((r) => ({
     ...r,
     site_id: r.site_id ?? null,
@@ -4698,10 +4790,12 @@ export async function listMyOpenTodos(
 
 /**
  * Home-page read model — live aggregates + small lists, no call transcripts.
- * `forUserId` set (staff) → only sites + open_site_tasks + my_open_todos scoped to that user;
- * admin fields are zero/empty. Omitted/null → full admin/superadmin payload.
- * `viewerUserId` (admin path) loads that user's personal open call todos so
- * an admin who claimed work via "Assign to me" can see them on home.
+ * `forUserId` set (staff) → only sites + open_site_tasks + my_open_todos_count
+ * scoped to that user; admin fields are zero/empty. Omitted/null → full
+ * admin/superadmin payload.
+ * `viewerUserId` (admin path) counts that user's personal open call todos so
+ * an admin who claimed work via "Assign to me" can see the tile on home.
+ * Full rows are not loaded here — use listMyOpenTodos / GET /api/my-open-todos.
  */
 export async function getDashboardSummary(
   db: D1Database,
@@ -4709,10 +4803,10 @@ export async function getDashboardSummary(
   viewerUserId?: string | null
 ): Promise<DashboardSummary> {
   if (forUserId) {
-    const [sites, open_site_tasks, my_open_todos] = await Promise.all([
+    const [sites, open_site_tasks, my_open_todos_count] = await Promise.all([
       listSites(db, forUserId),
       listOpenSiteTasks(db, forUserId),
-      listMyOpenTodos(db, forUserId),
+      countMyOpenTodos(db, forUserId),
     ]);
     return {
       open_today: 0,
@@ -4724,7 +4818,8 @@ export async function getDashboardSummary(
       sites,
       staff_roster: [],
       open_site_tasks,
-      my_open_todos,
+      my_open_todos: [],
+      my_open_todos_count,
       confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
       unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
       callers_count: 0,
@@ -4749,7 +4844,7 @@ export async function getDashboardSummary(
     open_site_tasks,
     callsNeedingActionCount,
     resolvedCallsCount,
-    my_open_todos,
+    my_open_todos_count,
     staff_with_open_todos,
   ] = await Promise.all([
     db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'open'`).first<{ n: number }>(),
@@ -4768,11 +4863,11 @@ export async function getDashboardSummary(
     countCallsNeedingAction(db),
     countResolvedCalls(db),
     viewerUserId
-      ? listMyOpenTodos(db, viewerUserId, {
+      ? countMyOpenTodos(db, viewerUserId, {
           includeIdentifiedForViewer: true,
           viewerName: viewer?.name ?? null,
         })
-      : Promise.resolve([] as AssignedTodoRow[]),
+      : Promise.resolve(0),
     listStaffWithOpenCallTodos(db),
   ]);
 
@@ -4786,7 +4881,8 @@ export async function getDashboardSummary(
     sites,
     staff_roster,
     open_site_tasks,
-    my_open_todos,
+    my_open_todos: [],
+    my_open_todos_count,
     confirmed_count: sites.filter((s) => s.is_confirmed === "Y").length,
     unconfirmed_count: sites.filter((s) => s.is_confirmed === null).length,
     callers_count: callersRow?.n ?? 0,

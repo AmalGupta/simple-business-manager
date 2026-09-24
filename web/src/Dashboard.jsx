@@ -50,6 +50,7 @@ import {
   fetchCall,
   fetchCallsCalendar,
   fetchDashboardSummary,
+  fetchMyOpenTodos,
   fetchEscalations,
   fetchSites,
   postCreateSite,
@@ -100,6 +101,8 @@ export default function SimpleBusinessManager() {
      superadmin. See fetchOpenSiteTasks and migration 0013. */
   const [openSiteTasks, setOpenSiteTasks] = useState([]);
   const [myOpenTodos, setMyOpenTodos] = useState([]);
+  /** Home tile count — from summary (read-only); list loads on My call tasks. */
+  const [myOpenTodosCount, setMyOpenTodosCount] = useState(0);
   /** Admin home bookmark tabs — staff with ≥1 open call todo. */
   const [staffWithOpenTodos, setStaffWithOpenTodos] = useState([]);
   /** Selected admin-home tab: "admin" or a staff user id. */
@@ -181,6 +184,7 @@ export default function SimpleBusinessManager() {
     setUnconfirmedCount(0);
     setOpenSiteTasks([]);
     setMyOpenTodos([]);
+    setMyOpenTodosCount(0);
     setStaffWithOpenTodos([]);
     setHomeTab("admin");
     setStaffPanel(null);
@@ -188,7 +192,10 @@ export default function SimpleBusinessManager() {
     const applySummary = (summary) => {
       setAllSites(summary.sites ?? []);
       setOpenSiteTasks(summary.open_site_tasks ?? []);
-      setMyOpenTodos(summary.my_open_todos ?? []);
+      setMyOpenTodos([]);
+      setMyOpenTodosCount(
+        summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0
+      );
       setConfirmedCount(summary.confirmed_count ?? 0);
       setUnconfirmedCount(summary.unconfirmed_count ?? 0);
       setParkedCount(summary.parked_count ?? 0);
@@ -374,28 +381,46 @@ export default function SimpleBusinessManager() {
       }
       return list.map((t) => (t.id === todo.id ? { ...t, ...patch } : t));
     });
+    if (patch.status === "done" || patch.status === "snoozed") {
+      setMyOpenTodosCount((n) => Math.max(0, n - 1));
+    }
     try {
       await patchTodo(todo.id, patch);
       setTodoRefreshKey((k) => k + 1);
       if (me?.role !== "staff") {
         fetchDashboardSummary()
           .then((summary) => {
-            setMyOpenTodos(summary.my_open_todos ?? []);
+            setMyOpenTodosCount(
+              summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0
+            );
             setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
           })
           .catch((err) => console.error("[sbm] failed to refresh staff tabs after todo mutate", err));
         if (homeTab !== "admin") {
-          fetchDashboardSummary({ forUserId: homeTab })
-            .then((summary) => {
+          Promise.all([
+            fetchDashboardSummary({ forUserId: homeTab }),
+            fetchMyOpenTodos({ forUserId: homeTab }),
+          ])
+            .then(([summary, todos]) => {
               setStaffPanel({
                 userId: homeTab,
                 openSiteTasks: summary.open_site_tasks ?? [],
-                myOpenTodos: summary.my_open_todos ?? [],
+                myOpenTodos: todos,
+                myOpenTodosCount:
+                  summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0,
                 sites: summary.sites ?? [],
               });
             })
             .catch((err) => console.error("[sbm] failed to refresh staff panel after todo mutate", err));
         }
+      } else {
+        fetchDashboardSummary()
+          .then((summary) => {
+            setMyOpenTodosCount(
+              summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0
+            );
+          })
+          .catch((err) => console.error("[sbm] failed to refresh my open todos count", err));
       }
     } catch {
       applyCountDelta(false);
@@ -403,6 +428,7 @@ export default function SimpleBusinessManager() {
       // (AssignedTodoRow carries client_name; CallDetail rows do not).
       if (todo.client_name != null && (patch.status === "done" || patch.status === "snoozed")) {
         setMyOpenTodos((list) => (list.some((t) => t.id === todo.id) ? list : [...list, todo]));
+        setMyOpenTodosCount((n) => n + 1);
       }
     } finally {
       setBusyIds((s) => {
@@ -438,8 +464,14 @@ export default function SimpleBusinessManager() {
     const updated = await patchTodo(todoId, { assigned_to_user_ids: userIds });
     setTodoRefreshKey((k) => k + 1);
     try {
-      const summary = await fetchDashboardSummary();
-      setMyOpenTodos(summary.my_open_todos ?? []);
+      const [summary, todos] = await Promise.all([
+        fetchDashboardSummary(),
+        fetchMyOpenTodos(),
+      ]);
+      setMyOpenTodos(todos);
+      setMyOpenTodosCount(
+        summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0
+      );
       setOpenTodayCount(summary.open_today ?? 0);
       setParkedCount(summary.parked_count ?? 0);
       setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
@@ -449,11 +481,16 @@ export default function SimpleBusinessManager() {
         return still ? tab : "admin";
       });
       if (homeTab !== "admin") {
-        const staffSum = await fetchDashboardSummary({ forUserId: homeTab });
+        const [staffSum, staffTodos] = await Promise.all([
+          fetchDashboardSummary({ forUserId: homeTab }),
+          fetchMyOpenTodos({ forUserId: homeTab }),
+        ]);
         setStaffPanel({
           userId: homeTab,
           openSiteTasks: staffSum.open_site_tasks ?? [],
-          myOpenTodos: staffSum.my_open_todos ?? [],
+          myOpenTodos: staffTodos,
+          myOpenTodosCount:
+            staffSum.my_open_todos_count ?? staffSum.my_open_todos?.length ?? 0,
           sites: staffSum.sites ?? [],
         });
       }
@@ -482,8 +519,14 @@ export default function SimpleBusinessManager() {
     }
     setTodoRefreshKey((k) => k + 1);
     try {
-      const summary = await fetchDashboardSummary();
-      setMyOpenTodos(summary.my_open_todos ?? []);
+      const [summary, todos] = await Promise.all([
+        fetchDashboardSummary(),
+        fetchMyOpenTodos(),
+      ]);
+      setMyOpenTodos(todos);
+      setMyOpenTodosCount(
+        summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0
+      );
       setOpenTodayCount(summary.open_today ?? 0);
     } catch (err) {
       console.error("[sbm] failed to refresh after todo site assign", err);
@@ -506,7 +549,9 @@ export default function SimpleBusinessManager() {
         setStaffPanel({
           userId: homeTab,
           openSiteTasks: summary.open_site_tasks ?? [],
-          myOpenTodos: summary.my_open_todos ?? [],
+          myOpenTodos: [],
+          myOpenTodosCount:
+            summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0,
           sites: summary.sites ?? [],
         });
       })
@@ -521,6 +566,33 @@ export default function SimpleBusinessManager() {
       cancelled = true;
     };
   }, [me, homeTab]);
+
+  /* Full personal-queue list (with claim/backfill) only when opening My call
+     tasks or My schedule — not on every home tile load. */
+  useEffect(() => {
+    if (!me) return;
+    if (view.name !== "my-open-todos" && view.name !== "my-schedule") return;
+    const forUserId = view.forUserId || null;
+    let cancelled = false;
+    fetchMyOpenTodos(forUserId ? { forUserId } : {})
+      .then((todos) => {
+        if (cancelled) return;
+        if (forUserId) {
+          setStaffPanel((prev) =>
+            prev?.userId === forUserId
+              ? { ...prev, myOpenTodos: todos, myOpenTodosCount: todos.length }
+              : prev
+          );
+        } else {
+          setMyOpenTodos(todos);
+          setMyOpenTodosCount(todos.length);
+        }
+      })
+      .catch((err) => console.error("[sbm] failed to load my open todos", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [me, view.name, view.forUserId]);
 
   /* If the selected staff no longer has open todos, fall back to Admin. */
   useEffect(() => {
@@ -999,6 +1071,7 @@ export default function SimpleBusinessManager() {
         <StaffHomePanel
           openSiteTasks={openSiteTasks}
           myOpenTodos={myOpenTodos}
+          myOpenTodosCount={myOpenTodosCount}
           sites={allSites}
           complaintsRefreshKey={complaintsRefreshKey}
           onOpenPendingWork={() => setView({ name: "pending-work", from: { name: "staff-home" } })}
@@ -1208,6 +1281,7 @@ export default function SimpleBusinessManager() {
           <StaffHomePanel
             openSiteTasks={staffPanel.openSiteTasks}
             myOpenTodos={staffPanel.myOpenTodos}
+            myOpenTodosCount={staffPanel.myOpenTodosCount}
             sites={staffPanel.sites}
             complaintsRefreshKey={complaintsRefreshKey}
             forUserId={homeTab}
@@ -1292,16 +1366,16 @@ export default function SimpleBusinessManager() {
             onOpen={() => setView({ name: "resolved-calls", from: { name: "home" } })}
           />
         )}
-        {(me.role === "admin" || me.role === "superadmin" || myOpenTodos.length > 0) && (
+        {(me.role === "admin" || me.role === "superadmin" || myOpenTodosCount > 0) && (
           <button
             onClick={() => setView({ name: "my-open-todos", from: { name: "home" } })}
             style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label={`My call tasks — ${myOpenTodos.length} open`}
+            aria-label={`My call tasks — ${myOpenTodosCount} open`}
           >
             <Card tile>
               <TileLabel>My call tasks</TileLabel>
               <div style={TILE_VALUE_ROW_STYLE}>
-                <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length}</span>
+                <span style={TILE_NUMBER_STYLE}>{myOpenTodosCount}</span>
               </div>
             </Card>
           </button>

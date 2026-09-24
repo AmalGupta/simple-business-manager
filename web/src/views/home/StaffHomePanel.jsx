@@ -12,6 +12,7 @@ import { ComplaintsTile } from "../site-visit/ComplaintsTile.jsx";
 export function StaffHomePanel({
   openSiteTasks,
   myOpenTodos,
+  myOpenTodosCount,
   sites,
   complaintsRefreshKey = 0,
   forUserId = null,
@@ -23,6 +24,7 @@ export function StaffHomePanel({
   onOpenSitesDirectory,
 }) {
   const confirmedSites = (sites ?? []).filter((s) => s.is_confirmed !== "N");
+  const openTodosCount = myOpenTodosCount ?? myOpenTodos?.length ?? 0;
 
   return (
     <>
@@ -37,7 +39,7 @@ export function StaffHomePanel({
         <PendingWorkTile count={openSiteTasks.length} onOpen={onOpenPendingWork} />
 
         <StaffScheduleTile
-          count={myOpenTodos.length + openSiteTasks.length}
+          count={openTodosCount + openSiteTasks.length}
           onOpen={onOpenSchedule}
         />
 
@@ -49,23 +51,23 @@ export function StaffHomePanel({
           onOpen={onOpenComplaints}
         />
 
-        {myOpenTodos.length > 0 && (
+        {openTodosCount > 0 && (
           <button
             onClick={onOpenMyOpenTodos}
             style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label={`My call tasks — ${myOpenTodos.length} open`}
+            aria-label={`My call tasks — ${openTodosCount} open`}
           >
             <Card tile>
               <TileLabel>My call tasks</TileLabel>
               <div style={TILE_VALUE_ROW_STYLE}>
-                <span style={TILE_NUMBER_STYLE}>{myOpenTodos.length}</span>
+                <span style={TILE_NUMBER_STYLE}>{openTodosCount}</span>
               </div>
             </Card>
           </button>
         )}
       </div>
 
-      {openSiteTasks.length === 0 && myOpenTodos.length === 0 && (
+      {openSiteTasks.length === 0 && openTodosCount === 0 && (
         <p style={{ fontSize: 14, color: t.edge2, marginBottom: "1.5rem" }}>Nothing assigned right now.</p>
       )}
 
