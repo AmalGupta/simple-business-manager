@@ -7,7 +7,6 @@ import {
   fetchSiteTimeline,
   fetchSiteContacts,
   patchSite,
-  patchCaller,
   postSiteTeamMembers,
   postSiteContacts,
   deleteSiteContact,
@@ -20,6 +19,7 @@ import { SiteMediaUploadRow } from "./SiteMediaUploadRow.jsx";
 import { MyTaskBanner } from "./MyTaskBanner.jsx";
 import { SiteTimeline } from "./SiteTimeline.jsx";
 import { AddPeopleModal } from "./AddPeopleModal.jsx";
+import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
 import { SiteDetailsModal } from "./SiteDetailsModal.jsx";
 import { WorkTimelinePopup } from "./WorkTimelinePopup.jsx";
 import { siteDetailsPrefill, siteDisplayName } from "./sitesGridChrome.jsx";
@@ -70,6 +70,7 @@ export function SiteView({
   const [team, setTeam] = useState(null);
   const [contacts, setContacts] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showAssociateContacts, setShowAssociateContacts] = useState(false);
   const [timeline, setTimeline] = useState(null);
 
   const hasCallHistory = useMemo(
@@ -138,27 +139,27 @@ export function SiteView({
 
   /* `patch` arrives pre-diffed by the modal — only fields the admin
      actually changed — so this stays a straight pass-through and the
-     site_edits audit trail doesn't record untouched fields. Linked
-     contact rows with caller_id also patch the Callers Directory so the
-     directory and the site POC/display stay aligned. Errors propagate so
-     the dialog can show them and keep the form open with the entered
-     values intact. */
-  const saveDetails = async (patch, { contactUpdates = [] } = {}) => {
+     site_edits audit trail doesn't record untouched fields. Errors
+     propagate so the dialog can show them and keep the form open with
+     the entered values intact. Contacts are linked via
+     AssociateContactsModal (same as Review sites), not free-text here. */
+  const saveDetails = async (patch) => {
     if (!siteRecord?.id) return;
     setDetailsSaved(false);
     const renamedTo = typeof patch.name === "string" ? patch.name.trim() : null;
     await patchSite(siteRecord.id, patch);
-    for (const update of contactUpdates) {
-      await patchCaller(update.caller_id, { name: update.name, phone: update.phone });
-    }
-    if (contactUpdates.length > 0) {
-      setContacts(await fetchSiteContacts(siteRecord.id));
-    }
     await onSiteUpdated?.();
     if (renamedTo && renamedTo !== site) {
       onSiteIdentityChanged?.(renamedTo);
     }
     setDetailsSaved(true);
+  };
+
+  const saveAssociatedContacts = async (callerIds) => {
+    const next = await postSiteContacts(siteRecord.id, callerIds);
+    setContacts(next);
+    await onSiteUpdated?.();
+    return next;
   };
 
   /* Both take arrays — the modal is multi-select. The staff response
@@ -436,10 +437,22 @@ export function SiteView({
         <SiteDetailsModal
           site={siteDetailsPrefill(siteRecord, contacts ?? [])}
           title="Edit site details"
-          intro="The name shown in lists is rebuilt from these fields when you save."
+          intro="The name shown in lists is rebuilt from address fields and linked contacts when you save. Use Add contact to link directory contacts."
           editableName
           onClose={() => setEditingDetails(false)}
           onSave={saveDetails}
+          onAddContact={() => {
+            setEditingDetails(false);
+            setShowAssociateContacts(true);
+          }}
+        />
+      )}
+      {canManage && showAssociateContacts && siteRecord?.id && (
+        <AssociateContactsModal
+          site={siteRecord}
+          existingContactIds={(contacts ?? []).map((c) => c.caller_id)}
+          onClose={() => setShowAssociateContacts(false)}
+          onSave={saveAssociatedContacts}
         />
       )}
       {showAssignModal && (

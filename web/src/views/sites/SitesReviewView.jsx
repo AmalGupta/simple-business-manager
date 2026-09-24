@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { t } from "../../theme.js";
-import { postSitesBackfill, patchSite, patchCaller } from "../../lib/api.js";
+import { postSitesBackfill, patchSite } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { SitesReviewGrid } from "./SitesReviewGrid.jsx";
@@ -93,11 +93,8 @@ export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
      judgement being queued. The pending map has to move with it: leave it
      null and the refetched 'Y' reads as an unsaved change, so the sticky
      button would offer to set the site back to undecided. */
-  const saveDetails = async (site, patch, { contactUpdates = [] } = {}) => {
+  const saveDetails = async (site, patch) => {
     await patchSite(site.id, patch);
-    for (const update of contactUpdates) {
-      await patchCaller(update.caller_id, { name: update.name, phone: update.phone });
-    }
     setPending((p) => ({ ...p, [site.id]: "Y" }));
     await onSaved();
   };
