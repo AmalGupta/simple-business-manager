@@ -453,6 +453,7 @@ export async function fetchCallers({
   siteId,
   linkedSitesOnly,
   includeLinkedSites,
+  includeAliases,
   q,
   limit,
   offset,
@@ -463,6 +464,7 @@ export async function fetchCallers({
   if (siteId) params.set("siteId", siteId);
   if (linkedSitesOnly) params.set("linked_sites", "1");
   if (includeLinkedSites) params.set("include_linked_sites", "1");
+  if (includeAliases) params.set("include_aliases", "1");
   if (q) params.set("q", q);
   if (limit !== undefined) params.set("limit", String(limit));
   if (offset !== undefined) params.set("offset", String(offset));
@@ -478,6 +480,7 @@ function contactsDirectoryCacheKey(opts) {
     siteId: opts.siteId ?? "",
     linkedSitesOnly: opts.linkedSitesOnly ? "1" : "",
     includeLinkedSites: opts.includeLinkedSites ? "1" : "",
+    includeAliases: opts.includeAliases ? "1" : "",
     q: opts.q ?? "",
     limit: opts.limit ?? "",
     offset: opts.offset ?? "",
@@ -553,6 +556,34 @@ export async function patchCaller(id, patch) {
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error || `PATCH /api/callers/${id} → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchCallerAliases(callerId) {
+  const res = await fetch(`/api/callers/${callerId}/aliases`);
+  if (!res.ok) throw new Error(`GET /api/callers/${callerId}/aliases → ${res.status}`);
+  return res.json();
+}
+
+export async function postCallerAlias(callerId, alias) {
+  const res = await fetch(`/api/callers/${callerId}/aliases`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ alias }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/callers/${callerId}/aliases → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function deleteCallerAlias(callerId, aliasId) {
+  const res = await fetch(`/api/callers/${callerId}/aliases/${aliasId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `DELETE /api/callers/${callerId}/aliases/${aliasId} → ${res.status}`);
   }
   return res.json();
 }
