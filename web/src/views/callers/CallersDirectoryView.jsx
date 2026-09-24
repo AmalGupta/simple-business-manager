@@ -16,6 +16,7 @@ import {
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { AddCallerModal } from "./AddCallerModal.jsx";
+import { ManageAliasesModal } from "./ManageAliasesModal.jsx";
 import "./CallersDirectoryView.css";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -97,13 +98,54 @@ function LinkedSitesCell({ sites, bucket, onSiteClick }) {
   );
 }
 
+function AliasesCell({ aliases, onManage }) {
+  const preview = aliases?.length ? aliases.join(", ") : "—";
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          fontSize: 13,
+          color: aliases?.length ? t.edge : t.edge2,
+        }}
+        title={aliases?.length ? aliases.join(", ") : undefined}
+      >
+        {preview}
+      </span>
+      <button
+        type="button"
+        onClick={onManage}
+        style={{
+          flexShrink: 0,
+          padding: "4px 8px",
+          border: `1px solid ${t.frost}`,
+          borderRadius: t.radiusButton,
+          background: t.white,
+          color: t.edge,
+          fontSize: 11,
+          fontWeight: 600,
+          cursor: "pointer",
+          whiteSpace: "nowrap",
+        }}
+      >
+        {aliases?.length ? "Manage" : "Add alias"}
+      </button>
+    </span>
+  );
+}
+
 function listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }) {
   return {
     bucket,
     siteId: bucket === "saved" && siteFilter ? siteFilter.id : undefined,
     linkedSitesOnly: bucket === "saved" && linkedSitesOnly && !siteFilter ? true : undefined,
-    /* Sites column — only the Contacts directory needs per-row linked_sites. */
+    /* Sites + aliases columns — only the Contacts directory needs these. */
     includeLinkedSites: true,
+    includeAliases: true,
     q: q.trim() || undefined,
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
@@ -122,6 +164,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const [total, setTotal] = useState(0);
   const [bucketCounts, setBucketCounts] = useState(EMPTY_BUCKET_COUNTS);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [aliasCaller, setAliasCaller] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState("");
 
@@ -179,6 +222,10 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
     setPageIndex(0);
   }, []);
 
+  const onManageAliases = useCallback((caller) => {
+    setAliasCaller(caller);
+  }, []);
+
   const columnDefs = useMemo(
     () => [
       {
@@ -209,6 +256,20 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
           ) : null,
       },
       {
+        headerName: "Aliases",
+        colId: "aliases",
+        flex: 1.2,
+        minWidth: 160,
+        sortable: false,
+        cellRenderer: (p) =>
+          p.data ? (
+            <AliasesCell
+              aliases={p.data.aliases}
+              onManage={() => onManageAliases(p.data)}
+            />
+          ) : null,
+      },
+      {
         headerName: "Linked site",
         colId: "sites",
         flex: 1.5,
@@ -220,7 +281,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
           ) : null,
       },
     ],
-    [bucket, busyId, onSiteClick, changeCategory]
+    [bucket, busyId, onSiteClick, changeCategory, onManageAliases]
   );
 
   const defaultColDef = useMemo(
@@ -519,6 +580,14 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
             }).catch(() => {});
             return created;
           }}
+        />
+      )}
+
+      {aliasCaller && (
+        <ManageAliasesModal
+          caller={aliasCaller}
+          onClose={() => setAliasCaller(null)}
+          onChanged={() => load(queryOpts, true)}
         />
       )}
     </div>

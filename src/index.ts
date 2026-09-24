@@ -71,7 +71,7 @@ import {
   handleUpdateStaffPhone,
 } from "./handlers/auth";
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
-import { handleCreateCaller, handleListCallers, handleUpdateCaller } from "./handlers/callers";
+import { handleCreateCaller, handleListCallers, handleUpdateCaller, handleListCallerAliases, handleAddCallerAlias, handleDeleteCallerAlias } from "./handlers/callers";
 import { handleGetSiteContactProposals, handlePostSiteContactMappings } from "./handlers/maintenance";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handlePostDeskVoiceNote } from "./handlers/desk-voice-note";
@@ -473,6 +473,20 @@ export default {
     }
     if (url.pathname === "/api/callers" && request.method === "POST") {
       return handleCreateCaller(request, env);
+    }
+    const callerAliasMatch = url.pathname.match(/^\/api\/callers\/([^/]+)\/aliases(?:\/([^/]+))?$/);
+    if (callerAliasMatch) {
+      const callerId = callerAliasMatch[1];
+      const aliasId = callerAliasMatch[2];
+      if (!aliasId && request.method === "GET") {
+        return handleListCallerAliases(request, env, callerId);
+      }
+      if (!aliasId && request.method === "POST") {
+        return handleAddCallerAlias(request, env, callerId);
+      }
+      if (aliasId && request.method === "DELETE") {
+        return handleDeleteCallerAlias(request, env, callerId, aliasId);
+      }
     }
     const callerMatch = url.pathname.match(/^\/api\/callers\/([^/]+)$/);
     if (callerMatch && request.method === "PATCH") {
