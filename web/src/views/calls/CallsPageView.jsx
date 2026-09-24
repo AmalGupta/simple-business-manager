@@ -98,12 +98,16 @@ function filterKey(filters) {
 export function CallsPageView({
   onBack,
   onToggle,
-  onPark,
   busyIds,
   onCallsChanged,
   onOpenSite = null,
   innerScrolls = false,
   horizontalScrolls = false,
+  canManage = true,
+  staffRoster = [],
+  currentUser = null,
+  onAssign,
+  onTodoSiteAssigned,
 }) {
   const [rows, setRows] = useState(null);
   const [total, setTotal] = useState(0);
@@ -595,8 +599,12 @@ export function CallsPageView({
           callId={selectedId}
           onClose={() => setSelectedId(null)}
           onToggle={onToggle}
-          onPark={onPark}
           busyIds={busyIds}
+          canManage={canManage}
+          staffRoster={staffRoster}
+          currentUser={currentUser}
+          onAssign={onAssign}
+          onTodoSiteAssigned={onTodoSiteAssigned}
         />
       )}
     </div>

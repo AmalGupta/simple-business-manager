@@ -901,12 +901,16 @@ export default function SimpleBusinessManager() {
       <CallsPageView
         onBack={() => setView(homeView)}
         onToggle={onToggle}
-        onPark={onPark}
         busyIds={busyIds}
         onCallsChanged={() => refreshCalendar(calMonth.year, calMonth.month)}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: { name: "calls" } })}
         innerScrolls={innerScrolls}
         horizontalScrolls={horizontalScrolls}
+        canManage={me.role !== "staff"}
+        staffRoster={staffRoster}
+        currentUser={me}
+        onAssign={me.role !== "staff" ? onAssignTodo : undefined}
+        onTodoSiteAssigned={me.role !== "staff" ? onTodoSiteAssigned : undefined}
       />,
       { wide: true, fillViewport: innerScrolls }
     );
