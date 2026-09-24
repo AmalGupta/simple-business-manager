@@ -104,11 +104,16 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
     limit,
     offset,
   };
+  /* Bucket counts are for the Contacts directory tabs. Category counts are
+     unused by pickers. Associate contacts / Add people only need items+total
+     — skipping the full-table scans keeps those modals snappy on UAT (~4k). */
   const [items, total, counts, bucket_counts] = await Promise.all([
     listCallers(env.DB, opts),
     countCallers(env.DB, opts),
-    countCallersByCategory(env.DB),
-    countCallersByBucket(env.DB),
+    bucket
+      ? countCallersByCategory(env.DB)
+      : Promise.resolve({ client: 0, staff: 0, family: 0, spam: 0 }),
+    bucket ? countCallersByBucket(env.DB) : Promise.resolve({ saved: 0, unsaved: 0, spam: 0 }),
   ]);
   return json({ items, total, counts, bucket_counts });
 }

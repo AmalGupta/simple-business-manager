@@ -6,7 +6,7 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 import { Check } from "lucide-react";
 import { t } from "../../theme.js";
 import { fetchCallers, postCreateCaller, patchCaller, refreshCallersByCategory } from "../../lib/api.js";
-import { isPhoneLikeName, newContactOffer, rankContactMatches } from "../../lib/contactMatch.js";
+import { isPhoneLikeName, needlesFromSite, newContactOffer, rankContactMatches } from "../../lib/contactMatch.js";
 import { Modal } from "../../components/Modal.jsx";
 import { PRIMARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
 
@@ -23,13 +23,39 @@ ModuleRegistry.registerModules([AllCommunityModule]);
    Cube ACR name — "Add a new contact" creates or renames the directory
    row, then ticks it for association. The full directory sits below.
 
-   Clients only. The directory is a ~3.3k-row phone-contacts import
+   Clients only. The directory is a ~3.3k–4k-row phone-contacts import
    whose other categories are staff, family and spam; none of those is a
-   site contact. Filtering to one category also makes it small enough to
-   load whole and filter in the browser, which is what makes typing feel
-   instant. Linked sites are not hydrated here — that is Contacts-directory
-   only; this picker only needs id / name / phone.
+   site contact. The grid is server-paginated (same pattern as Add people)
+   so opening the modal does not download the whole category. Likely matches
+   use a few targeted `q=` fetches from the site's known names/phones, then
+   rank in-memory. Linked sites are not hydrated here — Contacts directory
+   only.
    ------------------------------------------------------------------ */
+
+const CONTACT_PAGE_SIZE = 50;
+const SEARCH_DEBOUNCE_MS = 250;
+
+/** Small candidate set for "Most likely matches" — not the full directory. */
+async function fetchLikelyMatchCandidates(site) {
+  const needles = needlesFromSite(site);
+  const queries = new Set();
+  for (const phone of needles.phones.slice(0, 2)) {
+    if (phone.length >= 7) queries.add(phone);
+  }
+  for (const name of needles.names.slice(0, 2)) {
+    const token = name.split(/\s+/).find((w) => w.length >= 3) || name;
+    if (token.length >= 2) queries.add(token);
+  }
+  if (queries.size === 0) return [];
+  const pages = await Promise.all(
+    [...queries].map((q) => fetchCallers({ category: "client", q, limit: CONTACT_PAGE_SIZE }))
+  );
+  const byId = new Map();
+  for (const page of pages) {
+    for (const item of page.items ?? []) byId.set(item.id, item);
+  }
+  return [...byId.values()];
+}
 
 const CONTACTS_GRID_CSS = `
 .sbm-associate-contacts-grid.ag-theme-quartz {
@@ -146,9 +172,13 @@ function CheckBox({ checked, disabled, label, onToggle }) {
 export function AssociateContactsModal({ site, existingContactIds = [], onClose, onSave }) {
   const gridRef = useRef(null);
   const seededStrong = useRef(false);
+  const searchSeq = useRef(0);
   const [clients, setClients] = useState(null);
+  const [clientsTotal, setClientsTotal] = useState(0);
+  const [matchCandidates, setMatchCandidates] = useState(null);
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState(() => new Set());
+  const [selectedNames, setSelectedNames] = useState(() => ({}));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState(null);
@@ -163,49 +193,77 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
 
   const alreadyLinked = useMemo(() => new Set(existingContactIds), [existingContactIds]);
 
+  /* Likely-match candidates — a few targeted searches, not the full category. */
   useEffect(() => {
     let cancelled = false;
-    fetchCallers({ category: "client" })
-      .then((data) => {
-        if (!cancelled) setClients(data.items ?? []);
+    fetchLikelyMatchCandidates(site)
+      .then((list) => {
+        if (!cancelled) setMatchCandidates(list);
       })
       .catch((err) => {
-        console.error("[sbm] failed to load clients for site contacts", err);
-        if (!cancelled) {
-          setClients([]);
-          setError("Couldn't load the client list — try again.");
-        }
+        console.error("[sbm] failed to load likely contact matches", err);
+        if (!cancelled) setMatchCandidates([]);
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [site]);
+
+  /* Debounced server-side search for the grid (Add-people pattern). */
+  useEffect(() => {
+    const mySeq = ++searchSeq.current;
+    const timer = setTimeout(() => {
+      fetchCallers({
+        category: "client",
+        q: query.trim() || undefined,
+        limit: CONTACT_PAGE_SIZE,
+      })
+        .then((data) => {
+          if (searchSeq.current !== mySeq) return;
+          setClients(data.items ?? []);
+          setClientsTotal(data.total ?? 0);
+        })
+        .catch((err) => {
+          console.error("[sbm] failed to load clients for site contacts", err);
+          if (searchSeq.current !== mySeq) return;
+          setClients([]);
+          setClientsTotal(0);
+          setError("Couldn't load the client list — try again.");
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query]);
 
   const likelyMatches = useMemo(() => {
-    if (!clients) return [];
-    return rankContactMatches(site, clients, { excludeIds: alreadyLinked, limit: 5 });
-  }, [clients, site, alreadyLinked]);
+    if (!matchCandidates) return [];
+    return rankContactMatches(site, matchCandidates, { excludeIds: alreadyLinked, limit: 5 });
+  }, [matchCandidates, site, alreadyLinked]);
 
   const offer = useMemo(() => {
-    if (!clients || newContactDone) return null;
-    return newContactOffer(site, clients, likelyMatches);
-  }, [clients, site, likelyMatches, newContactDone]);
+    if (!matchCandidates || newContactDone) return null;
+    return newContactOffer(site, matchCandidates, likelyMatches);
+  }, [matchCandidates, site, likelyMatches, newContactDone]);
 
   useEffect(() => {
-    if (!clients || seededStrong.current) return;
+    if (!matchCandidates || seededStrong.current) return;
     seededStrong.current = true;
     /* Don't auto-tick digits-only directory rows — those need a real name
        via "Add a new contact" before they're useful as site contacts. */
     const auto = likelyMatches
       .filter((m) => m.strong && !isPhoneLikeName(m.caller.name))
-      .map((m) => m.caller.id);
+      .map((m) => m.caller);
     if (auto.length === 0) return;
     setSelected((current) => {
       const next = new Set(current);
-      for (const id of auto) next.add(id);
+      for (const c of auto) next.add(c.id);
       return next;
     });
-  }, [clients, likelyMatches]);
+    setSelectedNames((current) => {
+      const next = { ...current };
+      for (const c of auto) next[c.id] = c.name;
+      return next;
+    });
+  }, [matchCandidates, likelyMatches]);
 
   const openNewContactForm = () => {
     if (!offer) return;
@@ -237,6 +295,16 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
       } else {
         saved = await postCreateCaller({ name, phone, category: "client" });
       }
+      setMatchCandidates((current) => {
+        const list = current ?? [];
+        const idx = list.findIndex((c) => c.id === saved.id);
+        if (idx >= 0) {
+          const next = list.slice();
+          next[idx] = saved;
+          return next;
+        }
+        return [saved, ...list];
+      });
       setClients((current) => {
         const list = current ?? [];
         const idx = list.findIndex((c) => c.id === saved.id);
@@ -252,6 +320,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
         next.add(saved.id);
         return next;
       });
+      setSelectedNames((current) => ({ ...current, [saved.id]: saved.name }));
       setAddingNew(false);
       setNewContactDone(true);
       /* Keep the Callers Directory screen's cache honest if it's open later. */
@@ -264,11 +333,18 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
     }
   };
 
-  const toggle = useCallback((id) => {
+  const toggle = useCallback((caller) => {
+    if (!caller?.id) return;
     setSelected((current) => {
       const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(caller.id)) next.delete(caller.id);
+      else next.add(caller.id);
+      return next;
+    });
+    setSelectedNames((current) => {
+      const next = { ...current };
+      if (next[caller.id]) delete next[caller.id];
+      else next[caller.id] = caller.name;
       return next;
     });
   }, []);
@@ -282,12 +358,6 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
       })),
     [clients, alreadyLinked, selected]
   );
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((c) => c.name.toLowerCase().includes(q) || (c.phone ?? "").includes(q));
-  }, [rows, query]);
 
   const columnDefs = useMemo(
     () => [
@@ -322,7 +392,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
               checked={p.data.chosen}
               disabled={p.data.linked}
               label={p.data.linked ? `${p.data.name} is already on this site` : `Add ${p.data.name} to this site`}
-              onToggle={() => toggle(p.data.id)}
+              onToggle={() => toggle(p.data)}
             />
           ) : null,
       },
@@ -348,8 +418,8 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
     setError("");
     try {
       await onSave(ids);
-      const names = (clients ?? []).filter((c) => selected.has(c.id)).map((c) => c.name);
-      setConfirmation(names);
+      const names = ids.map((id) => selectedNames[id]).filter(Boolean);
+      setConfirmation(names.length > 0 ? names : ids.map(() => "Contact"));
     } catch (err) {
       console.error("[sbm] failed to associate contacts", err);
       setError(err.message || "Couldn't add these contacts — try again.");
@@ -385,7 +455,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
     >
       <style>{CONTACTS_GRID_CSS}</style>
 
-      {clients !== null && (
+      {matchCandidates !== null && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {offer && (
             <div
@@ -569,7 +639,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
                             ? `${caller.name} is already on this site`
                             : `Add ${caller.name} to this site`
                         }
-                        onToggle={() => toggle(caller.id)}
+                        onToggle={() => toggle(caller)}
                       />
                     </span>
                   </div>
@@ -594,16 +664,16 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
           <span style={{ fontSize: 12, color: t.edge2 }}>
             {clients === null
               ? "Loading clients…"
-              : filtered.length === rows.length
-                ? `${rows.length} client${rows.length === 1 ? "" : "s"}`
-                : `${filtered.length} of ${rows.length}`}
+              : clientsTotal > rows.length
+                ? `Showing ${rows.length} of ${clientsTotal}${query.trim() ? " matching" : ""}`
+                : `${clientsTotal} client${clientsTotal === 1 ? "" : "s"}`}
           </span>
         </div>
 
         <div className="sbm-associate-contacts-grid ag-theme-quartz">
           <AgGridReact
             ref={gridRef}
-            rowData={filtered}
+            rowData={rows}
             columnDefs={columnDefs}
             defaultColDef={defaultColDef}
             getRowId={getRowId}
