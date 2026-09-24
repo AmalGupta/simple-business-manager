@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../../theme.js";
-import { fmtShort, isUrgent } from "../../lib/dates.js";
-import { SMALL_SECONDARY_BUTTON_STYLE, TILE_ROW_STYLE } from "../../styles.js";
+import { TILE_ROW_STYLE } from "../../styles.js";
 import { getCachedCallsByTodoStatus, loadCallsByTodoStatus, refreshCallsByTodoStatus } from "../../lib/api.js";
+import { fmtShort, isUrgent } from "../../lib/dates.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { TodoRow } from "../../components/TodoRow.jsx";
-import { TodoAssignControl } from "./TodoAssignControl.jsx";
 import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
+import {
+  OPEN_TODO_PAGE_SIZE,
+  OpenTodoCard,
+  OpenTodoLoadMore,
+  sortTodosByRecordedAtDesc,
+} from "./OpenTodoCard.jsx";
 
 const OPEN_TABS_CSS = `
 .sbm-open-todos-tabs {
@@ -40,57 +45,6 @@ const OPEN_TABS_CSS = `
   border-top-left-radius: 6px;
   border-top-right-radius: 6px;
 }
-.sbm-open-todo-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 10px;
-  border-bottom: 1px solid var(--color-line-soft);
-}
-.sbm-open-todo-card:last-child {
-  border-bottom: none;
-}
-.sbm-open-todo-card__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px 12px;
-}
-.sbm-open-todo-card__call {
-  all: unset;
-  cursor: pointer;
-  font-size: 13px;
-  color: var(--color-accent);
-  font-weight: 500;
-}
-.sbm-open-todo-card__site {
-  font-size: 12px;
-  color: var(--color-slate);
-}
-.sbm-open-todo-card__text {
-  font-size: 14px;
-  line-height: 1.45;
-  color: var(--color-ink);
-  margin: 0;
-}
-.sbm-open-todo-card .cna-todo-toolbar {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  width: 100%;
-  min-width: 0;
-}
-.sbm-open-todo-card .cna-todo-toolbar__status {
-  font-size: 12px;
-  color: var(--color-slate);
-  line-height: 1.35;
-}
-.sbm-open-todo-card .cna-todo-toolbar__actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
 `;
 
 function isAssignedToUser(todo, userId) {
@@ -98,20 +52,8 @@ function isAssignedToUser(todo, userId) {
   return (todo.assignees ?? []).some((a) => a.id === userId);
 }
 
-function sortOpenTodos(list) {
-  return [...list].sort((a, b) => {
-    const aUn = (a.assignees?.length ?? 0) > 0 ? 1 : 0;
-    const bUn = (b.assignees?.length ?? 0) > 0 ? 1 : 0;
-    if (aUn !== bUn) return aUn - bUn;
-    const ad = a.due_date ? new Date(a.due_date).getTime() : Infinity;
-    const bd = b.due_date ? new Date(b.due_date).getTime() : Infinity;
-    return ad - bd;
-  });
-}
-
 /* Admin drilldown from the "open today" / "parked" home tiles.
-   Open today: bookmark tabs — Assigned to me | Others — with a CNA-style
-   Assign to me / Assign / Assign to Site toolbar on each card.
+   Open today: bookmark tabs — Assigned to me | Others — shared OpenTodoCard.
    Parked: flat TodoRow list (unpark / complete). */
 export function OpenTodosView({
   staffRoster,
@@ -131,6 +73,7 @@ export function OpenTodosView({
   const [loading, setLoading] = useState(cached === null);
   const [bookmark, setBookmark] = useState("mine");
   const [siteTodo, setSiteTodo] = useState(null);
+  const [visibleCount, setVisibleCount] = useState(OPEN_TODO_PAGE_SIZE);
   const lastRefreshKey = useRef(refreshKey);
 
   useEffect(() => {
@@ -157,6 +100,10 @@ export function OpenTodosView({
     };
   }, [status, refreshKey]);
 
+  useEffect(() => {
+    setVisibleCount(OPEN_TODO_PAGE_SIZE);
+  }, [bookmark, status]);
+
   const allTodos = useMemo(
     () =>
       calls.flatMap((c) =>
@@ -167,15 +114,20 @@ export function OpenTodosView({
 
   const mineTodos = useMemo(() => {
     if (!currentUser?.id) return [];
-    return sortOpenTodos(allTodos.filter((td) => isAssignedToUser(td, currentUser.id)));
+    return sortTodosByRecordedAtDesc(
+      allTodos.filter((td) => isAssignedToUser(td, currentUser.id)),
+      (td) => td.call?.recorded_at
+    );
   }, [allTodos, currentUser?.id]);
 
   const othersTodos = useMemo(() => {
-    if (!currentUser?.id) return sortOpenTodos(allTodos);
-    return sortOpenTodos(allTodos.filter((td) => !isAssignedToUser(td, currentUser.id)));
+    const list = !currentUser?.id ? allTodos : allTodos.filter((td) => !isAssignedToUser(td, currentUser.id));
+    return sortTodosByRecordedAtDesc(list, (td) => td.call?.recorded_at);
   }, [allTodos, currentUser?.id]);
 
   const visibleTodos = status === "open" ? (bookmark === "mine" ? mineTodos : othersTodos) : allTodos;
+  const pagedTodos = visibleTodos.slice(0, visibleCount);
+  const remaining = Math.max(0, visibleTodos.length - visibleCount);
   const title = status === "snoozed" ? "Parked" : "Open today";
   const empty =
     status === "snoozed"
@@ -230,52 +182,23 @@ export function OpenTodosView({
         </Card>
       ) : status === "open" ? (
         <Card style={{ padding: 0 }}>
-          {visibleTodos.map((td) => {
-            const urgent = isUrgent(td);
-            return (
-              <div key={td.id} className="sbm-open-todo-card">
-                <div className="sbm-open-todo-card__meta">
-                  <button type="button" className="sbm-open-todo-card__call" onClick={() => onOpen(td.call_id)}>
-                    {td.call.client_name}
-                    {td.call.recorded_at ? ` · ${fmtShort(td.call.recorded_at)}` : ""}
-                  </button>
-                  {td.site_name ? <span className="sbm-open-todo-card__site">{td.site_name}</span> : null}
-                  {td.due_date ? (
-                    <span
-                      style={{
-                        fontSize: 12,
-                        padding: "2px 8px",
-                        borderRadius: t.radius,
-                        color: urgent ? t.white : t.edge2,
-                        background: urgent ? t.signal : t.frost,
-                      }}
-                    >
-                      {fmtShort(td.due_date)}
-                    </span>
-                  ) : null}
-                </div>
-                <p className="sbm-open-todo-card__text">{td.text}</p>
-                {onAssign ? (
-                  <TodoAssignControl
-                    todo={td}
-                    staffRoster={staffRoster}
-                    currentUser={currentUser}
-                    onAssign={onAssign}
-                    compact
-                    extraActions={
-                      <button
-                        type="button"
-                        onClick={() => setSiteTodo(td)}
-                        style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 32, padding: "0 10px" }}
-                      >
-                        {td.site_id ? "Change site" : "Assign to Site"}
-                      </button>
-                    }
-                  />
-                ) : null}
-              </div>
-            );
-          })}
+          {pagedTodos.map((td) => (
+            <OpenTodoCard
+              key={td.id}
+              todo={td}
+              callName={td.call.client_name}
+              recordedAt={td.call.recorded_at}
+              onOpenCall={onOpen}
+              staffRoster={staffRoster}
+              currentUser={currentUser}
+              onAssign={onAssign}
+              onRequestSiteAssign={onAssign ? setSiteTodo : undefined}
+            />
+          ))}
+          <OpenTodoLoadMore
+            remaining={remaining}
+            onLoadMore={() => setVisibleCount((n) => n + OPEN_TODO_PAGE_SIZE)}
+          />
         </Card>
       ) : (
         <Card>

@@ -1,0 +1,122 @@
+/* Shared open-todo card — Studio surface inside a list Card.
+   Flat white parent, hairline dividers, CNA-style site chip. */
+
+.sbm-open-todo-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 14px 12px;
+  border-bottom: 1px solid var(--color-line);
+  box-sizing: border-box;
+}
+
+.sbm-open-todo-card:last-child {
+  border-bottom: none;
+}
+
+.sbm-open-todo-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+}
+
+.sbm-open-todo-card__call {
+  all: unset;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-accent);
+  line-height: 1.35;
+}
+
+.sbm-open-todo-card__call:hover {
+  text-decoration: underline;
+}
+
+.sbm-open-todo-card__call:disabled {
+  cursor: default;
+  text-decoration: none;
+}
+
+.sbm-open-todo-card__date {
+  font-size: 12px;
+  color: var(--color-slate);
+}
+
+.sbm-open-todo-card__due {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-card);
+  color: var(--color-slate);
+  background: transparent;
+  border: 1px solid var(--color-line);
+  white-space: nowrap;
+}
+
+.sbm-open-todo-card__due.is-urgent {
+  color: #fff;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.sbm-open-todo-card__site {
+  display: inline-block;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-accent);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.sbm-open-todo-card__text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.sbm-open-todo-card__toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.sbm-open-todo-card__toolbar .cna-todo-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+}
+
+.sbm-open-todo-card__toolbar .cna-todo-toolbar__status {
+  font-size: 12px;
+  color: var(--color-slate);
+  line-height: 1.35;
+}
+
+.sbm-open-todo-card__toolbar .cna-todo-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.sbm-open-todo-card__load-more {
+  display: flex;
+  justify-content: center;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--color-line);
+}
