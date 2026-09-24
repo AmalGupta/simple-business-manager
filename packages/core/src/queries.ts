@@ -4380,16 +4380,31 @@ export interface StaffWithOpenTodosRow {
   open_todo_count: number;
 }
 
-/** Staff accounts with at least one open call todo assigned — admin home tabs. */
+/** Staff accounts with open call todos assigned or identified by owner/alias. */
 export async function listStaffWithOpenCallTodos(db: D1Database): Promise<StaffWithOpenTodosRow[]> {
   const { results } = await db
     .prepare(
       `SELECT users.id AS id,
               users.name AS name,
-              COUNT(*) AS open_todo_count
-       FROM todo_assignees
-       JOIN todos ON todos.id = todo_assignees.todo_id AND todos.status = 'open'
-       JOIN users ON users.id = todo_assignees.user_id AND users.role = 'staff'
+              COUNT(DISTINCT todos.id) AS open_todo_count
+       FROM users
+       JOIN todos ON todos.status = 'open'
+       JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL
+       WHERE users.role = 'staff'
+         AND (
+           EXISTS (
+             SELECT 1 FROM todo_assignees
+             WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = users.id
+           )
+           OR lower(trim(todos.owner)) = lower(trim(users.name))
+           OR (lower(trim(users.name)) = 'tanseem' AND lower(trim(todos.owner)) = 'tanzeem')
+           OR EXISTS (
+             SELECT 1 FROM caller_aliases
+             JOIN callers ON callers.id = caller_aliases.caller_id
+             WHERE callers.staff_user_id = users.id
+               AND lower(trim(caller_aliases.alias)) = lower(trim(todos.owner))
+           )
+         )
        GROUP BY users.id, users.name
        ORDER BY users.name ASC`
     )
@@ -4421,8 +4436,9 @@ export interface SiteOpenTodoRow extends AssignedTodoRow {
 }
 
 export interface ListMyOpenTodosOptions {
-  /** Admin/superadmin: also include owner=self and owner matching viewer name. */
+  /** Admin personal queue: also include owner=self. */
   includeIdentifiedForViewer?: boolean;
+  /** Optional override for name matching (defaults to users.name for userId). */
   viewerName?: string | null;
 }
 
@@ -4535,9 +4551,19 @@ export async function backfillTodoSitesFromCallContext(
 }
 
 /**
- * Open call todos for a user's personal queue.
- * Staff: assignee rows only.
- * Admin (`includeIdentifiedForViewer`): also owner=self / owner matching viewer name.
+ * Open call todos for a user's personal queue (staff My call tasks, admin
+ * personal queue, admin staff-bookmark panel).
+ *
+ * Always includes:
+ * - todos with this user in todo_assignees
+ * - open todos whose owner matches the user's name or a contact alias linked
+ *   via callers.staff_user_id (so extraction "Shubham"/"Bablu" shows up even
+ *   when auto-assign missed writing todo_assignees)
+ *
+ * Admin (`includeIdentifiedForViewer`): also owner=self.
+ *
+ * Lazy-claims name/alias matches into todo_assignees so staff can mark done
+ * (PATCH requires assignee).
  */
 export async function listMyOpenTodos(
   db: D1Database,
@@ -4545,20 +4571,50 @@ export async function listMyOpenTodos(
   opts: ListMyOpenTodosOptions = {}
 ): Promise<AssignedTodoRow[]> {
   const includeIdentified = Boolean(opts.includeIdentifiedForViewer);
-  const viewerNeedle = opts.viewerName ? normalizeOwnerName(opts.viewerName) : "";
+  const user = await getUserById(db, userId);
+  const nameNeedle =
+    opts.viewerName != null && opts.viewerName !== ""
+      ? normalizeOwnerName(opts.viewerName)
+      : user?.name
+        ? normalizeOwnerName(user.name)
+        : "";
+
+  const { results: aliasRows } = await db
+    .prepare(
+      `SELECT caller_aliases.alias AS alias
+       FROM caller_aliases
+       JOIN callers ON callers.id = caller_aliases.caller_id
+       WHERE callers.staff_user_id = ?`
+    )
+    .bind(userId)
+    .all<{ alias: string }>();
+  const aliasNeedles = [
+    ...new Set(
+      (aliasRows ?? [])
+        .map((r) => normalizeOwnerName(r.alias))
+        .filter((a) => a && a !== "self")
+    ),
+  ];
+
   const binds: unknown[] = [userId];
+  const ownerClauses: string[] = [];
+  if (nameNeedle && nameNeedle !== "self") {
+    ownerClauses.push(`lower(trim(todos.owner)) = ?`);
+    binds.push(nameNeedle);
+    if (nameNeedle === "tanseem") {
+      ownerClauses.push(`lower(trim(todos.owner)) = 'tanzeem'`);
+    }
+  }
+  for (const alias of aliasNeedles) {
+    ownerClauses.push(`lower(trim(todos.owner)) = ?`);
+    binds.push(alias);
+  }
+
   let identifiedClause = "";
   if (includeIdentified) {
     identifiedClause = ` OR lower(trim(todos.owner)) = 'self'`;
-    if (viewerNeedle && viewerNeedle !== "self") {
-      identifiedClause += ` OR lower(trim(todos.owner)) = ?`;
-      binds.push(viewerNeedle);
-      /* Roster alias: STT often writes Tanzeem for Tanseem. */
-      if (viewerNeedle === "tanseem") {
-        identifiedClause += ` OR lower(trim(todos.owner)) = 'tanzeem'`;
-      }
-    }
   }
+  const ownerMatchSql = ownerClauses.length > 0 ? ` OR (${ownerClauses.join(" OR ")})` : "";
 
   const { results } = await db
     .prepare(
@@ -4591,8 +4647,10 @@ export async function listMyOpenTodos(
        LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
        LEFT JOIN sites AS todo_sites ON todo_sites.id = todos.site_id
        WHERE todos.status = 'open'
+         AND calls.deleted_at IS NULL
          AND (
            EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?)
+           ${ownerMatchSql}
            ${identifiedClause}
          )
        ORDER BY calls.recorded_at DESC, todos.id DESC`
@@ -4613,6 +4671,18 @@ export async function listMyOpenTodos(
       r.site_name = hit.site_name;
     }
   }
+
+  /* Ensure name/alias-identified todos are claimable (staff PATCH requires assignee). */
+  await db.batch(
+    rows.map((r) =>
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at)
+           VALUES (?, ?, NULL, datetime('now'))`
+        )
+        .bind(r.id, userId)
+    )
+  );
 
   const map = await getAssigneesByTodoIds(
     db,
