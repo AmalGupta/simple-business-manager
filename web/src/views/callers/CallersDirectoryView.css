@@ -1,5 +1,9 @@
 /* Contacts directory — scroll behavior follows shell data-inner-scrolls /
-   data-horizontal-scrolls (account menu Site customization). */
+   data-horizontal-scrolls (account menu Site customization).
+
+   Height rules are scoped under .sbm-contacts-grid-wrap so they don't
+   collapse other screens that reuse the ag-theme look (Associate
+   contacts modal uses a fixed-height sibling class). */
 
 .sbm-contacts-grid-wrap {
   display: flex;
@@ -10,7 +14,7 @@
   overflow: hidden;
 }
 
-.sbm-contacts-grid.ag-theme-quartz {
+.sbm-contacts-grid-wrap .sbm-contacts-grid.ag-theme-quartz {
   --ag-font-family: var(--font-body), system-ui, sans-serif;
   --ag-font-size: 13px;
   --ag-background-color: var(--color-surface);
@@ -33,7 +37,7 @@
   height: 100%;
 }
 
-.sbm-contacts-grid .ag-root-wrapper {
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-root-wrapper {
   border: none;
   height: 100%;
   background: var(--color-surface);
@@ -45,12 +49,12 @@
   height: auto;
 }
 
-[data-inner-scrolls="0"] .sbm-contacts-grid.ag-theme-quartz {
+[data-inner-scrolls="0"] .sbm-contacts-grid-wrap .sbm-contacts-grid.ag-theme-quartz {
   height: auto !important;
   min-height: 280px;
 }
 
-.sbm-contacts-grid .ag-header-cell-text {
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-cell-text {
   font-family: var(--font-label);
   font-size: 11px;
   font-weight: 700;
@@ -58,7 +62,7 @@
   letter-spacing: 0.04em;
 }
 
-.sbm-contacts-grid .ag-cell {
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-cell {
   display: flex;
   align-items: center;
   font-weight: 600;
