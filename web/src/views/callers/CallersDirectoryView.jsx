@@ -102,6 +102,8 @@ function listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }) {
     bucket,
     siteId: bucket === "saved" && siteFilter ? siteFilter.id : undefined,
     linkedSitesOnly: bucket === "saved" && linkedSitesOnly && !siteFilter ? true : undefined,
+    /* Sites column — only the Contacts directory needs per-row linked_sites. */
+    includeLinkedSites: true,
     q: q.trim() || undefined,
     limit: PAGE_SIZE,
     offset: pageIndex * PAGE_SIZE,
