@@ -31,7 +31,7 @@ ModuleRegistry.registerModules([AllCommunityModule]);
    ------------------------------------------------------------------ */
 
 const CONTACTS_GRID_CSS = `
-.sbm-contacts-grid.ag-theme-quartz {
+.sbm-associate-contacts-grid.ag-theme-quartz {
   --ag-font-family: var(--font-body), system-ui, sans-serif;
   --ag-font-size: 13px;
   --ag-background-color: var(--color-surface);
@@ -51,33 +51,38 @@ const CONTACTS_GRID_CSS = `
   --ag-icon-size: 14px;
   width: 100%;
   height: 260px;
+  min-height: 260px;
+  flex: 0 0 auto;
 }
-.sbm-contacts-grid .ag-header-cell-text {
+.sbm-associate-contacts-grid .ag-root-wrapper {
+  height: 100%;
+}
+.sbm-associate-contacts-grid .ag-header-cell-text {
   font-family: var(--font-label);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.sbm-contacts-grid .ag-cell {
+.sbm-associate-contacts-grid .ag-cell {
   display: flex;
   align-items: center;
 }
-.sbm-contacts-grid .sbm-ccol-phone {
+.sbm-associate-contacts-grid .sbm-ccol-phone {
   font-variant-numeric: tabular-nums;
   color: var(--color-slate);
 }
-.sbm-contacts-grid .sbm-ccol-add {
+.sbm-associate-contacts-grid .sbm-ccol-add {
   padding-top: 0;
   padding-bottom: 0;
   justify-content: center;
 }
-.sbm-contacts-grid .ag-row.sbm-crow-chosen .ag-cell {
+.sbm-associate-contacts-grid .ag-row.sbm-crow-chosen .ag-cell {
   color: var(--color-slate);
   opacity: 0.6;
 }
-.sbm-contacts-grid .ag-tooltip,
-.sbm-contacts-grid .ag-popup .ag-tooltip {
+.sbm-associate-contacts-grid .ag-tooltip,
+.sbm-associate-contacts-grid .ag-popup .ag-tooltip {
   display: none !important;
 }
 `;
@@ -594,7 +599,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
           </span>
         </div>
 
-        <div className="sbm-contacts-grid ag-theme-quartz">
+        <div className="sbm-associate-contacts-grid ag-theme-quartz">
           <AgGridReact
             ref={gridRef}
             rowData={filtered}
