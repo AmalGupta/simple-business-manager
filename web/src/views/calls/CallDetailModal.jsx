@@ -8,14 +8,29 @@ import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 import { TodoRow } from "../../components/TodoRow.jsx";
 import { WaitingTag } from "../../components/WaitingTag.jsx";
 import { CallTypeBadge } from "../../components/CallTypeBadge.jsx";
+import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
+import { TodoAssignControl } from "./TodoAssignControl.jsx";
+import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
 
 /**
  * Modal call detail — transcript, audio, todos. Close returns to the grid
  * without navigating away (filters/page state preserved).
+ * Todos: complete + assign/reassign + assign-to-site (no park).
  */
-export function CallDetailModal({ callId, onClose, onToggle, onPark, busyIds }) {
+export function CallDetailModal({
+  callId,
+  onClose,
+  onToggle,
+  busyIds,
+  canManage = true,
+  staffRoster = [],
+  currentUser = null,
+  onAssign,
+  onTodoSiteAssigned,
+}) {
   const [call, setCall] = useState(undefined);
   const [error, setError] = useState("");
+  const [siteTodo, setSiteTodo] = useState(null);
 
   useEffect(() => {
     if (!callId) return;
@@ -50,34 +65,46 @@ export function CallDetailModal({ callId, onClose, onToggle, onPark, busyIds }) 
     };
   }, [onClose]);
 
-  const handleToggle = (todo) => {
+  const patchLocalTodo = (todoId, patch) => {
     setCall((c) => {
       if (!c) return c;
       return {
         ...c,
-        todos: (c.todos || []).map((td) => {
-          if (td.id !== todo.id) return td;
-          return todo.status === "done"
-            ? { ...td, status: "open", completed_at: null }
-            : { ...td, status: "done", completed_at: new Date().toISOString() };
-        }),
+        todos: (c.todos || []).map((td) => (td.id === todoId ? { ...td, ...patch } : td)),
       };
     });
+  };
+
+  const handleToggle = (todo) => {
+    patchLocalTodo(
+      todo.id,
+      todo.status === "done"
+        ? { status: "open", completed_at: null }
+        : { status: "done", completed_at: new Date().toISOString() }
+    );
     onToggle?.(todo);
   };
 
-  const handlePark = (todo) => {
-    setCall((c) => {
-      if (!c) return c;
-      return {
-        ...c,
-        todos: (c.todos || []).map((td) => {
-          if (td.id !== todo.id) return td;
-          return { ...td, status: todo.status === "snoozed" ? "open" : "snoozed" };
-        }),
-      };
-    });
-    onPark?.(todo);
+  const handleAssign = async (todoId, userIds) => {
+    const updated = await onAssign?.(todoId, userIds);
+    if (updated?.assignees) {
+      patchLocalTodo(todoId, { assignees: updated.assignees });
+    }
+    return updated;
+  };
+
+  const handleSiteAssigned = (result) => {
+    const updated = result?.todo;
+    if (updated?.id) {
+      patchLocalTodo(updated.id, {
+        ...updated,
+        site_id: result.site_id ?? updated.site_id,
+        site_name: result.site_name ?? updated.site_name,
+        assignees: updated.assignees,
+      });
+    }
+    onTodoSiteAssigned?.(result);
+    setSiteTodo(null);
   };
 
   const openTodos = call ? (call.todos || []).filter((td) => td.status !== "done") : [];
@@ -85,6 +112,7 @@ export function CallDetailModal({ callId, onClose, onToggle, onPark, busyIds }) 
   const dateIso = call ? call.recording_date || call.recorded_at : null;
 
   return (
+    <>
     <div
       role="dialog"
       aria-modal="true"
@@ -214,13 +242,36 @@ export function CallDetailModal({ callId, onClose, onToggle, onPark, busyIds }) 
                 <p style={{ margin: 0, fontSize: 13, color: t.edge2 }}>No todos on this call.</p>
               ) : (
                 [...openTodos, ...doneTodos].map((todo) => (
-                  <TodoRow
-                    key={todo.id}
-                    todo={todo}
-                    onToggle={handleToggle}
-                    onPark={handlePark}
-                    busy={busyIds?.has?.(todo.id)}
-                  />
+                  <div key={todo.id} style={{ marginBottom: 8 }}>
+                    <TodoRow
+                      todo={todo}
+                      onToggle={canManage ? handleToggle : undefined}
+                      busy={busyIds?.has?.(todo.id)}
+                      readOnly={!canManage}
+                    />
+                    {canManage && onAssign ? (
+                      <div style={{ padding: "0 10px 4px" }}>
+                        {todo.site_name ? (
+                          <div style={{ fontSize: 12, color: t.edge2, marginBottom: 4 }}>Site: {todo.site_name}</div>
+                        ) : null}
+                        <TodoAssignControl
+                          todo={todo}
+                          staffRoster={staffRoster}
+                          currentUser={currentUser}
+                          onAssign={handleAssign}
+                          extraActions={
+                            <button
+                              type="button"
+                              onClick={() => setSiteTodo(todo)}
+                              style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 34 }}
+                            >
+                              {todo.site_id ? "Change site" : "Assign to Site"}
+                            </button>
+                          }
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                 ))
               )}
             </div>
@@ -228,5 +279,14 @@ export function CallDetailModal({ callId, onClose, onToggle, onPark, busyIds }) 
         )}
       </div>
     </div>
+
+      {siteTodo ? (
+        <AssignTodoSiteModal
+          todo={siteTodo}
+          onClose={() => setSiteTodo(null)}
+          onAssigned={handleSiteAssigned}
+        />
+      ) : null}
+    </>
   );
 }
