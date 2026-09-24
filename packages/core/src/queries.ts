@@ -1,6 +1,6 @@
 // All D1 access lives here — see docs/SCAFFOLDING.md §1 ("no SQL outside queries.ts").
 
-import { matchStaffByOwner } from "./assignment";
+import { matchStaffByOwner, normalizeOwnerName } from "./assignment";
 import { normalizeCallerPhone } from "./caller-category";
 import { SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import type {
@@ -772,6 +772,13 @@ export async function saveExtraction(
 ): Promise<void> {
   const siteNames = [...new Set(extraction.sites.map((s) => s.trim()).filter(Boolean))];
   const siteIds = await Promise.all(siteNames.map((name) => upsertSite(db, name, callId)));
+  /* name → id for resolving todos[].site (v7). Case-insensitive lookup so
+     roster drift in spelling/case still hits the call-level upsert. */
+  const siteIdByName = new Map<string, string>();
+  for (let i = 0; i < siteNames.length; i++) {
+    siteIdByName.set(siteNames[i].toLowerCase(), siteIds[i]);
+  }
+  const linkedSiteIds = new Set(siteIds);
   const staff = await listStaffRoster(db);
 
   const statements = [
@@ -794,6 +801,16 @@ export async function saveExtraction(
       ),
   ];
 
+  const linkCallSite = (siteId: string) => {
+    if (linkedSiteIds.has(siteId)) return;
+    linkedSiteIds.add(siteId);
+    statements.push(
+      db
+        .prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`)
+        .bind(callId, siteId)
+    );
+  };
+
   for (const siteId of siteIds) {
     statements.push(
       db
@@ -807,25 +824,62 @@ export async function saveExtraction(
      Drive calls leave it NULL (no human assigner in-app). */
   const call = await getCallById(db, callId);
   const assignedByUserId = call?.uploaded_by_user_id ?? null;
+  const soleCallSiteId = siteIds.length === 1 ? siteIds[0] : null;
+  const recordedForSiteId = call?.recorded_for_site_id ?? null;
+
+  const resolveTodoSiteId = async (spokenSite: string | undefined): Promise<string | null> => {
+    const trimmed = spokenSite?.trim() ?? "";
+    if (trimmed) {
+      const existing = siteIdByName.get(trimmed.toLowerCase());
+      if (existing) {
+        linkCallSite(existing);
+        return existing;
+      }
+      const id = await upsertSite(db, trimmed, callId);
+      siteIdByName.set(trimmed.toLowerCase(), id);
+      linkCallSite(id);
+      return id;
+    }
+    /* Fallbacks when the model left todos[].site empty: single call site,
+       else the site this voice memo was recorded for. */
+    if (soleCallSiteId) {
+      linkCallSite(soleCallSiteId);
+      return soleCallSiteId;
+    }
+    if (recordedForSiteId) {
+      linkCallSite(recordedForSiteId);
+      return recordedForSiteId;
+    }
+    return null;
+  };
 
   for (const todo of extraction.todos) {
     const matched = matchStaffByOwner(todo.owner, staff);
+    /* Desk/site memos: owner "self" → claim for the recorder so My call tasks
+       fills without a manual Assign-to-me. Phone/Drive calls leave self
+       unassigned (no uploaded_by); admins still see them via widened query. */
+    const selfAssigneeId =
+      !matched && assignedByUserId && normalizeOwnerName(todo.owner ?? "") === "self"
+        ? assignedByUserId
+        : null;
+    const assigneeId = matched?.id ?? selfAssigneeId;
     const todoId = crypto.randomUUID();
+    const todoSiteId = await resolveTodoSiteId(todo.site);
     statements.push(
       db
         .prepare(
-          `INSERT INTO todos (id, call_id, owner, text, due_date, origin)
-           VALUES (?, ?, ?, ?, ?, 'llm')`
+          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id)
+           VALUES (?, ?, ?, ?, ?, 'llm', ?)`
         )
-        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null)
+        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null, todoSiteId)
     );
-    if (matched) {
+    if (assigneeId) {
       statements.push(
         db
           .prepare(
             `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at) VALUES (?, ?, ?, datetime('now'))`
           )
-          .bind(todoId, matched.id, assignedByUserId)
+          .bind(todoId, assigneeId, assignedByUserId)
       );
     }
   }
@@ -842,7 +896,9 @@ export async function saveExtraction(
 
   await db.batch(statements);
   const at = call?.recorded_at ?? null;
-  await Promise.all(siteIds.map((siteId) => touchSiteActivity(db, siteId, { at, source: "call", refId: callId })));
+  await Promise.all(
+    [...linkedSiteIds].map((siteId) => touchSiteActivity(db, siteId, { at, source: "call", refId: callId }))
+  );
 }
 
 /**
@@ -4209,12 +4265,20 @@ export interface AssignedTodoRow {
   status: Todo["status"];
   client_name: string;
   recorded_at: string | null;
+  site_id: string | null;
+  site_name: string | null;
+  assignees: TodoAssignee[];
 }
 
 /** Open call todos for one site — confirmed-sites Open-count popup. */
 export interface SiteOpenTodoRow extends AssignedTodoRow {
   recording_date: string | null;
-  assignees: TodoAssignee[];
+}
+
+export interface ListMyOpenTodosOptions {
+  /** Admin/superadmin: also include owner=self and owner matching viewer name. */
+  includeIdentifiedForViewer?: boolean;
+  viewerName?: string | null;
 }
 
 /** Open call todos linked to a site via call_sites, newest call first. */
@@ -4229,11 +4293,14 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
               todos.status AS status,
               COALESCE(callers.name, 'Unknown caller') AS client_name,
               calls.recorded_at AS recorded_at,
-              calls.recording_date AS recording_date
+              calls.recording_date AS recording_date,
+              todos.site_id AS site_id,
+              todo_sites.name AS site_name
        FROM todos
        JOIN calls ON calls.id = todos.call_id
        JOIN call_sites ON call_sites.call_id = calls.id
        LEFT JOIN callers ON callers.id = calls.client_id
+       LEFT JOIN sites AS todo_sites ON todo_sites.id = todos.site_id
        WHERE call_sites.site_id = ?
          AND todos.status = 'open'
          AND calls.deleted_at IS NULL
@@ -4247,11 +4314,40 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
     db,
     rows.map((r) => r.id)
   );
-  return rows.map((r) => ({ ...r, assignees: map.get(r.id) ?? [] }));
+  return rows.map((r) => ({
+    ...r,
+    site_id: r.site_id ?? null,
+    site_name: r.site_name ?? null,
+    assignees: map.get(r.id) ?? [],
+  }));
 }
 
-/** Open call todos assigned to a user — personal work queue (staff or admin). */
-export async function listMyOpenTodos(db: D1Database, userId: string): Promise<AssignedTodoRow[]> {
+/**
+ * Open call todos for a user's personal queue.
+ * Staff: assignee rows only.
+ * Admin (`includeIdentifiedForViewer`): also owner=self / owner matching viewer name.
+ */
+export async function listMyOpenTodos(
+  db: D1Database,
+  userId: string,
+  opts: ListMyOpenTodosOptions = {}
+): Promise<AssignedTodoRow[]> {
+  const includeIdentified = Boolean(opts.includeIdentifiedForViewer);
+  const viewerNeedle = opts.viewerName ? normalizeOwnerName(opts.viewerName) : "";
+  const binds: unknown[] = [userId];
+  let identifiedClause = "";
+  if (includeIdentified) {
+    identifiedClause = ` OR lower(trim(todos.owner)) = 'self'`;
+    if (viewerNeedle && viewerNeedle !== "self") {
+      identifiedClause += ` OR lower(trim(todos.owner)) = ?`;
+      binds.push(viewerNeedle);
+      /* Roster alias: STT often writes Tanzeem for Tanseem. */
+      if (viewerNeedle === "tanseem") {
+        identifiedClause += ` OR lower(trim(todos.owner)) = 'tanzeem'`;
+      }
+    }
+  }
+
   const { results } = await db
     .prepare(
       `SELECT todos.id AS id,
@@ -4274,18 +4370,35 @@ export async function listMyOpenTodos(db: D1Database, userId: string): Promise<A
                 CASE WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'Desk conversation' END,
                 'Unknown caller'
               ) AS client_name,
-              calls.recorded_at AS recorded_at
+              calls.recorded_at AS recorded_at,
+              todos.site_id AS site_id,
+              todo_sites.name AS site_name
        FROM todos
        JOIN calls ON calls.id = todos.call_id
        LEFT JOIN callers ON callers.id = calls.client_id
        LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
+       LEFT JOIN sites AS todo_sites ON todo_sites.id = todos.site_id
        WHERE todos.status = 'open'
-         AND EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?)
+         AND (
+           EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?)
+           ${identifiedClause}
+         )
        ORDER BY calls.recorded_at DESC, todos.id DESC`
     )
-    .bind(userId)
-    .all<AssignedTodoRow>();
-  return results ?? [];
+    .bind(...binds)
+    .all<Omit<AssignedTodoRow, "assignees">>();
+  const rows = results ?? [];
+  if (rows.length === 0) return [];
+  const map = await getAssigneesByTodoIds(
+    db,
+    rows.map((r) => r.id)
+  );
+  return rows.map((r) => ({
+    ...r,
+    site_id: r.site_id ?? null,
+    site_name: r.site_name ?? null,
+    assignees: map.get(r.id) ?? [],
+  }));
 }
 
 /**
@@ -4327,6 +4440,7 @@ export async function getDashboardSummary(
   }
 
   const todayKey = todayKeyKolkata();
+  const viewer = viewerUserId ? await getUserById(db, viewerUserId) : null;
   const [
     openRow,
     closedRow,
@@ -4358,7 +4472,12 @@ export async function getDashboardSummary(
     listOpenSiteTasks(db),
     countCallsNeedingAction(db),
     countResolvedCalls(db),
-    viewerUserId ? listMyOpenTodos(db, viewerUserId) : Promise.resolve([] as AssignedTodoRow[]),
+    viewerUserId
+      ? listMyOpenTodos(db, viewerUserId, {
+          includeIdentifiedForViewer: true,
+          viewerName: viewer?.name ?? null,
+        })
+      : Promise.resolve([] as AssignedTodoRow[]),
     listStaffWithOpenCallTodos(db),
   ]);
 
