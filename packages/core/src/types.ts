@@ -283,7 +283,7 @@ export interface CallExtraction {
   key_takeaways: string[];
   call_type: CallType;
   sites: string[];
-  todos: Array<{ text: string; owner: string; due_date?: string }>;
+  todos: Array<{ text: string; owner: string; due_date?: string; site?: string }>;
   commitments: Array<{ raw_phrase: string; resolved_datetime?: string; promised_to?: string }>;
   unresolved: UnresolvedItem[];
   material_needs: string[];

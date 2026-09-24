@@ -140,11 +140,21 @@ function normalizeExtraction(input: unknown, entries: DiarizedEntry[] = []): Cal
 
   const todos = asArray<Record<string, unknown>>(raw.todos)
     .filter((t) => typeof t?.text === "string" && typeof t?.owner === "string")
-    .map((t) => ({
-      text: t.text as string,
-      owner: t.owner as string,
-      due_date: typeof t.due_date === "string" ? t.due_date : undefined,
-    }));
+    .map((t) => {
+      const siteRaw = typeof t.site === "string" ? t.site.trim() : "";
+      const site =
+        siteRaw && isMentionedInTranscript(siteRaw, entries)
+          ? siteRaw
+          : siteRaw
+            ? (console.warn(`[extract] dropped todo site "${siteRaw}" — not found in transcript`), undefined)
+            : undefined;
+      return {
+        text: t.text as string,
+        owner: t.owner as string,
+        due_date: typeof t.due_date === "string" ? t.due_date : undefined,
+        ...(site ? { site } : {}),
+      };
+    });
 
   const commitments = asArray<Record<string, unknown>>(raw.commitments)
     .filter((c) => typeof c?.raw_phrase === "string")
