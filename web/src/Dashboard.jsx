@@ -546,14 +546,16 @@ export default function SimpleBusinessManager() {
     fetchDashboardSummary({ forUserId: homeTab })
       .then((summary) => {
         if (cancelled) return;
-        setStaffPanel({
+        /* Preserve a list already loaded for this user — summary always sends
+           my_open_todos: [] and must not wipe a concurrent my-open-todos fetch. */
+        setStaffPanel((prev) => ({
           userId: homeTab,
           openSiteTasks: summary.open_site_tasks ?? [],
-          myOpenTodos: [],
+          myOpenTodos: prev?.userId === homeTab ? prev.myOpenTodos : [],
           myOpenTodosCount:
             summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0,
           sites: summary.sites ?? [],
-        });
+        }));
       })
       .catch((err) => {
         console.error("[sbm] failed to load staff dashboard tab", err);
@@ -578,10 +580,19 @@ export default function SimpleBusinessManager() {
       .then((todos) => {
         if (cancelled) return;
         if (forUserId) {
+          /* Seed or merge even if staffPanel summary has not landed yet —
+             otherwise a fast list response was dropped (prev null) and the
+             later summary left myOpenTodos stuck at []. */
           setStaffPanel((prev) =>
             prev?.userId === forUserId
               ? { ...prev, myOpenTodos: todos, myOpenTodosCount: todos.length }
-              : prev
+              : {
+                  userId: forUserId,
+                  openSiteTasks: [],
+                  myOpenTodos: todos,
+                  myOpenTodosCount: todos.length,
+                  sites: [],
+                }
           );
         } else {
           setMyOpenTodos(todos);

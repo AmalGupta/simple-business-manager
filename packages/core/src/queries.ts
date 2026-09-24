@@ -37,6 +37,8 @@ import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./types";
 
 /** Cloudflare D1 — https://developers.cloudflare.com/d1/platform/limits/ */
 const D1_MAX_BOUND_PARAMS = 100;
+/** D1 `db.batch()` rejects above 1000 statements — leave headroom. */
+const D1_MAX_BATCH_STATEMENTS = 500;
 
 function staffHiddenCategorySql(alias = "workflow_stages.category"): { clause: string; binds: string[] } {
   const placeholders = STAFF_HIDDEN_WORKFLOW_CATEGORIES.map(() => "?").join(", ");
@@ -4650,7 +4652,9 @@ export async function backfillTodoSitesFromCallContext(
   if (updates.length === 0) return new Map();
 
   /* Batch UPDATE + ensure call_sites (INSERT OR IGNORE). Skip touchSiteActivity —
-     these are historical associations; activity already exists from the call. */
+     these are historical associations; activity already exists from the call.
+     Chunk — a single batch over ~1k+ missing sites blows past D1's 1000-statement
+     limit and 500s the whole GET /api/my-open-todos (count tile stays non-zero). */
   const statements = [];
   for (const u of updates) {
     statements.push(
@@ -4660,7 +4664,9 @@ export async function backfillTodoSitesFromCallContext(
       db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(u.callId, u.siteId)
     );
   }
-  await db.batch(statements);
+  for (let i = 0; i < statements.length; i += D1_MAX_BATCH_STATEMENTS) {
+    await db.batch(statements.slice(i, i + D1_MAX_BATCH_STATEMENTS));
+  }
 
   const siteIds = [...new Set(updates.map((u) => u.siteId))];
   const nameRows = await queryAllByIdChunks<{ id: string; name: string }>(db, siteIds, (ph) =>
@@ -4740,16 +4746,22 @@ export async function listMyOpenTodos(
   if (rows.length === 0) return [];
 
   if (backfillSites) {
-    const filled = await backfillTodoSitesFromCallContext(
-      db,
-      rows.map((r) => ({ id: r.id, call_id: r.call_id, site_id: r.site_id ?? null }))
-    );
-    for (const r of rows) {
-      const hit = filled.get(r.id);
-      if (hit) {
-        r.site_id = hit.site_id;
-        r.site_name = hit.site_name;
+    try {
+      const filled = await backfillTodoSitesFromCallContext(
+        db,
+        rows.map((r) => ({ id: r.id, call_id: r.call_id, site_id: r.site_id ?? null }))
+      );
+      for (const r of rows) {
+        const hit = filled.get(r.id);
+        if (hit) {
+          r.site_id = hit.site_id;
+          r.site_name = hit.site_name;
+        }
       }
+    } catch (err) {
+      /* List must still render — site backfill is best-effort (seen on UAT when
+         one user had 1.5k+ open todos missing site_id). */
+      console.error("[sbm] backfillTodoSitesFromCallContext failed", err);
     }
   }
 
@@ -4763,16 +4775,17 @@ export async function listMyOpenTodos(
   if (claimAssignees) {
     const toClaim = rows.filter((r) => !(map.get(r.id) ?? []).some((a) => a.id === userId));
     if (toClaim.length > 0) {
-      await db.batch(
-        toClaim.map((r) =>
-          db
-            .prepare(
-              `INSERT OR IGNORE INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at)
-               VALUES (?, ?, NULL, datetime('now'))`
-            )
-            .bind(r.id, userId)
-        )
+      const claimStmts = toClaim.map((r) =>
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at)
+             VALUES (?, ?, NULL, datetime('now'))`
+          )
+          .bind(r.id, userId)
       );
+      for (let i = 0; i < claimStmts.length; i += D1_MAX_BATCH_STATEMENTS) {
+        await db.batch(claimStmts.slice(i, i + D1_MAX_BATCH_STATEMENTS));
+      }
       map = await getAssigneesByTodoIds(
         db,
         rows.map((r) => r.id)
