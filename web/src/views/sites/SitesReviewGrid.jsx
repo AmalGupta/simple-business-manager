@@ -693,12 +693,17 @@ export function SitesReviewGrid({
              here and nowhere else: this is the screen where a name the
              extraction misheard gets corrected. */
           title={detailsSite.name}
-          intro="Correct the name if the call got it wrong. Saving marks this site valid and adds it to the confirmed sites list."
+          intro="Correct the name if the call got it wrong. Saving marks this site valid and adds it to the confirmed sites list. Add contact opens the contacts picker."
           saveLabel="Save site"
           extraPatch={{ is_confirmed: "Y" }}
           editableName
           onClose={() => setDetailsSite(null)}
-          onSave={(patch, meta) => onDetailsSaved(detailsSite, patch, meta)}
+          onSave={(patch) => onDetailsSaved(detailsSite, patch)}
+          onAddContact={() => {
+            const site = detailsSite;
+            setDetailsSite(null);
+            setContactsSite(site);
+          }}
         />
       )}
     </>
