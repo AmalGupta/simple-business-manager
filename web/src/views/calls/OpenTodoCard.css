@@ -27,7 +27,7 @@
   margin-bottom: 0;
 }
 
-/* ── Header: call · date, then Extracted by / Extracted / Assigned ── */
+/* ── Header: call + highlighted Extracted by / Extracted / Assigned ── */
 
 .sbm-open-todo-card__top {
   display: flex;
@@ -39,7 +39,6 @@
 
 .sbm-open-todo-card__meta {
   display: flex;
-  justify-content: space-between;
   align-items: baseline;
   gap: 8px 12px;
 }
@@ -66,21 +65,18 @@
   text-decoration: none;
 }
 
-.sbm-open-todo-card__date {
-  flex: 0 0 auto;
-  font-size: 12px;
-  color: var(--color-slate);
-  white-space: nowrap;
-}
-
-/* Inline extraction meta on the top block */
+/* Highlighted meta facts strip (stays in __top) */
 .sbm-open-todo-card__meta-facts {
   margin: 0;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px 16px;
+  gap: 6px 14px;
+  padding: 6px 10px;
   font-size: 12px;
   line-height: 1.4;
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
 }
 
 .sbm-open-todo-card__meta-fact {
@@ -104,6 +100,7 @@
 .sbm-open-todo-card__meta-fact dd {
   margin: 0;
   color: var(--color-ink);
+  font-weight: 500;
   overflow-wrap: anywhere;
   word-break: break-word;
 }
@@ -180,7 +177,7 @@
   border-color: var(--color-danger);
 }
 
-/* ── Below todo text: chips then assign buttons ── */
+/* ── Below todo text: assign buttons (chips removed) ── */
 
 .sbm-open-todo-card__below-text {
   display: flex;
@@ -195,42 +192,6 @@
   flex-direction: column;
   gap: 10px;
   padding: 0 0 0 var(--sbm-todo-body-inset);
-}
-
-.sbm-open-todo-card__labels {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.sbm-open-todo-card__chip {
-  display: inline-block;
-  max-width: 100%;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--color-ink);
-  background: var(--color-canvas);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.sbm-open-todo-card__chip.is-muted {
-  color: var(--color-slate);
-  font-weight: 500;
-}
-
-.sbm-open-todo-card__chip.is-site {
-  color: var(--color-accent);
-}
-
-.sbm-open-todo-card__chip.is-urgent {
-  color: #fff;
-  background: var(--color-danger);
-  border-color: var(--color-danger);
 }
 
 /* Stacked meta (TodoFacts legacy / non-card) */

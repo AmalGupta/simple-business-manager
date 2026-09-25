@@ -1,4 +1,4 @@
-import { fmtShort, isUrgent } from "../../lib/dates.js";
+import { fmtShort } from "../../lib/dates.js";
 import "./OpenTodoCard.css";
 
 function extractedByLabel(owner) {
@@ -10,18 +10,15 @@ function extractedByLabel(owner) {
 function todoMeta(todo) {
   const assignees = todo.assignees ?? [];
   const assigneeNames = assignees.map((a) => a.name).filter(Boolean);
-  const urgent = isUrgent(todo);
   const extractedAt = todo.created_at || todo.recorded_at || null;
   return {
-    assigneeNames,
-    urgent,
     extractedBy: extractedByLabel(todo.owner),
     extractedAt: extractedAt ? fmtShort(extractedAt) : "—",
     assigned: assigneeNames.length > 0 ? assigneeNames.join(", ") : "Unassigned",
   };
 }
 
-/** Top-row strip: Extracted by / Extracted / Assigned. */
+/** Top-row strip inside sbm-open-todo-card__top: Extracted by / Extracted / Assigned. */
 export function TodoExtractionMeta({ todo }) {
   const { extractedBy, extractedAt, assigned } = todoMeta(todo);
   return (
@@ -42,34 +39,10 @@ export function TodoExtractionMeta({ todo }) {
   );
 }
 
-/** Status chips under the todo text (assignees / due). */
-export function TodoStatusChips({ todo }) {
-  const { assigneeNames, urgent } = todoMeta(todo);
-  return (
-    <div className="sbm-open-todo-card__labels" aria-label="Labels">
-      {assigneeNames.length > 0 ? (
-        assigneeNames.map((name) => (
-          <span key={name} className="sbm-open-todo-card__chip">
-            {name}
-          </span>
-        ))
-      ) : (
-        <span className="sbm-open-todo-card__chip is-muted">Unassigned</span>
-      )}
-      {todo.due_date ? (
-        <span className={`sbm-open-todo-card__chip${urgent ? " is-urgent" : ""}`}>Due {fmtShort(todo.due_date)}</span>
-      ) : null}
-    </div>
-  );
-}
-
-/**
- * Full facts block (chips + stacked meta) — kept for any non-card surfaces.
- */
+/** Full facts block (meta only) — kept for any non-card surfaces. */
 export function TodoFacts({ todo }) {
   return (
     <div className="sbm-open-todo-card__facts">
-      <TodoStatusChips todo={todo} />
       <TodoExtractionMeta todo={todo} />
     </div>
   );
