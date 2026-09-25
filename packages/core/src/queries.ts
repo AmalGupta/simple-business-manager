@@ -4,6 +4,7 @@ import { matchStaffByOwner, normalizeOwnerName, type OwnerAliasMatch } from "./a
 import { normalizeCallerPhone } from "./caller-category";
 import { SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import { pickExistingSiteId, type SiteMatchCandidate } from "./site-match";
+import { PRODUCTION_STEPS } from "./production-steps";
 import type {
   AppRequest,
   Call,
@@ -23,12 +24,23 @@ import type {
   InstallationUpdateCategory,
   MaterialShortage,
   MaterialShortageStatus,
+  ProductionJob,
+  ProductionJobProblem,
+  ProductionJobProblemStatus,
+  ProductionJobStatus,
+  ProductionJobStep,
+  ProductionJobStepStatus,
   SiteMedia,
   SiteMediaType,
   SiteTaskStatus,
+  ToolMovement,
+  ToolMovementLocation,
   Todo,
   TodoAssignee,
   TodoOwner,
+  WarehouseMovement,
+  WarehouseMovementKind,
+  WarehouseStore,
   TodoVoiceNote,
   User,
   UserRole,
@@ -889,7 +901,9 @@ export type SiteActivitySource =
   | "complaint"
   | "installation"
   | "shortage"
-  | "site_created";
+  | "site_created"
+  | "production"
+  | "warehouse";
 
 export async function touchSiteActivity(
   db: D1Database,
@@ -3611,6 +3625,8 @@ export interface NewEscalationInput {
   createdByUserId?: string | null;
   source?: EscalationSource;
   installationUpdateId?: string | null;
+  /** migration 0042: set when dual-written from a production job's "site problem". */
+  productionJobProblemId?: string | null;
 }
 
 /** Manual only — see schema.sql comment on `escalations`. Never called from the extraction path. */
@@ -3618,8 +3634,8 @@ export async function createEscalation(db: D1Database, input: NewEscalationInput
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO escalations (id, text, site_id, created_by_user_id, source, installation_update_id)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO escalations (id, text, site_id, created_by_user_id, source, installation_update_id, production_job_problem_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -3627,7 +3643,8 @@ export async function createEscalation(db: D1Database, input: NewEscalationInput
       input.siteId ?? null,
       input.createdByUserId ?? null,
       input.source ?? "admin",
-      input.installationUpdateId ?? null
+      input.installationUpdateId ?? null,
+      input.productionJobProblemId ?? null
     )
     .run();
   const row = await db.prepare(`SELECT * FROM escalations WHERE id = ?`).bind(id).first<Escalation>();
@@ -5519,4 +5536,494 @@ export async function getDashboardSummary(
     resolved_calls_count: resolvedCallsCount,
     staff_with_open_todos,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Production job tracker — migration 0042. See production-steps.ts for the
+// fixed step catalog and migrations/0042_production_warehouse.sql for the
+// design rationale. Site problems raised against a job dual-write into
+// escalations, same decoupled pattern as installation_updates' complaints
+// row (see createEscalation call in createProductionJobProblem below).
+// ---------------------------------------------------------------------------
+
+export interface ProductionJobRow extends ProductionJob {
+  site_name: string;
+}
+
+const PRODUCTION_JOB_ROW_SELECT = `
+  SELECT production_jobs.*, sites.name AS site_name
+  FROM production_jobs
+  JOIN sites ON sites.id = production_jobs.site_id
+`;
+
+export interface NewProductionJobInput {
+  siteId: string;
+  title: string;
+  surveyNote?: string | null;
+  createdByUserId: string;
+}
+
+/** Creates the job and seeds all 5 fixed steps (pending, unassigned) in one batch. */
+export async function createProductionJob(db: D1Database, input: NewProductionJobInput): Promise<ProductionJobRow> {
+  const id = crypto.randomUUID();
+  const stepStatements = PRODUCTION_STEPS.map((step) =>
+    db
+      .prepare(`INSERT INTO production_job_steps (id, job_id, step_key, step_order) VALUES (?, ?, ?, ?)`)
+      .bind(crypto.randomUUID(), id, step.key, step.order)
+  );
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO production_jobs (id, site_id, title, survey_note, created_by_user_id) VALUES (?, ?, ?, ?, ?)`
+      )
+      .bind(id, input.siteId, input.title.trim(), input.surveyNote?.trim() || null, input.createdByUserId),
+    ...stepStatements,
+  ]);
+  await touchSiteActivity(db, input.siteId, { source: "production", refId: id });
+  const row = await getProductionJobById(db, id);
+  return row!;
+}
+
+export async function getProductionJobById(db: D1Database, id: string): Promise<ProductionJobRow | null> {
+  const row = await db
+    .prepare(`${PRODUCTION_JOB_ROW_SELECT} WHERE production_jobs.id = ?`)
+    .bind(id)
+    .first<ProductionJobRow>();
+  return row ?? null;
+}
+
+export async function listProductionJobs(db: D1Database, status?: ProductionJobStatus | null): Promise<ProductionJobRow[]> {
+  const scoped = status ? `WHERE production_jobs.status = ?` : "";
+  const stmt = db.prepare(`${PRODUCTION_JOB_ROW_SELECT} ${scoped} ORDER BY production_jobs.created_at DESC`);
+  const { results } = await (status ? stmt.bind(status) : stmt).all<ProductionJobRow>();
+  return results;
+}
+
+export interface ProductionJobStepRow extends ProductionJobStep {
+  assignee_name: string | null;
+  completed_by_name: string | null;
+}
+
+const PRODUCTION_JOB_STEP_ROW_SELECT = `
+  SELECT production_job_steps.*, assignee.name AS assignee_name, completer.name AS completed_by_name
+  FROM production_job_steps
+  LEFT JOIN users AS assignee ON assignee.id = production_job_steps.assigned_to_user_id
+  LEFT JOIN users AS completer ON completer.id = production_job_steps.completed_by_user_id
+`;
+
+export async function listProductionJobSteps(db: D1Database, jobId: string): Promise<ProductionJobStepRow[]> {
+  const { results } = await db
+    .prepare(`${PRODUCTION_JOB_STEP_ROW_SELECT} WHERE production_job_steps.job_id = ? ORDER BY production_job_steps.step_order`)
+    .bind(jobId)
+    .all<ProductionJobStepRow>();
+  return results;
+}
+
+export async function getProductionJobStepById(db: D1Database, id: string): Promise<ProductionJobStepRow | null> {
+  const row = await db
+    .prepare(`${PRODUCTION_JOB_STEP_ROW_SELECT} WHERE production_job_steps.id = ?`)
+    .bind(id)
+    .first<ProductionJobStepRow>();
+  return row ?? null;
+}
+
+export interface ProductionJobProblemRow extends ProductionJobProblem {
+  raised_by_name: string | null;
+  resolved_by_name: string | null;
+}
+
+const PRODUCTION_JOB_PROBLEM_ROW_SELECT = `
+  SELECT production_job_problems.*, raiser.name AS raised_by_name, resolver.name AS resolved_by_name
+  FROM production_job_problems
+  LEFT JOIN users AS raiser ON raiser.id = production_job_problems.raised_by_user_id
+  LEFT JOIN users AS resolver ON resolver.id = production_job_problems.resolved_by_user_id
+`;
+
+export async function listProductionJobProblems(db: D1Database, jobId: string): Promise<ProductionJobProblemRow[]> {
+  const { results } = await db
+    .prepare(
+      `${PRODUCTION_JOB_PROBLEM_ROW_SELECT} WHERE production_job_problems.job_id = ? ORDER BY production_job_problems.raised_at DESC`
+    )
+    .bind(jobId)
+    .all<ProductionJobProblemRow>();
+  return results;
+}
+
+export async function getProductionJobProblemById(db: D1Database, id: string): Promise<ProductionJobProblemRow | null> {
+  const row = await db
+    .prepare(`${PRODUCTION_JOB_PROBLEM_ROW_SELECT} WHERE production_job_problems.id = ?`)
+    .bind(id)
+    .first<ProductionJobProblemRow>();
+  return row ?? null;
+}
+
+/** "My production steps" home tile — steps currently assigned to one staff member across every job. `forUserId` omitted = every currently-assigned step business-wide (admin view). Mirrors listOpenSiteTasks. */
+export interface OpenProductionStepRow extends ProductionJobStepRow {
+  job_id: string;
+  job_title: string;
+  job_status: ProductionJobStatus;
+  site_id: string;
+  site_name: string;
+}
+
+export async function listOpenProductionSteps(db: D1Database, forUserId?: string | null): Promise<OpenProductionStepRow[]> {
+  const scoped = forUserId ? `AND production_job_steps.assigned_to_user_id = ?` : "";
+  const stmt = db.prepare(
+    `SELECT production_job_steps.*, assignee.name AS assignee_name, completer.name AS completed_by_name,
+            production_jobs.id AS job_id, production_jobs.title AS job_title, production_jobs.status AS job_status,
+            production_jobs.site_id AS site_id, sites.name AS site_name
+     FROM production_job_steps
+     JOIN production_jobs ON production_jobs.id = production_job_steps.job_id
+     JOIN sites ON sites.id = production_jobs.site_id
+     LEFT JOIN users AS assignee ON assignee.id = production_job_steps.assigned_to_user_id
+     LEFT JOIN users AS completer ON completer.id = production_job_steps.completed_by_user_id
+     WHERE production_job_steps.status = 'assigned' ${scoped}
+     ORDER BY production_job_steps.assigned_at DESC`
+  );
+  const bound = forUserId ? stmt.bind(forUserId) : stmt;
+  const { results } = await bound.all<OpenProductionStepRow>();
+  return results;
+}
+
+/** Same "currently holds or completed another step on this job" permission model as isUserActiveOnSiteTasks — lets Tanseem hand a step to a junior without an admin. */
+export async function isUserActiveOnProductionJob(db: D1Database, userId: string, jobId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM production_job_steps
+       WHERE job_id = ? AND assigned_to_user_id = ? AND status IN ('assigned', 'done')
+       LIMIT 1`
+    )
+    .bind(jobId, userId)
+    .first();
+  return row !== null;
+}
+
+/** Assign/reassign one step. Clears any prior blocked note — assigning is how a blocked step gets picked back up. */
+export async function assignProductionStep(
+  db: D1Database,
+  id: string,
+  input: { assignedToUserId: string; assignedByUserId: string }
+): Promise<ProductionJobStepRow | null> {
+  await db
+    .prepare(
+      `UPDATE production_job_steps
+       SET status = 'assigned', assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now'),
+           blocked_note = NULL, blocked_at = NULL
+       WHERE id = ?`
+    )
+    .bind(input.assignedToUserId, input.assignedByUserId, id)
+    .run();
+  const row = await getProductionJobStepById(db, id);
+  if (row) {
+    const job = await getProductionJobById(db, row.job_id);
+    if (job) await touchSiteActivity(db, job.site_id, { source: "production", refId: id });
+  }
+  return row;
+}
+
+/** Marks a step done. When it's the last step (glass integration), flips the job to ready_for_dispatch so it surfaces in the warehouse dispatch queue. */
+export async function completeProductionStep(
+  db: D1Database,
+  id: string,
+  completedByUserId: string,
+  note?: string | null
+): Promise<ProductionJobStepRow | null> {
+  await db
+    .prepare(
+      `UPDATE production_job_steps
+       SET status = 'done', completed_at = datetime('now'), completed_by_user_id = ?, note = COALESCE(?, note)
+       WHERE id = ?`
+    )
+    .bind(completedByUserId, note?.trim() || null, id)
+    .run();
+  const row = await getProductionJobStepById(db, id);
+  if (!row) return null;
+  const job = await getProductionJobById(db, row.job_id);
+  if (job) {
+    await touchSiteActivity(db, job.site_id, { source: "production", refId: id });
+    if (row.step_order === PRODUCTION_STEPS.length && job.status === "active") {
+      await db.prepare(`UPDATE production_jobs SET status = 'ready_for_dispatch' WHERE id = ?`).bind(job.id).run();
+    }
+  }
+  return row;
+}
+
+export async function blockProductionStep(db: D1Database, id: string, blockedNote: string): Promise<ProductionJobStepRow | null> {
+  await db
+    .prepare(`UPDATE production_job_steps SET status = 'blocked', blocked_note = ?, blocked_at = datetime('now') WHERE id = ?`)
+    .bind(blockedNote.trim(), id)
+    .run();
+  return getProductionJobStepById(db, id);
+}
+
+export interface NewProductionJobProblemInput {
+  jobId: string;
+  siteId: string;
+  description: string;
+  raisedByUserId: string;
+}
+
+/** Raise a site problem — not gated on step order (Tanseem may need to go to site at any point). Dual-writes an escalation for admin home-tile visibility. */
+export async function createProductionJobProblem(
+  db: D1Database,
+  input: NewProductionJobProblemInput
+): Promise<ProductionJobProblemRow> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO production_job_problems (id, job_id, site_id, description, raised_by_user_id)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+    .bind(id, input.jobId, input.siteId, input.description.trim(), input.raisedByUserId)
+    .run();
+  await touchSiteActivity(db, input.siteId, { source: "production", refId: id });
+
+  const job = await getProductionJobById(db, input.jobId);
+  await createEscalation(db, {
+    text: `Site problem — "${job?.title ?? "production job"}": ${input.description.trim()}`,
+    siteId: input.siteId,
+    createdByUserId: input.raisedByUserId,
+    source: "production",
+    productionJobProblemId: id,
+  });
+
+  const row = await getProductionJobProblemById(db, id);
+  return row!;
+}
+
+export async function resolveProductionJobProblem(
+  db: D1Database,
+  id: string,
+  resolvedByUserId: string,
+  resolutionNote?: string | null
+): Promise<ProductionJobProblemRow | null> {
+  await db
+    .prepare(
+      `UPDATE production_job_problems
+       SET status = 'resolved', resolved_by_user_id = ?, resolved_at = datetime('now'), resolution_note = ?
+       WHERE id = ?`
+    )
+    .bind(resolvedByUserId, resolutionNote?.trim() || null, id)
+    .run();
+  return getProductionJobProblemById(db, id);
+}
+
+// ---------------------------------------------------------------------------
+// Warehouse register — migration 0042. A movement ledger, not a stock
+// table: rows are never edited, only voided and re-entered. Stock is a
+// read-time SUM(in) - SUM(out) - SUM(dispatch) per store/item/batch — see
+// listWarehouseStock.
+// ---------------------------------------------------------------------------
+
+export async function listWarehouseStores(db: D1Database): Promise<WarehouseStore[]> {
+  const { results } = await db.prepare(`SELECT * FROM warehouse_stores ORDER BY label`).all<WarehouseStore>();
+  return results;
+}
+
+export interface WarehouseMovementRow extends WarehouseMovement {
+  store_label: string;
+  site_name: string | null;
+  created_by_name: string | null;
+  job_title: string | null;
+}
+
+const WAREHOUSE_MOVEMENT_ROW_SELECT = `
+  SELECT warehouse_movements.*, warehouse_stores.label AS store_label, sites.name AS site_name,
+         creator.name AS created_by_name, production_jobs.title AS job_title
+  FROM warehouse_movements
+  JOIN warehouse_stores ON warehouse_stores.id = warehouse_movements.store_id
+  LEFT JOIN sites ON sites.id = warehouse_movements.site_id
+  LEFT JOIN users AS creator ON creator.id = warehouse_movements.created_by_user_id
+  LEFT JOIN production_jobs ON production_jobs.id = warehouse_movements.production_job_id
+`;
+
+export interface NewWarehouseMovementInput {
+  storeId: string;
+  kind: WarehouseMovementKind;
+  item: string;
+  quantity: number;
+  unit?: string | null;
+  batchNo?: string | null;
+  siteId?: string | null;
+  productionJobId?: string | null;
+  supplier?: string | null;
+  machineOrArea?: string | null;
+  note?: string | null;
+  createdByUserId: string;
+}
+
+/** Dispatch against a job that's `ready_for_dispatch` closes it out to `dispatched` — the warehouse-side half of the production→warehouse handoff in the approved diagram. */
+export async function createWarehouseMovement(db: D1Database, input: NewWarehouseMovementInput): Promise<WarehouseMovementRow> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO warehouse_movements
+       (id, store_id, kind, item, quantity, unit, batch_no, site_id, production_job_id, supplier, machine_or_area, note, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      id,
+      input.storeId,
+      input.kind,
+      input.item.trim(),
+      input.quantity,
+      input.unit?.trim() || null,
+      input.batchNo?.trim() || null,
+      input.siteId ?? null,
+      input.productionJobId ?? null,
+      input.supplier?.trim() || null,
+      input.machineOrArea?.trim() || null,
+      input.note?.trim() || null,
+      input.createdByUserId
+    )
+    .run();
+  if (input.siteId) await touchSiteActivity(db, input.siteId, { source: "warehouse", refId: id });
+  if (input.kind === "dispatch" && input.productionJobId) {
+    await db
+      .prepare(`UPDATE production_jobs SET status = 'dispatched' WHERE id = ? AND status = 'ready_for_dispatch'`)
+      .bind(input.productionJobId)
+      .run();
+  }
+  const row = await db
+    .prepare(`${WAREHOUSE_MOVEMENT_ROW_SELECT} WHERE warehouse_movements.id = ?`)
+    .bind(id)
+    .first<WarehouseMovementRow>();
+  return row!;
+}
+
+export interface ListWarehouseMovementsFilter {
+  storeId?: string | null;
+  kind?: WarehouseMovementKind | null;
+  siteId?: string | null;
+  includeVoided?: boolean;
+  limit?: number;
+}
+
+export async function listWarehouseMovements(
+  db: D1Database,
+  filter: ListWarehouseMovementsFilter = {}
+): Promise<WarehouseMovementRow[]> {
+  const clauses: string[] = [];
+  const binds: unknown[] = [];
+  if (filter.storeId) {
+    clauses.push("warehouse_movements.store_id = ?");
+    binds.push(filter.storeId);
+  }
+  if (filter.kind) {
+    clauses.push("warehouse_movements.kind = ?");
+    binds.push(filter.kind);
+  }
+  if (filter.siteId) {
+    clauses.push("warehouse_movements.site_id = ?");
+    binds.push(filter.siteId);
+  }
+  if (!filter.includeVoided) clauses.push("warehouse_movements.status = 'active'");
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const limit = Math.min(Math.max(filter.limit ?? 200, 1), 500);
+  const { results } = await db
+    .prepare(`${WAREHOUSE_MOVEMENT_ROW_SELECT} ${where} ORDER BY warehouse_movements.created_at DESC LIMIT ?`)
+    .bind(...binds, limit)
+    .all<WarehouseMovementRow>();
+  return results;
+}
+
+/** Never edits a movement's content — flips it to voided so the ledger stays an honest history; the correcting entry is a fresh row. */
+export async function voidWarehouseMovement(db: D1Database, id: string, voidedByUserId: string): Promise<WarehouseMovementRow | null> {
+  await db
+    .prepare(
+      `UPDATE warehouse_movements SET status = 'voided', voided_by_user_id = ?, voided_at = datetime('now')
+       WHERE id = ? AND status = 'active'`
+    )
+    .bind(voidedByUserId, id)
+    .run();
+  return db
+    .prepare(`${WAREHOUSE_MOVEMENT_ROW_SELECT} WHERE warehouse_movements.id = ?`)
+    .bind(id)
+    .first<WarehouseMovementRow>();
+}
+
+export interface WarehouseStockRow {
+  store_id: string;
+  store_label: string;
+  item: string;
+  batch_no: string | null;
+  unit: string | null;
+  balance: number;
+}
+
+/** Read-time stock: SUM(in) - SUM(out) - SUM(dispatch) - SUM(maintenance), per store/item/batch, over active rows only. A negative balance means a missed "in" entry — the dashboard flags it rather than hiding it. */
+export async function listWarehouseStock(db: D1Database, storeId?: string | null): Promise<WarehouseStockRow[]> {
+  const scoped = storeId ? `AND warehouse_movements.store_id = ?` : "";
+  const stmt = db.prepare(
+    `SELECT warehouse_movements.store_id AS store_id, warehouse_stores.label AS store_label,
+            warehouse_movements.item AS item, warehouse_movements.batch_no AS batch_no,
+            MAX(warehouse_movements.unit) AS unit,
+            SUM(CASE WHEN warehouse_movements.kind = 'in' THEN warehouse_movements.quantity
+                     ELSE -warehouse_movements.quantity END) AS balance
+     FROM warehouse_movements
+     JOIN warehouse_stores ON warehouse_stores.id = warehouse_movements.store_id
+     WHERE warehouse_movements.status = 'active' ${scoped}
+     GROUP BY warehouse_movements.store_id, warehouse_movements.item, warehouse_movements.batch_no
+     ORDER BY warehouse_stores.label, warehouse_movements.item, warehouse_movements.batch_no`
+  );
+  const bound = storeId ? stmt.bind(storeId) : stmt;
+  const { results } = await bound.all<WarehouseStockRow>();
+  return results;
+}
+
+/** Distinct items previously logged for a store — the "type and it's suggested" affordance in the approved diagram, no separate item master to set up first. */
+export async function listWarehouseItemSuggestions(db: D1Database, storeId: string): Promise<string[]> {
+  const { results } = await db
+    .prepare(`SELECT DISTINCT item FROM warehouse_movements WHERE store_id = ? ORDER BY item`)
+    .bind(storeId)
+    .all<{ item: string }>();
+  return results.map((r) => r.item);
+}
+
+// --- Tools — simple out/back log, no per-tool inventory id in this pass. ---
+
+export interface ToolMovementRow extends ToolMovement {
+  taken_by_name: string | null;
+  site_name: string | null;
+}
+
+const TOOL_MOVEMENT_ROW_SELECT = `
+  SELECT tool_movements.*, taker.name AS taken_by_name, sites.name AS site_name
+  FROM tool_movements
+  LEFT JOIN users AS taker ON taker.id = tool_movements.taken_by_user_id
+  LEFT JOIN sites ON sites.id = tool_movements.site_id
+`;
+
+export interface NewToolMovementInput {
+  toolName: string;
+  takenByUserId: string;
+  location: ToolMovementLocation;
+  siteId?: string | null;
+  note?: string | null;
+  createdByUserId: string;
+}
+
+export async function createToolMovement(db: D1Database, input: NewToolMovementInput): Promise<ToolMovementRow> {
+  const id = crypto.randomUUID();
+  await db
+    .prepare(
+      `INSERT INTO tool_movements (id, tool_name, taken_by_user_id, location, site_id, note, created_by_user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(id, input.toolName.trim(), input.takenByUserId, input.location, input.siteId ?? null, input.note?.trim() || null, input.createdByUserId)
+    .run();
+  const row = await db.prepare(`${TOOL_MOVEMENT_ROW_SELECT} WHERE tool_movements.id = ?`).bind(id).first<ToolMovementRow>();
+  return row!;
+}
+
+export async function listOpenToolMovements(db: D1Database): Promise<ToolMovementRow[]> {
+  const { results } = await db
+    .prepare(`${TOOL_MOVEMENT_ROW_SELECT} WHERE tool_movements.returned_at IS NULL ORDER BY tool_movements.taken_at DESC`)
+    .all<ToolMovementRow>();
+  return results;
+}
+
+export async function returnToolMovement(db: D1Database, id: string): Promise<ToolMovementRow | null> {
+  await db.prepare(`UPDATE tool_movements SET returned_at = datetime('now') WHERE id = ?`).bind(id).run();
+  return db.prepare(`${TOOL_MOVEMENT_ROW_SELECT} WHERE tool_movements.id = ?`).bind(id).first<ToolMovementRow>();
 }
