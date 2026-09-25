@@ -28,6 +28,8 @@ import {
   getConfirmedSitesSummary,
   getDashboardSummary,
   listMyOpenTodos,
+  listOpenTodosByAssigneeBucket,
+  countOpenTodosByAssigneeBucket,
   getLatestVoiceNotesByTodoIds,
   getSitesNeedingAttention,
   getTodoById,
@@ -380,6 +382,41 @@ export async function handleGetMyOpenTodos(request: Request, env: Env): Promise<
       viewerName: user?.name ?? null,
     })
   );
+}
+
+/**
+ * Admin Open tasks — paginated open todos by assignee bucket
+ * (mine | unassigned | staff).
+ */
+export async function handleGetOpenTodos(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const url = new URL(request.url);
+  const bucket = url.searchParams.get("bucket")?.trim() || "mine";
+  if (bucket !== "mine" && bucket !== "unassigned" && bucket !== "staff") {
+    return json({ error: "bucket must be mine, unassigned, or staff" }, 400);
+  }
+  const limitParam = Number(url.searchParams.get("limit"));
+  const offsetParam = Number(url.searchParams.get("offset"));
+  const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 20;
+  const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 0;
+  return json(
+    await listOpenTodosByAssigneeBucket(env.DB, {
+      viewerUserId: gate.user_id,
+      bucket,
+      limit,
+      offset,
+    })
+  );
+}
+
+/**
+ * Admin Open tasks tab badge counts (mine / unassigned / staff / total).
+ */
+export async function handleGetOpenTodosCounts(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  return json(await countOpenTodosByAssigneeBucket(env.DB, gate.user_id));
 }
 
 /**
