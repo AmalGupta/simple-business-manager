@@ -7,12 +7,12 @@ import {
   OPEN_TODO_PAGE_SIZE,
   OpenTodoCard,
   OpenTodoLoadMore,
+  groupOpenTodosByCall,
   sortTodosByRecordedAtDesc,
 } from "./OpenTodoCard.jsx";
 
 /* Personal queue — open call todos for this user (staff + admin).
-   Uses OpenTodoCard (facts: extracted by / date / assignees). Staff: mark done only.
-   Admin (canManage): also Assign / site. */
+   One card per call; nested todos. Staff: mark done only. Admin: Assign / site. */
 export function MyOpenTodosView({
   todos,
   onBack,
@@ -33,13 +33,14 @@ export function MyOpenTodosView({
     () => sortTodosByRecordedAtDesc(todos, (td) => td.recorded_at),
     [todos]
   );
+  const callGroups = useMemo(() => groupOpenTodosByCall(sorted), [sorted]);
 
   useEffect(() => {
     setVisibleCount(OPEN_TODO_PAGE_SIZE);
   }, [todos]);
 
-  const paged = sorted.slice(0, visibleCount);
-  const remaining = Math.max(0, sorted.length - visibleCount);
+  const paged = callGroups.slice(0, visibleCount);
+  const remaining = Math.max(0, callGroups.length - visibleCount);
 
   const emptyCopy = canManage
     ? "Nothing assigned to you or identified for you right now."
@@ -52,21 +53,21 @@ export function MyOpenTodosView({
         My call tasks
       </h1>
 
-      {sorted.length === 0 ? (
+      {callGroups.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>{emptyCopy}</p>
         </Card>
       ) : (
         <Card style={{ padding: 0 }}>
-          {paged.map((td) => (
+          {paged.map((group) => (
             <OpenTodoCard
-              key={td.id}
-              todo={td}
-              callName={td.client_name}
-              recordedAt={td.recorded_at}
+              key={group.callId}
+              todos={group.todos}
+              callName={group.callName}
+              recordedAt={group.recordedAt}
               onOpenCall={onOpenCall}
               onToggle={onToggle}
-              busy={busyIds?.has(td.id)}
+              busyIds={busyIds}
               staffRoster={staffRoster}
               currentUser={currentUser}
               onAssign={canManage && onAssign ? onAssign : undefined}
