@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../../theme.js";
+import { addDaysIso, todayIso } from "../../lib/dates.js";
 import { fetchOpenTodos, fetchOpenTodosCounts } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
+import { TEXT_INPUT_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
 import { OPEN_TODO_PAGE_SIZE, OpenTodoCard, OpenTodoLoadMore } from "./OpenTodoCard.jsx";
+
+const DATE_FIELD = { ...TEXT_INPUT_STYLE, minHeight: 36, fontSize: 13 };
 
 const OPEN_TABS_CSS = `
 .sbm-open-todos-tabs {
@@ -37,6 +41,39 @@ const OPEN_TABS_CSS = `
   border-top-left-radius: 6px;
   border-top-right-radius: 6px;
 }
+.sbm-open-todos-tab--blocked {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+.sbm-open-todos-tab--blocked[aria-selected="true"] {
+  background: var(--color-danger-bg);
+  border-color: var(--color-line);
+  color: var(--color-danger);
+}
+.sbm-open-todos-date-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 10px 14px;
+  margin: 0 0 1rem;
+}
+.sbm-open-todos-date-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.sbm-open-todos-date-filter__hint {
+  font-size: 12px;
+  color: var(--color-slate);
+  margin: 0 0 0.75rem;
+}
+.sbm-open-todos-older {
+  display: flex;
+  justify-content: center;
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--color-line);
+}
 `;
 
 const BUCKETS = [
@@ -53,9 +90,15 @@ const EMPTY_COPY = {
   blocked: "No open tasks with unresolved items right now.",
 };
 
+/** Default Open tasks window: last 7 calendar days (inclusive), by identification date. */
+export function defaultOpenTodosDateRange() {
+  const dateTo = todayIso();
+  return { dateFrom: addDaysIso(dateTo, -6), dateTo };
+}
+
 /**
- * Admin Open tasks — assignee bookmarks + Blocked (unresolved), server-paginated, newest first.
- * Cards: complete + Assign to me / Assign·Reassign / Assign to Site.
+ * Admin Open tasks — assignee bookmarks + Blocked (unresolved), server-paginated.
+ * Default: last 7 days by task identification date; From/To filter or “older” to go back.
  */
 export function OpenTodosView({
   staffRoster,
@@ -69,7 +112,12 @@ export function OpenTodosView({
   refreshKey = 0,
   initialBucket = "mine",
 }) {
+  const initialRange = defaultOpenTodosDateRange();
   const [bucket, setBucket] = useState(initialBucket);
+  const [dateFrom, setDateFrom] = useState(initialRange.dateFrom);
+  const [dateTo, setDateTo] = useState(initialRange.dateTo);
+  const [draftFrom, setDraftFrom] = useState(initialRange.dateFrom);
+  const [draftTo, setDraftTo] = useState(initialRange.dateTo);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState({ mine: 0, unassigned: 0, staff: 0, blocked: 0, total: 0 });
@@ -78,7 +126,7 @@ export function OpenTodosView({
   const [siteTodo, setSiteTodo] = useState(null);
 
   const loadCounts = useCallback(() => {
-    return fetchOpenTodosCounts()
+    return fetchOpenTodosCounts({ dateFrom, dateTo })
       .then((data) => {
         setCounts({
           mine: data?.mine ?? 0,
@@ -89,7 +137,7 @@ export function OpenTodosView({
         });
       })
       .catch((err) => console.error("[sbm] open-todos counts failed", err));
-  }, []);
+  }, [dateFrom, dateTo]);
 
   const loadPage = useCallback(
     async (bucketId, offset, { append } = {}) => {
@@ -100,6 +148,8 @@ export function OpenTodosView({
           bucket: bucketId,
           limit: OPEN_TODO_PAGE_SIZE,
           offset,
+          dateFrom,
+          dateTo,
         });
         const next = Array.isArray(page?.items) ? page.items : [];
         setTotal(Number(page?.total) || 0);
@@ -112,7 +162,7 @@ export function OpenTodosView({
         setLoadingMore(false);
       }
     },
-    []
+    [dateFrom, dateTo]
   );
 
   useEffect(() => {
@@ -120,7 +170,30 @@ export function OpenTodosView({
     setTotal(0);
     loadPage(bucket, 0, { append: false });
     loadCounts();
-  }, [bucket, refreshKey, loadPage, loadCounts]);
+  }, [bucket, dateFrom, dateTo, refreshKey, loadPage, loadCounts]);
+
+  const applyDateFilter = () => {
+    const nextFrom = draftFrom || "";
+    const nextTo = draftTo || "";
+    setDateFrom(nextFrom);
+    setDateTo(nextTo);
+  };
+
+  const resetLast7Days = () => {
+    const range = defaultOpenTodosDateRange();
+    setDraftFrom(range.dateFrom);
+    setDraftTo(range.dateTo);
+    setDateFrom(range.dateFrom);
+    setDateTo(range.dateTo);
+  };
+
+  /** Extend From back another 7 days so the user can page into older identification dates. */
+  const showOlderWeek = () => {
+    if (!dateFrom) return;
+    const nextFrom = addDaysIso(dateFrom, -7);
+    setDraftFrom(nextFrom);
+    setDateFrom(nextFrom);
+  };
 
   const patchLocalTodo = (todoId, patch) => {
     setItems((prev) => prev.map((td) => (td.id === todoId ? { ...td, ...patch } : td)));
@@ -171,24 +244,60 @@ export function OpenTodosView({
 
   const remaining = Math.max(0, total - items.length);
   const empty = EMPTY_COPY[bucket] ?? "Nothing here right now.";
+  const canShowOlder = Boolean(dateFrom);
+  const rangeLabel =
+    dateFrom || dateTo
+      ? `${dateFrom || "…"} → ${dateTo || "…"}`
+      : "All dates";
 
   return (
     <div>
       <style>{OPEN_TABS_CSS}</style>
       <BackLink onClick={onBack}>Back</BackLink>
-      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
+      <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 0.5rem" }}>
         Open tasks
       </h1>
+      <p className="sbm-open-todos-date-filter__hint">
+        Filtered by task identification date (Extracted). Default last 7 days · {rangeLabel}
+      </p>
+
+      <div className="sbm-open-todos-date-filter">
+        <label>
+          <span style={{ fontSize: 11, color: t.edge2, fontWeight: 600 }}>From</span>
+          <input
+            type="date"
+            value={draftFrom}
+            onChange={(e) => setDraftFrom(e.target.value)}
+            style={DATE_FIELD}
+          />
+        </label>
+        <label>
+          <span style={{ fontSize: 11, color: t.edge2, fontWeight: 600 }}>To</span>
+          <input
+            type="date"
+            value={draftTo}
+            onChange={(e) => setDraftTo(e.target.value)}
+            style={DATE_FIELD}
+          />
+        </label>
+        <button type="button" onClick={applyDateFilter} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 36 }}>
+          Apply
+        </button>
+        <button type="button" onClick={resetLast7Days} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 36 }}>
+          Last 7 days
+        </button>
+      </div>
 
       <div className="sbm-open-todos-tabs" role="tablist" aria-label="Open tasks">
         {BUCKETS.map((tab) => {
           const n = counts[tab.id] ?? 0;
+          const blockedClass = tab.id === "blocked" ? " sbm-open-todos-tab--blocked" : "";
           return (
             <button
               key={tab.id}
               type="button"
               role="tab"
-              className="sbm-open-todos-tab"
+              className={`sbm-open-todos-tab${blockedClass}`}
               aria-selected={bucket === tab.id}
               onClick={() => setBucket(tab.id)}
             >
@@ -204,6 +313,15 @@ export function OpenTodosView({
       ) : items.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>{empty}</p>
+          {canShowOlder ? (
+            <button
+              type="button"
+              onClick={showOlderWeek}
+              style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 36, marginTop: 12 }}
+            >
+              Show older tasks
+            </button>
+          ) : null}
         </Card>
       ) : (
         <Card style={{ padding: 0 }}>
@@ -227,6 +345,17 @@ export function OpenTodosView({
             onLoadMore={() => loadPage(bucket, items.length, { append: true })}
           />
           {loadingMore ? <p style={{ fontSize: 13, color: t.edge2, padding: "8px 12px" }}>Loading…</p> : null}
+          {!loadingMore && remaining === 0 && canShowOlder ? (
+            <div className="sbm-open-todos-older">
+              <button
+                type="button"
+                onClick={showOlderWeek}
+                style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 36, padding: "0 16px" }}
+              >
+                Show older tasks
+              </button>
+            </div>
+          ) : null}
         </Card>
       )}
 

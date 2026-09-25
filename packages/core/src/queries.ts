@@ -4489,6 +4489,10 @@ export interface ListOpenTodosByBucketOptions {
   bucket: OpenTodoAssigneeBucket;
   limit?: number;
   offset?: number;
+  /** Inclusive yyyy-mm-dd on task identification date (todos.created_at, else call recorded_at). */
+  dateFrom?: string | null;
+  /** Inclusive yyyy-mm-dd on task identification date. */
+  dateTo?: string | null;
 }
 
 export interface OpenTodosPage {
@@ -4627,6 +4631,30 @@ const OPEN_TODO_CLIENT_NAME_SQL = `COALESCE(
 
 const OPEN_TODO_HAS_UNRESOLVED_SQL = `(calls.unresolved IS NOT NULL AND calls.unresolved != '' AND calls.unresolved != '[]')`;
 
+/** Identification date — when the todo was extracted (fallback: call recorded_at). */
+const OPEN_TODO_IDENTIFIED_DAY_SQL = `substr(COALESCE(todos.created_at, calls.recorded_at), 1, 10)`;
+
+const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function openTodoDateRangeClause(dateFrom?: string | null, dateTo?: string | null): {
+  sql: string;
+  binds: unknown[];
+} {
+  const binds: unknown[] = [];
+  const parts: string[] = [];
+  const from = dateFrom && ISO_DAY_RE.test(dateFrom) ? dateFrom : null;
+  const to = dateTo && ISO_DAY_RE.test(dateTo) ? dateTo : null;
+  if (from) {
+    parts.push(`${OPEN_TODO_IDENTIFIED_DAY_SQL} >= ?`);
+    binds.push(from);
+  }
+  if (to) {
+    parts.push(`${OPEN_TODO_IDENTIFIED_DAY_SQL} <= ?`);
+    binds.push(to);
+  }
+  return { sql: parts.length ? ` AND ${parts.join(" AND ")}` : "", binds };
+}
+
 function openTodoBucketWhere(bucket: OpenTodoAssigneeBucket, viewerUserId: string): { sql: string; binds: unknown[] } {
   const base = `todos.status = 'open' AND calls.deleted_at IS NULL`;
   if (bucket === "mine") {
@@ -4675,7 +4703,10 @@ export async function listOpenTodosByAssigneeBucket(
 ): Promise<OpenTodosPage> {
   const limit = Math.min(Math.max(1, opts.limit ?? 20), 100);
   const offset = Math.max(0, opts.offset ?? 0);
-  const { sql: whereSql, binds: whereBinds } = openTodoBucketWhere(opts.bucket, opts.viewerUserId);
+  const { sql: bucketSql, binds: bucketBinds } = openTodoBucketWhere(opts.bucket, opts.viewerUserId);
+  const { sql: dateSql, binds: dateBinds } = openTodoDateRangeClause(opts.dateFrom, opts.dateTo);
+  const whereSql = `${bucketSql}${dateSql}`;
+  const whereBinds = [...bucketBinds, ...dateBinds];
 
   const countRow = await db
     .prepare(
@@ -4712,7 +4743,7 @@ export async function listOpenTodosByAssigneeBucket(
        LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
        LEFT JOIN sites AS todo_sites ON todo_sites.id = todos.site_id
        WHERE ${whereSql}
-       ORDER BY calls.recorded_at DESC, todos.id DESC
+       ORDER BY COALESCE(todos.created_at, calls.recorded_at) DESC, todos.id DESC
        LIMIT ? OFFSET ?`
     )
     .bind(...whereBinds, limit, offset)
@@ -4761,11 +4792,13 @@ export async function listOpenTodosByAssigneeBucket(
   return { items, total, limit, offset };
 }
 
-/** Tab badge counts for admin Open tasks (same partition as the list). */
+/** Tab badge counts for admin Open tasks (same partition + date window as the list). */
 export async function countOpenTodosByAssigneeBucket(
   db: D1Database,
-  viewerUserId: string
+  viewerUserId: string,
+  opts: { dateFrom?: string | null; dateTo?: string | null } = {}
 ): Promise<OpenTodoBucketCounts> {
+  const { sql: dateSql, binds: dateBinds } = openTodoDateRangeClause(opts.dateFrom, opts.dateTo);
   const [mine, unassigned, staff, blocked] = await Promise.all(
     (["mine", "unassigned", "staff", "blocked"] as const).map(async (bucket) => {
       const { sql, binds } = openTodoBucketWhere(bucket, viewerUserId);
@@ -4774,9 +4807,9 @@ export async function countOpenTodosByAssigneeBucket(
           `SELECT COUNT(*) AS n
            FROM todos
            JOIN calls ON calls.id = todos.call_id
-           WHERE ${sql}`
+           WHERE ${sql}${dateSql}`
         )
-        .bind(...binds)
+        .bind(...binds, ...dateBinds)
         .first<{ n: number }>();
       return Number(row?.n) || 0;
     })

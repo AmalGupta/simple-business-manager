@@ -156,20 +156,33 @@ export async function fetchMyOpenTodos({ forUserId } = {}) {
 
 /**
  * Admin Open tasks — paginated by assignee bucket (mine | unassigned | staff | blocked).
+ * Optional date_from / date_to (yyyy-mm-dd) filter on task identification date.
  * Returns { items, total, limit, offset }.
  */
-export async function fetchOpenTodos({ bucket = "mine", limit = 20, offset = 0 } = {}) {
+export async function fetchOpenTodos({
+  bucket = "mine",
+  limit = 20,
+  offset = 0,
+  dateFrom = "",
+  dateTo = "",
+} = {}) {
   const params = new URLSearchParams({
     bucket,
     limit: String(limit),
     offset: String(offset),
   });
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
   return fetchJSON(`/api/open-todos?${params}`);
 }
 
-/** Admin Open tasks tab badge counts: { mine, unassigned, staff, total }. */
-export async function fetchOpenTodosCounts() {
-  return fetchJSON("/api/open-todos/counts");
+/** Admin Open tasks tab badge counts — same optional date window as the list. */
+export async function fetchOpenTodosCounts({ dateFrom = "", dateTo = "" } = {}) {
+  const params = new URLSearchParams();
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  const q = params.toString();
+  return fetchJSON(`/api/open-todos/counts${q ? `?${q}` : ""}`);
 }
 
 /* Single-call fetch, on demand — the bulk fetchCalls() list is never loaded

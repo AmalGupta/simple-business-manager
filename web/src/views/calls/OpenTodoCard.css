@@ -9,7 +9,6 @@
   padding: 14px 14px 12px;
   border-bottom: 1px solid var(--color-line);
   box-sizing: border-box;
-  background: var(--color-surface, #fff);
 }
 
 .sbm-open-todo-card:last-child {
@@ -26,11 +25,6 @@
 
 .sbm-open-todo-card.is-standalone:last-child {
   margin-bottom: 0;
-}
-
-/* Pastel red when the card has unresolved items (Blocked bookmark). */
-.sbm-open-todo-card.is-blocked {
-  background: var(--color-danger-bg);
 }
 
 /* ── Header: call + highlighted Extracted by / Extracted / Assigned ── */
