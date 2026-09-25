@@ -6,7 +6,7 @@ import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { TEXT_INPUT_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
-import { OPEN_TODO_PAGE_SIZE, OpenTodoCard, OpenTodoLoadMore } from "./OpenTodoCard.jsx";
+import { OPEN_TODO_PAGE_SIZE, OpenTodoCard, OpenTodoLoadMore, groupOpenTodosByCall } from "./OpenTodoCard.jsx";
 
 const DATE_FIELD = { ...TEXT_INPUT_STYLE, minHeight: 36, fontSize: 13 };
 
@@ -249,6 +249,7 @@ export function OpenTodosView({
     dateFrom || dateTo
       ? `${dateFrom || "…"} → ${dateTo || "…"}`
       : "All dates";
+  const callGroups = groupOpenTodosByCall(items);
 
   return (
     <div>
@@ -325,15 +326,15 @@ export function OpenTodosView({
         </Card>
       ) : (
         <Card style={{ padding: 0 }}>
-          {items.map((td) => (
+          {callGroups.map((group) => (
             <OpenTodoCard
-              key={td.id}
-              todo={td}
-              callName={td.client_name}
-              recordedAt={td.recorded_at}
+              key={group.callId}
+              todos={group.todos}
+              callName={group.callName}
+              recordedAt={group.recordedAt}
               onOpenCall={onOpen}
               onToggle={onToggle ? handleToggle : undefined}
-              busy={busyIds?.has(td.id)}
+              busyIds={busyIds}
               staffRoster={staffRoster}
               currentUser={currentUser}
               onAssign={onAssign ? handleAssign : undefined}

@@ -213,21 +213,20 @@ export function CallDetail({
               <div style={{ fontSize: 12, color: t.edge2, marginBottom: 8, fontWeight: 600 }}>
                 Todos ({call.todos.length})
               </div>
-              {[...openTodos, ...doneTodos].map((td) => (
+              {[...openTodos, ...doneTodos].length === 0 ? null : (
                 <OpenTodoCard
-                  key={td.id}
-                  todo={td}
+                  todos={[...openTodos, ...doneTodos]}
                   callName={call.client_name}
                   recordedAt={call.recorded_at}
                   onToggle={onToggle}
-                  busy={busyIds.has(td.id)}
+                  busyIds={busyIds}
                   readOnly={!canManage}
                   staffRoster={staffRoster}
                   currentUser={currentUser}
                   onAssign={canManage && onAssign ? onAssign : undefined}
                   standalone
                 />
-              ))}
+              )}
             </div>
           )}
         </div>
