@@ -42,6 +42,8 @@ export function TodoAssignControl({
   currentUser = null,
   alwaysEditing = false,
   compact = false,
+  /** When true, omit the "Assigned to…" status line (parent shows richer meta). */
+  hideStatus = false,
   /** Optional trailing controls (e.g. voice-note mic) rendered in the
    *  collapsed action row so they wrap with Assign/Assign-to-me on narrow
    *  screens instead of colliding in a sibling flex row. */
@@ -146,12 +148,10 @@ export function TodoAssignControl({
 
   if (!editing) {
     if (compact) {
-      /* Status above; action buttons stay on one row (Assign to me / Assign /
-         Site / mic). Voice playback, when present, sits below so it cannot
-         break the button row. */
+      /* Status above (optional); action buttons stay on one row. */
       return (
         <div className="cna-todo-toolbar">
-          <span className="cna-todo-toolbar__status">{statusWithDue}</span>
+          {!hideStatus ? <span className="cna-todo-toolbar__status">{statusWithDue}</span> : null}
           <div className="cna-todo-toolbar__actions">
             {canClaim ? (
               <button
@@ -175,7 +175,7 @@ export function TodoAssignControl({
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4, minWidth: 0, width: "100%" }}>
-        <span style={{ fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>{statusWithDue}</span>
+        {!hideStatus ? <span style={{ fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>{statusWithDue}</span> : null}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
           {canClaim ? (
             <button

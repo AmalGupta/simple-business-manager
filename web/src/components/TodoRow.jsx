@@ -13,6 +13,7 @@ export function formatTodoSentence(todo) {
   return `${owner} is assigned ${todo.text}, to be done by ${due}`;
 }
 
+/** Checklist row — text + optional due. Assignee / extraction meta lives on OpenTodoCard. */
 export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
   const done = todo.status === "done";
   const parked = todo.status === "snoozed";
@@ -66,21 +67,6 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
         }}
       >
         {todo.text}
-      </span>
-
-      <span
-        style={{
-          flexShrink: 0,
-          fontSize: 11,
-          fontWeight: 600,
-          padding: "2px 8px",
-          borderRadius: t.radius,
-          background: t.frostSoft,
-          color: t.edge2,
-          whiteSpace: "nowrap",
-        }}
-      >
-        {todo.owner === "self" ? "him" : todo.owner}
       </span>
 
       {!done && todo.due_date && (

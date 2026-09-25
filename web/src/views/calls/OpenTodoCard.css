@@ -76,6 +76,79 @@
   word-break: break-word;
 }
 
+.sbm-open-todo-card__facts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0 0;
+}
+
+.sbm-open-todo-card__labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sbm-open-todo-card__chip {
+  display: inline-block;
+  max-width: 100%;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.sbm-open-todo-card__chip.is-muted {
+  color: var(--color-slate);
+  font-weight: 500;
+}
+
+.sbm-open-todo-card__chip.is-site {
+  color: var(--color-accent);
+}
+
+.sbm-open-todo-card__chip.is-urgent {
+  color: #fff;
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.sbm-open-todo-card__dl {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sbm-open-todo-card__dl-row {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: baseline;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sbm-open-todo-card__dl-row dt {
+  margin: 0;
+  color: var(--color-slate);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.sbm-open-todo-card__dl-row dd {
+  margin: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .sbm-open-todo-card__text {
   margin: 0;
   font-size: 14px;

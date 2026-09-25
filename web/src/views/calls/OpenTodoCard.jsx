@@ -1,7 +1,8 @@
-import { fmtShort, isUrgent } from "../../lib/dates.js";
+import { fmtShort } from "../../lib/dates.js";
 import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { TodoRow } from "../../components/TodoRow.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
+import { TodoFacts } from "./TodoFacts.jsx";
 import "./OpenTodoCard.css";
 
 export const OPEN_TODO_PAGE_SIZE = 20;
@@ -16,8 +17,8 @@ export function sortTodosByRecordedAtDesc(list, getRecordedAt) {
 }
 
 /**
- * Studio-style open-todo card shared by OpenTodosView + MyOpenTodosView.
- * Meta (call · date · due) → site chip → body / TodoRow → optional assign toolbar.
+ * Studio-style open-todo card shared by OpenTodosView + MyOpenTodosView (staff).
+ * Meta (call · date) → body / TodoRow → facts → optional assign toolbar.
  */
 export function OpenTodoCard({
   todo,
@@ -31,7 +32,6 @@ export function OpenTodoCard({
   onAssign,
   onRequestSiteAssign,
 }) {
-  const urgent = isUrgent(todo);
   const canOpen = typeof onOpenCall === "function";
 
   return (
@@ -46,19 +46,15 @@ export function OpenTodoCard({
           {callName || "Unknown caller"}
         </button>
         {recordedAt ? <span className="sbm-open-todo-card__date">{fmtShort(recordedAt)}</span> : null}
-        {/* Due lives on TodoRow when toggle is shown — avoid a duplicate badge. */}
-        {!onToggle && todo.due_date ? (
-          <span className={`sbm-open-todo-card__due${urgent ? " is-urgent" : ""}`}>{fmtShort(todo.due_date)}</span>
-        ) : null}
       </div>
-
-      {todo.site_name ? <span className="sbm-open-todo-card__site">{todo.site_name}</span> : null}
 
       {onToggle ? (
         <TodoRow todo={todo} onToggle={onToggle} busy={busy} />
       ) : (
         <p className="sbm-open-todo-card__text">{todo.text}</p>
       )}
+
+      <TodoFacts todo={todo} />
 
       {onAssign ? (
         <div className="sbm-open-todo-card__toolbar">
@@ -68,6 +64,7 @@ export function OpenTodoCard({
             currentUser={currentUser}
             onAssign={onAssign}
             compact
+            hideStatus
             extraActions={
               onRequestSiteAssign ? (
                 <button

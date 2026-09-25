@@ -1106,6 +1106,8 @@ export interface TodoRow {
   site_id: string | null;
   /** Joined site name when site_id is set. */
   site_name: string | null;
+  /** Row create time (extraction / manual). */
+  created_at: string | null;
   /** migration 0025 — a todo can be assigned to more than one staff member. */
   assignees: TodoAssignee[];
 }
@@ -1215,6 +1217,7 @@ interface RawTodoRow {
   customer_waiting: 0 | 1;
   site_id: string | null;
   site_name: string | null;
+  created_at: string | null;
 }
 
 interface RawCommitmentRow {
@@ -1269,6 +1272,7 @@ const CALL_LIST_SELECT = `
 const TODO_SELECT = `
   SELECT todos.id, todos.call_id, todos.owner, todos.text, todos.due_date, todos.status,
          todos.completed_at, todos.closed_by_call_id, todos.customer_waiting,
+         todos.created_at AS created_at,
          todos.site_id AS site_id, sites.name AS site_name
   FROM todos
   LEFT JOIN sites ON sites.id = todos.site_id
@@ -1299,6 +1303,7 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     closed_by_call_id: t.closed_by_call_id,
     site_id: t.site_id ?? null,
     site_name: t.site_name ?? null,
+    created_at: t.created_at ?? null,
     assignees: [], // filled in by hydrateTodoAssignees — see hydrateCallRows/getCallWithTodos
   };
 }
@@ -4462,6 +4467,8 @@ export interface AssignedTodoRow {
   status: Todo["status"];
   client_name: string;
   recorded_at: string | null;
+  /** When the todo row was created (extraction / manual). */
+  created_at: string | null;
   site_id: string | null;
   site_name: string | null;
   assignees: TodoAssignee[];
@@ -4679,6 +4686,7 @@ export async function listOpenTodosByAssigneeBucket(
               todos.status AS status,
               ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
               calls.recorded_at AS recorded_at,
+              todos.created_at AS created_at,
               todos.site_id AS site_id,
               todo_sites.name AS site_name
        FROM todos
@@ -4720,6 +4728,7 @@ export async function listOpenTodosByAssigneeBucket(
   );
   const items = rows.map((r) => ({
     ...r,
+    created_at: r.created_at ?? null,
     site_id: r.site_id ?? null,
     site_name: r.site_name ?? null,
     assignees: map.get(r.id) ?? [],
@@ -4763,6 +4772,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
               COALESCE(callers.name, 'Unknown caller') AS client_name,
               calls.recorded_at AS recorded_at,
               calls.recording_date AS recording_date,
+              todos.created_at AS created_at,
               todos.site_id AS site_id,
               todo_sites.name AS site_name
        FROM todos
@@ -4785,6 +4795,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
   );
   return rows.map((r) => ({
     ...r,
+    created_at: r.created_at ?? null,
     site_id: r.site_id ?? null,
     site_name: r.site_name ?? null,
     assignees: map.get(r.id) ?? [],
@@ -4911,6 +4922,7 @@ export async function listMyOpenTodos(
                 'Unknown caller'
               ) AS client_name,
               calls.recorded_at AS recorded_at,
+              todos.created_at AS created_at,
               todos.site_id AS site_id,
               todo_sites.name AS site_name
        FROM todos
@@ -4976,6 +4988,7 @@ export async function listMyOpenTodos(
 
   return rows.map((r) => ({
     ...r,
+    created_at: r.created_at ?? null,
     site_id: r.site_id ?? null,
     site_name: r.site_name ?? null,
     assignees: map.get(r.id) ?? [],
