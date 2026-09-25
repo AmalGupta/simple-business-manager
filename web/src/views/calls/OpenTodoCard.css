@@ -29,6 +29,81 @@
 
 /* ── Header: call + highlighted Extracted by / Extracted / Assigned ── */
 
+.sbm-open-todo-card__summary {
+  display: flex;
+  align-items: center;
+  gap: 8px 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.sbm-open-todo-card.is-collapsed {
+  gap: 0;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.sbm-open-todo-card__toggle {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  color: var(--color-slate);
+  cursor: pointer;
+  border-radius: var(--radius-card);
+}
+
+.sbm-open-todo-card__toggle:hover {
+  color: var(--color-ink);
+  background: var(--color-canvas);
+}
+
+.sbm-open-todo-card__summary-stats {
+  margin: 0;
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.sbm-open-todo-card__summary-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.sbm-open-todo-card__summary-stat dt {
+  margin: 0;
+  color: var(--color-slate);
+  font-weight: 600;
+}
+
+.sbm-open-todo-card__summary-stat dt::after {
+  content: ":";
+}
+
+.sbm-open-todo-card__summary-stat dd {
+  margin: 0;
+  color: var(--color-ink);
+  font-weight: 600;
+}
+
+.sbm-open-todo-card__summary-stat dd.is-urgent {
+  color: var(--color-danger);
+}
+
+.sbm-open-todo-card__summary-stat dd.is-blocked {
+  color: var(--color-danger);
+}
+
 .sbm-open-todo-card__top {
   display: flex;
   flex-direction: column;
@@ -63,6 +138,7 @@
 .sbm-open-todo-card__call:disabled {
   cursor: default;
   text-decoration: none;
+  color: var(--color-ink);
 }
 
 /* Highlighted meta facts strip (stays in __top) */
