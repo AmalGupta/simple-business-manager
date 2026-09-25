@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { t } from "../../theme.js";
-import { fmtShort, fmtDate, isUrgent } from "../../lib/dates.js";
+import { fmtDate, isUrgent } from "../../lib/dates.js";
 import { SMALL_SECONDARY_BUTTON_STYLE, TILE_ROW_STYLE } from "../../styles.js";
 import { fetchSiteOpenTodos, postTodoVoiceNote, refreshConfirmedSites } from "../../lib/api.js";
 import { TodoRow } from "../../components/TodoRow.jsx";
 import { TodoAssignControl } from "../calls/TodoAssignControl.jsx";
+import { TodoFacts } from "../calls/TodoFacts.jsx";
 import { TodoVoiceNoteButton } from "../../components/TodoVoiceNoteButton.jsx";
 import { siteDisplayName } from "./sitesGridChrome.jsx";
+import "../calls/OpenTodoCard.css";
 
 /* Popup from the confirmed-sites Open count — the same open call todos that
    make up open_count, newest first. Mark done / assign / voice note match
@@ -151,14 +153,14 @@ export function SiteOpenTodosPopup({
                   <div style={{ fontSize: 13, color: t.edge2 }}>
                     {todo.client_name}
                     {dateIso ? ` · ${fmtDate(dateIso)}` : ""}
-                    {todo.owner ? ` · owner ${todo.owner === "self" ? "Self" : todo.owner}` : ""}
-                    {todo.due_date ? ` · due ${fmtShort(todo.due_date)}` : ""}
                   </div>
+                  <TodoFacts todo={todo} />
                   <TodoAssignControl
                     todo={todo}
                     staffRoster={staffRoster}
                     currentUser={currentUser}
                     onAssign={assign}
+                    hideStatus
                     extraActions={
                       <TodoVoiceNoteButton
                         todoId={todo.id}

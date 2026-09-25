@@ -13,12 +13,12 @@ export function formatTodoSentence(todo) {
   return `${owner} is assigned ${todo.text}, to be done by ${due}`;
 }
 
-export function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
+/** Checklist row — text + optional due. Assignee / extraction meta lives on OpenTodoCard. */
+export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
   const done = todo.status === "done";
   const parked = todo.status === "snoozed";
   const urgent = isUrgent(todo);
   const Icon = done ? Check : parked ? Clock : Circle;
-  const canPark = Boolean(onPark) && !readOnly;
 
   return (
     <div
@@ -69,21 +69,6 @@ export function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
         {todo.text}
       </span>
 
-      <span
-        style={{
-          flexShrink: 0,
-          fontSize: 11,
-          fontWeight: 600,
-          padding: "2px 8px",
-          borderRadius: t.radius,
-          background: t.frostSoft,
-          color: t.edge2,
-          whiteSpace: "nowrap",
-        }}
-      >
-        {todo.owner === "self" ? "him" : todo.owner}
-      </span>
-
       {!done && todo.due_date && (
         <span
           style={{
@@ -97,27 +82,6 @@ export function TodoRow({ todo, onToggle, onPark, busy, readOnly = false }) {
         >
           {fmtShort(todo.due_date)}
         </span>
-      )}
-
-      {!done && canPark && (
-        <button
-          onClick={() => onPark(todo)}
-          disabled={busy}
-          aria-label={parked ? `Unpark: ${todo.text}` : `Park: ${todo.text}`}
-          style={{
-            fontSize: 12,
-            padding: "13px 10px",
-            margin: "-13px -10px",
-            border: `1px solid ${parked ? t.putty : "transparent"}`,
-            borderRadius: t.radius,
-            background: "none",
-            cursor: busy ? "wait" : "pointer",
-            color: parked ? t.putty : t.edge2,
-            whiteSpace: "nowrap",
-          }}
-        >
-          {parked ? "parked" : "park"}
-        </button>
       )}
     </div>
   );

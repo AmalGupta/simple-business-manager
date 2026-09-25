@@ -5,7 +5,6 @@ import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./lib/constants.js";
 import { Card } from "./components/Card.jsx";
 import { BackLink } from "./components/BackLink.jsx";
 import { TileLabel } from "./components/TileLabel.jsx";
-import { StatCard } from "./components/StatCard.jsx";
 import { TILE_VALUE_ROW_STYLE, TILE_NUMBER_STYLE } from "./styles.js";
 import { AppHeader } from "./components/AppHeader.jsx";
 import { DeskConversationMic } from "./components/DeskConversationMic.jsx";
@@ -20,7 +19,6 @@ import { HomeDashboardTabs } from "./views/home/HomeDashboardTabs.jsx";
 import { PendingWorkView } from "./views/home/PendingWorkView.jsx";
 import { MyScheduleView } from "./views/home/MyScheduleView.jsx";
 import { StreakWall } from "./views/calls/StreakWall.jsx";
-import { DayView } from "./views/calls/DayView.jsx";
 import { CallsPageView } from "./views/calls/CallsPageView.jsx";
 import { CallDetail } from "./views/calls/CallDetail.jsx";
 import { OpenTodosView } from "./views/calls/OpenTodosView.jsx";
@@ -91,9 +89,8 @@ export default function SimpleBusinessManager() {
   const [callersCount, setCallersCount] = useState(0);
   const [callsNeedingActionCount, setCallsNeedingActionCount] = useState(0);
   const [resolvedCallsCount, setResolvedCallsCount] = useState(0);
-  /* Home parked / open-today tiles — from GET /api/dashboard/summary. */
-  const [parkedCount, setParkedCount] = useState(0);
-  const [openTodayCount, setOpenTodayCount] = useState(0);
+  /* Home Open tasks tile — from GET /api/dashboard/summary open_todos_count. */
+  const [openTodosCount, setOpenTodosCount] = useState(0);
   const [confirmedCount, setConfirmedCount] = useState(0);
   const [unconfirmedCount, setUnconfirmedCount] = useState(0);
   /* Open (assigned, not done) site tasks — scoped server-side to "mine" for
@@ -178,8 +175,7 @@ export default function SimpleBusinessManager() {
     setCallersCount(0);
     setCallsNeedingActionCount(0);
     setResolvedCallsCount(0);
-    setParkedCount(0);
-    setOpenTodayCount(0);
+    setOpenTodosCount(0);
     setConfirmedCount(0);
     setUnconfirmedCount(0);
     setOpenSiteTasks([]);
@@ -198,8 +194,7 @@ export default function SimpleBusinessManager() {
       );
       setConfirmedCount(summary.confirmed_count ?? 0);
       setUnconfirmedCount(summary.unconfirmed_count ?? 0);
-      setParkedCount(summary.parked_count ?? 0);
-      setOpenTodayCount(summary.open_today ?? 0);
+      setOpenTodosCount(summary.open_todos_count ?? summary.open_today ?? 0);
       setCallsCount(summary.calls_count ?? 0);
       setCallersCount(summary.callers_count ?? 0);
       setCallsNeedingActionCount(summary.calls_needing_action_count ?? 0);
@@ -359,21 +354,9 @@ export default function SimpleBusinessManager() {
   }, []);
 
   /* Optimistic write, rolled back if D1 rejects it. Also keeps home
-     parked_count in sync with the summary read model. */
+     open_todos_count in sync when completing from lists. */
   const mutate = useCallback(async (todo, patch) => {
-    const prev = { status: todo.status, completed_at: todo.completed_at };
-    const prevParked = prev.status === "snoozed";
-    const nextParked = patch.status === "snoozed";
-
-    const applyCountDelta = (fromPrev) => {
-      const wasParked = fromPrev ? prevParked : nextParked;
-      const isParked = fromPrev ? nextParked : prevParked;
-      if (wasParked && !isParked) setParkedCount((n) => Math.max(0, n - 1));
-      if (!wasParked && isParked) setParkedCount((n) => n + 1);
-    };
-
     setBusyIds((s) => new Set(s).add(todo.id));
-    applyCountDelta(true);
     setMyOpenTodos((list) => {
       if (!list.some((t) => t.id === todo.id)) return list;
       if (patch.status === "done" || patch.status === "snoozed") {
@@ -383,6 +366,7 @@ export default function SimpleBusinessManager() {
     });
     if (patch.status === "done" || patch.status === "snoozed") {
       setMyOpenTodosCount((n) => Math.max(0, n - 1));
+      setOpenTodosCount((n) => Math.max(0, n - 1));
     }
     try {
       await patchTodo(todo.id, patch);
@@ -393,6 +377,7 @@ export default function SimpleBusinessManager() {
             setMyOpenTodosCount(
               summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0
             );
+            setOpenTodosCount(summary.open_todos_count ?? summary.open_today ?? 0);
             setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
           })
           .catch((err) => console.error("[sbm] failed to refresh staff tabs after todo mutate", err));
@@ -423,12 +408,12 @@ export default function SimpleBusinessManager() {
           .catch((err) => console.error("[sbm] failed to refresh my open todos count", err));
       }
     } catch {
-      applyCountDelta(false);
       // Restore personal-queue row when the todo came from that list
       // (AssignedTodoRow carries client_name; CallDetail rows do not).
       if (todo.client_name != null && (patch.status === "done" || patch.status === "snoozed")) {
         setMyOpenTodos((list) => (list.some((t) => t.id === todo.id) ? list : [...list, todo]));
         setMyOpenTodosCount((n) => n + 1);
+        setOpenTodosCount((n) => n + 1);
       }
     } finally {
       setBusyIds((s) => {
@@ -450,11 +435,6 @@ export default function SimpleBusinessManager() {
     [mutate]
   );
 
-  const onPark = useCallback(
-    (todo) => mutate(todo, { status: todo.status === "snoozed" ? "open" : "snoozed" }),
-    [mutate]
-  );
-
   /* Not optimistic — assignment (migration 0025: a todo can go to more than
      one staff member now) refreshes via key bump rather than a client-side
      merge, since the server response carries the full assignees[] list.
@@ -472,8 +452,7 @@ export default function SimpleBusinessManager() {
       setMyOpenTodosCount(
         summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0
       );
-      setOpenTodayCount(summary.open_today ?? 0);
-      setParkedCount(summary.parked_count ?? 0);
+      setOpenTodosCount(summary.open_todos_count ?? summary.open_today ?? 0);
       setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
       setHomeTab((tab) => {
         if (tab === "admin") return tab;
@@ -527,7 +506,7 @@ export default function SimpleBusinessManager() {
       setMyOpenTodosCount(
         summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0
       );
-      setOpenTodayCount(summary.open_today ?? 0);
+      setOpenTodosCount(summary.open_todos_count ?? summary.open_today ?? 0);
     } catch (err) {
       console.error("[sbm] failed to refresh after todo site assign", err);
     }
@@ -823,7 +802,6 @@ export default function SimpleBusinessManager() {
         call={openCall}
         onBack={() => setView(view.from ?? homeView)}
         onToggle={onToggle}
-        onPark={onPark}
         busyIds={busyIds}
         canManage={me.role !== "staff"}
         staffRoster={staffRoster}
@@ -840,19 +818,6 @@ export default function SimpleBusinessManager() {
       </div>
     );
   }
-
-  if (view.name === "day")
-    return shell(
-      <DayView
-        date={view.date}
-        onBack={() => setView(homeView)}
-        onOpen={(id) => setView({ name: "call", id, from: { name: "day", date: view.date } })}
-        onToggle={onToggle}
-        onPark={onPark}
-        busyIds={busyIds}
-        refreshKey={todoRefreshKey}
-      />
-    );
 
   if (view.name === "site")
     return shell(
@@ -923,24 +888,9 @@ export default function SimpleBusinessManager() {
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "open-todos" } })}
         onAssign={onAssignTodo}
-        onTodoSiteAssigned={onTodoSiteAssigned}
-        status="open"
-        refreshKey={todoRefreshKey}
-      />
-    );
-
-  if (view.name === "parked-todos")
-    return shell(
-      <OpenTodosView
-        staffRoster={staffRoster}
-        currentUser={me}
-        onBack={() => setView(view.from ?? homeView)}
-        onOpen={(id) => setView({ name: "call", id, from: { name: "parked-todos" } })}
-        onAssign={onAssignTodo}
         onToggle={onToggle}
-        onPark={onPark}
+        onTodoSiteAssigned={onTodoSiteAssigned}
         busyIds={busyIds}
-        status="snoozed"
         refreshKey={todoRefreshKey}
       />
     );
@@ -1381,27 +1331,18 @@ export default function SimpleBusinessManager() {
             onOpen={() => setView({ name: "resolved-calls", from: { name: "home" } })}
           />
         )}
-        {(me.role === "admin" || me.role === "superadmin" || myOpenTodosCount > 0) && (
-          <button
-            onClick={() => setView({ name: "my-open-todos", from: { name: "home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label={`My call tasks — ${myOpenTodosCount} open`}
-          >
-            <Card tile>
-              <TileLabel>My call tasks</TileLabel>
-              <div style={TILE_VALUE_ROW_STYLE}>
-                <span style={TILE_NUMBER_STYLE}>{myOpenTodosCount}</span>
-              </div>
-            </Card>
-          </button>
-        )}
-        {(me.role === "admin" || me.role === "superadmin") && openTodayCount > 0 && (
+        {(me.role === "admin" || me.role === "superadmin") && (
           <button
             onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
             style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label={`Open today — ${openTodayCount}`}
+            aria-label={`Open tasks — ${openTodosCount}`}
           >
-            <StatCard value={openTodayCount} label="open today" />
+            <Card tile>
+              <TileLabel>Open tasks</TileLabel>
+              <div style={TILE_VALUE_ROW_STYLE}>
+                <span style={TILE_NUMBER_STYLE}>{openTodosCount}</span>
+              </div>
+            </Card>
           </button>
         )}
         <ComplaintsTile
@@ -1412,15 +1353,6 @@ export default function SimpleBusinessManager() {
           tasks={openSiteTasks}
           onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}
         />
-        {parkedCount > 0 && (
-          <button
-            onClick={() => setView({ name: "parked-todos", from: { name: "home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label={`Parked — ${parkedCount}`}
-          >
-            <StatCard value={parkedCount} label="parked" />
-          </button>
-        )}
       </div>
       )}
     </>
