@@ -52,6 +52,12 @@ import { ComplaintSetupView } from "./views/site-visit/ComplaintSetupView.jsx";
 import { ComplaintsTile } from "./views/site-visit/ComplaintsTile.jsx";
 import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
+import { ProductionJobsTile } from "./views/production/ProductionJobsTile.jsx";
+import { ProductionJobsListView } from "./views/production/ProductionJobsListView.jsx";
+import { ProductionJobDetailView } from "./views/production/ProductionJobDetailView.jsx";
+import { MyProductionStepsView } from "./views/production/MyProductionStepsView.jsx";
+import { WarehouseTile } from "./views/warehouse/WarehouseTile.jsx";
+import { WarehouseView } from "./views/warehouse/WarehouseView.jsx";
 import { CallsNeedingActionTile } from "./views/home/CallsNeedingActionTile.jsx";
 import { ResolvedCallsTile } from "./views/home/ResolvedCallsTile.jsx";
 import { CallsNeedingActionView } from "./views/calls/CallsNeedingActionView.jsx";
@@ -1145,6 +1151,8 @@ export default function SimpleBusinessManager() {
           onOpenAssignedWork={() => setView({ name: "assigned-work", from: { name: "staff-home" } })}
           onOpenSiteVisit={() => setView({ name: "site-visit-sites", from: { name: "staff-home" } })}
           onOpenComplaints={() => setView({ name: "complaints-home", from: { name: "staff-home" } })}
+          onOpenProduction={() => setView({ name: "my-production-steps", from: { name: "staff-home" } })}
+          onOpenWarehouse={() => setView({ name: "warehouse", from: { name: "staff-home" } })}
         />
       </>
     );
@@ -1385,6 +1393,37 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "material-shortages") return shell(<MaterialShortagesView onBack={() => setView(homeView)} />);
 
+  // --- Production job tracker + warehouse register — migration 0042. See
+  // the approved "Production & Warehouse Workflow" diagram. Shared between
+  // admin (full job list, "+ New job") and staff (their own assigned
+  // steps) — shellInStaffBookmark falls back to plain shell outside a
+  // staff-bookmark admin view. ---
+
+  if (view.name === "production-jobs")
+    return shell(
+      <ProductionJobsListView
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenJob={(job) => setView({ name: "production-job-detail", jobId: job.id, from: view })}
+      />
+    );
+
+  if (view.name === "production-job-detail")
+    return shellInStaffBookmark(
+      <ProductionJobDetailView jobId={view.jobId} onBack={() => setView(view.from ?? homeView)} />
+    );
+
+  if (view.name === "my-production-steps")
+    return shellInStaffBookmark(
+      <MyProductionStepsView
+        forUserId={view.forUserId || null}
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenJob={(job) => setView({ name: "production-job-detail", jobId: job.id, from: view, forUserId: view.forUserId })}
+      />
+    );
+
+  if (view.name === "warehouse")
+    return shellInStaffBookmark(<WarehouseView onBack={() => setView(view.from ?? homeView)} />);
+
   if (view.name === "app-request") return shell(<RequestForm onBack={() => setView(view.from ?? homeView)} />);
 
   return shell(
@@ -1415,6 +1454,12 @@ export default function SimpleBusinessManager() {
             }
             onOpenComplaints={() =>
               setView({ name: "complaints-home", forUserId: homeTab, from: { name: "home" } })
+            }
+            onOpenProduction={() =>
+              setView({ name: "my-production-steps", forUserId: homeTab, from: { name: "home" } })
+            }
+            onOpenWarehouse={() =>
+              setView({ name: "warehouse", forUserId: homeTab, from: { name: "home" } })
             }
           />
           </>
@@ -1495,6 +1540,12 @@ export default function SimpleBusinessManager() {
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
           <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <ProductionJobsTile onOpen={() => setView({ name: "production-jobs", from: { name: "home" } })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <WarehouseTile onOpen={() => setView({ name: "warehouse", from: { name: "home" } })} />
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
           <ResolvedCallsTile

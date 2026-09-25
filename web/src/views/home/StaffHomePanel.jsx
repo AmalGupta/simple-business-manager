@@ -3,6 +3,8 @@ import { AssignedWorkTile } from "../work/AssignedWorkTile.jsx";
 import { fetchTaskUpdateInbox } from "../../lib/api.js";
 import { SiteVisitTile } from "../site-visit/SiteVisitTile.jsx";
 import { ComplaintsTile } from "../site-visit/ComplaintsTile.jsx";
+import { MyProductionTile } from "../production/MyProductionTile.jsx";
+import { WarehouseTile } from "../warehouse/WarehouseTile.jsx";
 import { ScopeGate, useViewAsReadOnly } from "../../lib/scopes.jsx";
 import { t } from "../../theme.js";
 
@@ -23,6 +25,8 @@ export function StaffHomePanel({
   onOpenAssignedWork,
   onOpenSiteVisit,
   onOpenComplaints,
+  onOpenProduction,
+  onOpenWarehouse,
 }) {
   const confirmedSites = (sites ?? []).filter((s) => s.is_confirmed !== "N");
   const readOnly = useViewAsReadOnly();
@@ -82,6 +86,10 @@ export function StaffHomePanel({
         <ScopeGate scope="staff.complaints">
           <ComplaintsTile refreshKey={complaintsRefreshKey} forUserId={forUserId} onOpen={onOpenComplaints} />
         </ScopeGate>
+
+        <MyProductionTile forUserId={forUserId} onOpen={onOpenProduction} />
+
+        <WarehouseTile onOpen={onOpenWarehouse} />
       </div>
     </>
   );
