@@ -218,6 +218,7 @@ export function CallDetail({
                   todos={[...openTodos, ...doneTodos]}
                   callName={call.client_name}
                   recordedAt={call.recorded_at}
+                  unresolved={call.unresolved}
                   onToggle={onToggle}
                   busyIds={busyIds}
                   readOnly={!canManage}
@@ -225,6 +226,7 @@ export function CallDetail({
                   currentUser={currentUser}
                   onAssign={canManage && onAssign ? onAssign : undefined}
                   standalone
+                  defaultExpanded
                 />
               )}
             </div>
