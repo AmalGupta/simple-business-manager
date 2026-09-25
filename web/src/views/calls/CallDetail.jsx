@@ -12,6 +12,8 @@ import { TodoRow } from "../../components/TodoRow.jsx";
 import { CallHeading } from "../../components/CallHeading.jsx";
 import { CommitmentsList } from "../../components/CommitmentsList.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
+import { TodoFacts } from "./TodoFacts.jsx";
+import "./OpenTodoCard.css";
 
 /* 2-column layout: transcript/summary/details on the left, todos (with
    assignment) on the right — the left column is everything a call used to
@@ -215,20 +217,26 @@ export function CallDetail({
                 Todos ({call.todos.length})
               </div>
               {[...openTodos, ...doneTodos].map((td) => (
-                <div key={td.id}>
+                <div key={td.id} style={{ marginBottom: 10 }}>
                   <TodoRow
                     todo={td}
                     onToggle={onToggle}
                     busy={busyIds.has(td.id)}
                     readOnly={!canManage}
                   />
+                  <div style={{ padding: "0 10px 4px" }}>
+                    <TodoFacts todo={td} />
+                  </div>
                   {canManage && (
-                    <TodoAssignControl
-                      todo={td}
-                      staffRoster={staffRoster}
-                      currentUser={currentUser}
-                      onAssign={onAssign}
-                    />
+                    <div style={{ padding: "0 10px 4px" }}>
+                      <TodoAssignControl
+                        todo={td}
+                        staffRoster={staffRoster}
+                        currentUser={currentUser}
+                        onAssign={onAssign}
+                        hideStatus
+                      />
+                    </div>
                   )}
                 </div>
               ))}
