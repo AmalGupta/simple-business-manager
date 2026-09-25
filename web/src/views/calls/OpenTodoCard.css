@@ -127,16 +127,17 @@
 }
 
 .sbm-open-todo-card__dl-row {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 8px 12px;
+  display: flex;
+  justify-content: space-between;
   align-items: baseline;
+  gap: 12px;
   font-size: 12px;
   line-height: 1.4;
 }
 
 .sbm-open-todo-card__dl-row dt {
   margin: 0;
+  flex: 0 0 auto;
   color: var(--color-slate);
   font-weight: 600;
   letter-spacing: 0.02em;
@@ -144,6 +145,9 @@
 
 .sbm-open-todo-card__dl-row dd {
   margin: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
   color: var(--color-ink);
   overflow-wrap: anywhere;
   word-break: break-word;
