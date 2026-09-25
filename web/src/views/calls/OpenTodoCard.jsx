@@ -2,7 +2,7 @@ import { fmtShort } from "../../lib/dates.js";
 import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { TodoRow } from "../../components/TodoRow.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
-import { TodoFacts } from "./TodoFacts.jsx";
+import { TodoExtractionMeta, TodoStatusChips } from "./TodoFacts.jsx";
 import "./OpenTodoCard.css";
 
 export const OPEN_TODO_PAGE_SIZE = 20;
@@ -17,8 +17,9 @@ export function sortTodosByRecordedAtDesc(list, getRecordedAt) {
 }
 
 /**
- * Studio open-todo card — same layout for staff + admin:
- * meta (call · date) → checklist + due badge → facts → optional assign toolbar.
+ * Studio open-todo card — staff + admin:
+ * top (call · date + Extracted by / Extracted / Assigned)
+ * → checklist → chips → assign buttons under the todo text.
  */
 export function OpenTodoCard({
   todo,
@@ -39,8 +40,8 @@ export function OpenTodoCard({
   const siteButton = onRequestSiteAssign ? (
     <button
       type="button"
+      className="sbm-open-todo-card__btn sbm-open-todo-card__btn--secondary"
       onClick={() => onRequestSiteAssign(todo)}
-      style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 32, padding: "0 10px" }}
     >
       {todo.site_id ? "Change site" : "Assign to Site"}
     </button>
@@ -56,16 +57,19 @@ export function OpenTodoCard({
 
   return (
     <article className={`sbm-open-todo-card${standalone ? " is-standalone" : ""}`}>
-      <div className="sbm-open-todo-card__meta">
-        <button
-          type="button"
-          className="sbm-open-todo-card__call"
-          disabled={!canOpen}
-          onClick={() => onOpenCall?.(todo.call_id)}
-        >
-          {callName || "Unknown caller"}
-        </button>
-        {recordedAt ? <span className="sbm-open-todo-card__date">{fmtShort(recordedAt)}</span> : null}
+      <div className="sbm-open-todo-card__top">
+        <div className="sbm-open-todo-card__meta">
+          <button
+            type="button"
+            className="sbm-open-todo-card__call"
+            disabled={!canOpen}
+            onClick={() => onOpenCall?.(todo.call_id)}
+          >
+            {callName || "Unknown caller"}
+          </button>
+          {recordedAt ? <span className="sbm-open-todo-card__date">{fmtShort(recordedAt)}</span> : null}
+        </div>
+        <TodoExtractionMeta todo={todo} />
       </div>
 
       {onToggle || readOnly ? (
@@ -80,21 +84,22 @@ export function OpenTodoCard({
         <p className="sbm-open-todo-card__text">{todo.text}</p>
       )}
 
-      <TodoFacts todo={todo} />
-
-      {onAssign ? (
-        <div className="sbm-open-todo-card__toolbar">
-          <TodoAssignControl
-            todo={todo}
-            staffRoster={staffRoster}
-            currentUser={currentUser}
-            onAssign={onAssign}
-            compact
-            hideStatus
-            extraActions={trailing}
-          />
-        </div>
-      ) : null}
+      <div className="sbm-open-todo-card__below-text">
+        <TodoStatusChips todo={todo} />
+        {onAssign ? (
+          <div className="sbm-open-todo-card__toolbar">
+            <TodoAssignControl
+              todo={todo}
+              staffRoster={staffRoster}
+              currentUser={currentUser}
+              onAssign={onAssign}
+              compact
+              hideStatus
+              extraActions={trailing}
+            />
+          </div>
+        ) : null}
+      </div>
     </article>
   );
 }
