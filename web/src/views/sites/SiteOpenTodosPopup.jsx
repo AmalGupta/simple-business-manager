@@ -1,19 +1,13 @@
 import { useState, useEffect, useCallback } from "react";
 import { t } from "../../theme.js";
-import { fmtDate, isUrgent } from "../../lib/dates.js";
-import { SMALL_SECONDARY_BUTTON_STYLE, TILE_ROW_STYLE } from "../../styles.js";
+import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { fetchSiteOpenTodos, postTodoVoiceNote, refreshConfirmedSites } from "../../lib/api.js";
-import { TodoRow } from "../../components/TodoRow.jsx";
-import { TodoAssignControl } from "../calls/TodoAssignControl.jsx";
-import { TodoFacts } from "../calls/TodoFacts.jsx";
+import { OpenTodoCard } from "../calls/OpenTodoCard.jsx";
 import { TodoVoiceNoteButton } from "../../components/TodoVoiceNoteButton.jsx";
 import { siteDisplayName } from "./sitesGridChrome.jsx";
-import "../calls/OpenTodoCard.css";
 
-/* Popup from the confirmed-sites Open count — the same open call todos that
-   make up open_count, newest first. Mark done / assign / voice note match
-   the Open todos / Calls needing action patterns; assign already writes
-   site_edits for Site details. */
+/* Popup from the confirmed-sites Open count — same Studio open-todo card as
+   Open tasks / My call tasks / call detail. Mark done / assign / voice note. */
 export function SiteOpenTodosPopup({
   site,
   staffRoster,
@@ -134,45 +128,27 @@ export function SiteOpenTodosPopup({
         ) : items.length === 0 ? (
           <p style={{ fontSize: 13, color: t.edge2, margin: "8px 0" }}>No open items for this site.</p>
         ) : (
-          items.map((todo) => {
-            const dateIso = todo.recording_date || todo.recorded_at;
-            const urgent = isUrgent(todo);
-            return (
-              <div key={todo.id} style={{ ...TILE_ROW_STYLE, display: "flex", flexDirection: "column", gap: 4, alignItems: "stretch" }}>
-                <TodoRow todo={todo} urgent={urgent} onToggle={toggle} busy={busyIds.has(todo.id)} showDue />
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "stretch",
-                    gap: 8,
-                    paddingLeft: 28,
-                    minWidth: 0,
-                  }}
-                >
-                  <div style={{ fontSize: 13, color: t.edge2 }}>
-                    {todo.client_name}
-                    {dateIso ? ` · ${fmtDate(dateIso)}` : ""}
-                  </div>
-                  <TodoFacts todo={todo} />
-                  <TodoAssignControl
-                    todo={todo}
-                    staffRoster={staffRoster}
-                    currentUser={currentUser}
-                    onAssign={assign}
-                    hideStatus
-                    extraActions={
-                      <TodoVoiceNoteButton
-                        todoId={todo.id}
-                        existingNote={voiceNotesByTodoId.get(todo.id)}
-                        onUpload={addVoiceNote}
-                      />
-                    }
-                  />
-                </div>
-              </div>
-            );
-          })
+          items.map((todo) => (
+            <OpenTodoCard
+              key={todo.id}
+              todo={todo}
+              callName={todo.client_name}
+              recordedAt={todo.recording_date || todo.recorded_at}
+              onToggle={toggle}
+              busy={busyIds.has(todo.id)}
+              staffRoster={staffRoster}
+              currentUser={currentUser}
+              onAssign={assign}
+              standalone
+              extraActions={
+                <TodoVoiceNoteButton
+                  todoId={todo.id}
+                  existingNote={voiceNotesByTodoId.get(todo.id)}
+                  onUpload={addVoiceNote}
+                />
+              }
+            />
+          ))
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
