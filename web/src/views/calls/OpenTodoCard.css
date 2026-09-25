@@ -177,6 +177,32 @@
   border-color: var(--color-danger);
 }
 
+/* ── Nested todos under one call header ── */
+
+.sbm-open-todo-card__todos {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.sbm-open-todo-card__todo {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sbm-open-todo-card__todo + .sbm-open-todo-card__todo {
+  padding-top: 12px;
+  border-top: 1px solid var(--color-line-soft, var(--color-line));
+}
+
+.sbm-open-todo-card__meta-facts--compact {
+  padding: 4px 8px;
+  gap: 4px 10px;
+}
+
 /* ── Below todo text: assign buttons (chips removed) ── */
 
 .sbm-open-todo-card__below-text {

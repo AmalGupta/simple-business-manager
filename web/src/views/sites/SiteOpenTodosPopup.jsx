@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { t } from "../../theme.js";
 import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { fetchSiteOpenTodos, postTodoVoiceNote, refreshConfirmedSites } from "../../lib/api.js";
-import { OpenTodoCard } from "../calls/OpenTodoCard.jsx";
+import { OpenTodoCard, groupOpenTodosByCall } from "../calls/OpenTodoCard.jsx";
 import { TodoVoiceNoteButton } from "../../components/TodoVoiceNoteButton.jsx";
 import { siteDisplayName } from "./sitesGridChrome.jsx";
 
@@ -128,25 +128,25 @@ export function SiteOpenTodosPopup({
         ) : items.length === 0 ? (
           <p style={{ fontSize: 13, color: t.edge2, margin: "8px 0" }}>No open items for this site.</p>
         ) : (
-          items.map((todo) => (
+          groupOpenTodosByCall(items).map((group) => (
             <OpenTodoCard
-              key={todo.id}
-              todo={todo}
-              callName={todo.client_name}
-              recordedAt={todo.recording_date || todo.recorded_at}
+              key={group.callId}
+              todos={group.todos}
+              callName={group.callName}
+              recordedAt={group.recordedAt}
               onToggle={toggle}
-              busy={busyIds.has(todo.id)}
+              busyIds={busyIds}
               staffRoster={staffRoster}
               currentUser={currentUser}
               onAssign={assign}
               standalone
-              extraActions={
+              renderExtraActions={(todo) => (
                 <TodoVoiceNoteButton
                   todoId={todo.id}
                   existingNote={voiceNotesByTodoId.get(todo.id)}
                   onUpload={addVoiceNote}
                 />
-              }
+              )}
             />
           ))
         )}
