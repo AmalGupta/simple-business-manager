@@ -13,16 +13,12 @@ export function formatTodoSentence(todo) {
   return `${owner} is assigned ${todo.text}, to be done by ${due}`;
 }
 
+/** Checklist row — text + optional due. Assignee / extraction meta lives on OpenTodoCard. */
 export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
   const done = todo.status === "done";
   const parked = todo.status === "snoozed";
   const urgent = isUrgent(todo);
   const Icon = done ? Check : parked ? Clock : Circle;
-  const assignees = todo.assignees ?? [];
-  const assigneeLabel =
-    assignees.length > 0
-      ? assignees.map((a) => a.name).filter(Boolean).join(", ")
-      : "Unassigned";
 
   return (
     <div
@@ -71,25 +67,6 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
         }}
       >
         {todo.text}
-      </span>
-
-      <span
-        title={assigneeLabel}
-        style={{
-          flexShrink: 0,
-          maxWidth: 140,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          fontSize: 11,
-          fontWeight: 600,
-          padding: "2px 8px",
-          borderRadius: t.radius,
-          background: t.frostSoft,
-          color: t.edge2,
-          whiteSpace: "nowrap",
-        }}
-      >
-        {assigneeLabel}
       </span>
 
       {!done && todo.due_date && (

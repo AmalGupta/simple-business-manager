@@ -15,9 +15,57 @@ export function sortTodosByRecordedAtDesc(list, getRecordedAt) {
   });
 }
 
+function extractedByLabel(owner) {
+  if (!owner) return "—";
+  if (owner === "self") return "Self";
+  return owner;
+}
+
+function TodoFacts({ todo }) {
+  const assignees = todo.assignees ?? [];
+  const assigneeNames = assignees.map((a) => a.name).filter(Boolean);
+  const urgent = isUrgent(todo);
+  const extractedAt = todo.created_at || todo.recorded_at || null;
+
+  return (
+    <div className="sbm-open-todo-card__facts">
+      <div className="sbm-open-todo-card__labels" aria-label="Labels">
+        {assigneeNames.length > 0 ? (
+          assigneeNames.map((name) => (
+            <span key={name} className="sbm-open-todo-card__chip">
+              {name}
+            </span>
+          ))
+        ) : (
+          <span className="sbm-open-todo-card__chip is-muted">Unassigned</span>
+        )}
+        {todo.site_name ? <span className="sbm-open-todo-card__chip is-site">{todo.site_name}</span> : null}
+        {todo.due_date ? (
+          <span className={`sbm-open-todo-card__chip${urgent ? " is-urgent" : ""}`}>Due {fmtShort(todo.due_date)}</span>
+        ) : null}
+      </div>
+
+      <dl className="sbm-open-todo-card__dl">
+        <div className="sbm-open-todo-card__dl-row">
+          <dt>Extracted by</dt>
+          <dd>{extractedByLabel(todo.owner)}</dd>
+        </div>
+        <div className="sbm-open-todo-card__dl-row">
+          <dt>Extracted</dt>
+          <dd>{extractedAt ? fmtShort(extractedAt) : "—"}</dd>
+        </div>
+        <div className="sbm-open-todo-card__dl-row">
+          <dt>Assigned</dt>
+          <dd>{assigneeNames.length > 0 ? assigneeNames.join(", ") : "Unassigned"}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
 /**
  * Studio-style open-todo card shared by OpenTodosView + MyOpenTodosView.
- * Meta (call · date · due) → site chip → body / TodoRow → optional assign toolbar.
+ * Meta (call · date) → body / TodoRow → facts (labels + extracted/assigned) → toolbar.
  */
 export function OpenTodoCard({
   todo,
@@ -31,7 +79,6 @@ export function OpenTodoCard({
   onAssign,
   onRequestSiteAssign,
 }) {
-  const urgent = isUrgent(todo);
   const canOpen = typeof onOpenCall === "function";
 
   return (
@@ -46,19 +93,15 @@ export function OpenTodoCard({
           {callName || "Unknown caller"}
         </button>
         {recordedAt ? <span className="sbm-open-todo-card__date">{fmtShort(recordedAt)}</span> : null}
-        {/* Due lives on TodoRow when toggle is shown — avoid a duplicate badge. */}
-        {!onToggle && todo.due_date ? (
-          <span className={`sbm-open-todo-card__due${urgent ? " is-urgent" : ""}`}>{fmtShort(todo.due_date)}</span>
-        ) : null}
       </div>
-
-      {todo.site_name ? <span className="sbm-open-todo-card__site">{todo.site_name}</span> : null}
 
       {onToggle ? (
         <TodoRow todo={todo} onToggle={onToggle} busy={busy} />
       ) : (
         <p className="sbm-open-todo-card__text">{todo.text}</p>
       )}
+
+      <TodoFacts todo={todo} />
 
       {onAssign ? (
         <div className="sbm-open-todo-card__toolbar">
@@ -68,6 +111,7 @@ export function OpenTodoCard({
             currentUser={currentUser}
             onAssign={onAssign}
             compact
+            hideStatus
             extraActions={
               onRequestSiteAssign ? (
                 <button
