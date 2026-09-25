@@ -8,12 +8,9 @@ import { PhoneLink } from "../../components/PhoneLink.jsx";
 import { WaitingTag } from "../../components/WaitingTag.jsx";
 import { DownloadButton } from "../../components/DownloadButton.jsx";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
-import { TodoRow } from "../../components/TodoRow.jsx";
 import { CallHeading } from "../../components/CallHeading.jsx";
 import { CommitmentsList } from "../../components/CommitmentsList.jsx";
-import { TodoAssignControl } from "./TodoAssignControl.jsx";
-import { TodoFacts } from "./TodoFacts.jsx";
-import "./OpenTodoCard.css";
+import { OpenTodoCard } from "./OpenTodoCard.jsx";
 
 /* 2-column layout: transcript/summary/details on the left, todos (with
    assignment) on the right — the left column is everything a call used to
@@ -212,35 +209,26 @@ export function CallDetail({
               <p style={{ fontSize: 13, color: t.edge2, margin: 0 }}>No todos extracted from this call.</p>
             </Card>
           ) : (
-            <Card>
+            <div>
               <div style={{ fontSize: 12, color: t.edge2, marginBottom: 8, fontWeight: 600 }}>
                 Todos ({call.todos.length})
               </div>
               {[...openTodos, ...doneTodos].map((td) => (
-                <div key={td.id} style={{ marginBottom: 10 }}>
-                  <TodoRow
-                    todo={td}
-                    onToggle={onToggle}
-                    busy={busyIds.has(td.id)}
-                    readOnly={!canManage}
-                  />
-                  <div style={{ padding: "0 10px 4px" }}>
-                    <TodoFacts todo={td} />
-                  </div>
-                  {canManage && (
-                    <div style={{ padding: "0 10px 4px" }}>
-                      <TodoAssignControl
-                        todo={td}
-                        staffRoster={staffRoster}
-                        currentUser={currentUser}
-                        onAssign={onAssign}
-                        hideStatus
-                      />
-                    </div>
-                  )}
-                </div>
+                <OpenTodoCard
+                  key={td.id}
+                  todo={td}
+                  callName={call.client_name}
+                  recordedAt={call.recorded_at}
+                  onToggle={onToggle}
+                  busy={busyIds.has(td.id)}
+                  readOnly={!canManage}
+                  staffRoster={staffRoster}
+                  currentUser={currentUser}
+                  onAssign={canManage && onAssign ? onAssign : undefined}
+                  standalone
+                />
               ))}
-            </Card>
+            </div>
           )}
         </div>
       </div>

@@ -13,12 +13,44 @@ export function formatTodoSentence(todo) {
   return `${owner} is assigned ${todo.text}, to be done by ${due}`;
 }
 
-/** Checklist row — text + optional due. Assignee / extraction meta lives on OpenTodoCard. */
-export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
+/**
+ * Checklist row — text + optional due on the right.
+ * `embedded` = OpenTodoCard / Studio card body (no CallCard frost borders).
+ */
+export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = false }) {
   const done = todo.status === "done";
   const parked = todo.status === "snoozed";
   const urgent = isUrgent(todo);
   const Icon = done ? Check : parked ? Clock : Circle;
+
+  if (embedded) {
+    return (
+      <div
+        className={`sbm-todo-row${done ? " is-done" : ""}${busy ? " is-busy" : ""}`}
+      >
+        <button
+          type="button"
+          className="sbm-todo-row__check"
+          onClick={readOnly ? undefined : () => onToggle(todo)}
+          disabled={busy || readOnly}
+          aria-pressed={done}
+          aria-label={done ? `Reopen: ${todo.text}` : `Mark done: ${todo.text}`}
+        >
+          <Icon size={18} strokeWidth={done ? 2.5 : 1.6} />
+        </button>
+
+        <span className={`sbm-todo-row__text${done || parked ? " is-muted" : ""}`}>
+          {todo.text}
+        </span>
+
+        {!done && todo.due_date ? (
+          <span className={`sbm-todo-row__due${urgent ? " is-urgent" : ""}`}>
+            {fmtShort(todo.due_date)}
+          </span>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <div

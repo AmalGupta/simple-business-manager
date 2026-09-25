@@ -17,8 +17,8 @@ export function sortTodosByRecordedAtDesc(list, getRecordedAt) {
 }
 
 /**
- * Studio-style open-todo card shared by OpenTodosView + MyOpenTodosView (staff).
- * Meta (call · date) → body / TodoRow → facts → optional assign toolbar.
+ * Studio open-todo card — same layout for staff + admin:
+ * meta (call · date) → checklist + due badge → facts → optional assign toolbar.
  */
 export function OpenTodoCard({
   todo,
@@ -27,15 +27,35 @@ export function OpenTodoCard({
   onOpenCall,
   onToggle,
   busy = false,
+  readOnly = false,
   staffRoster,
   currentUser = null,
   onAssign,
   onRequestSiteAssign,
+  extraActions = null,
+  standalone = false,
 }) {
   const canOpen = typeof onOpenCall === "function";
+  const siteButton = onRequestSiteAssign ? (
+    <button
+      type="button"
+      onClick={() => onRequestSiteAssign(todo)}
+      style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 32, padding: "0 10px" }}
+    >
+      {todo.site_id ? "Change site" : "Assign to Site"}
+    </button>
+  ) : null;
+
+  const trailing =
+    siteButton || extraActions ? (
+      <>
+        {siteButton}
+        {extraActions}
+      </>
+    ) : null;
 
   return (
-    <article className="sbm-open-todo-card">
+    <article className={`sbm-open-todo-card${standalone ? " is-standalone" : ""}`}>
       <div className="sbm-open-todo-card__meta">
         <button
           type="button"
@@ -48,8 +68,14 @@ export function OpenTodoCard({
         {recordedAt ? <span className="sbm-open-todo-card__date">{fmtShort(recordedAt)}</span> : null}
       </div>
 
-      {onToggle ? (
-        <TodoRow todo={todo} onToggle={onToggle} busy={busy} />
+      {onToggle || readOnly ? (
+        <TodoRow
+          todo={todo}
+          onToggle={onToggle}
+          busy={busy}
+          readOnly={readOnly || !onToggle}
+          embedded
+        />
       ) : (
         <p className="sbm-open-todo-card__text">{todo.text}</p>
       )}
@@ -65,17 +91,7 @@ export function OpenTodoCard({
             onAssign={onAssign}
             compact
             hideStatus
-            extraActions={
-              onRequestSiteAssign ? (
-                <button
-                  type="button"
-                  onClick={() => onRequestSiteAssign(todo)}
-                  style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 32, padding: "0 10px" }}
-                >
-                  {todo.site_id ? "Change site" : "Assign to Site"}
-                </button>
-              ) : null
-            }
+            extraActions={trailing}
           />
         </div>
       ) : null}
