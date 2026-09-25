@@ -4462,6 +4462,8 @@ export interface AssignedTodoRow {
   status: Todo["status"];
   client_name: string;
   recorded_at: string | null;
+  /** When the todo row was created (extraction / manual). */
+  created_at: string | null;
   site_id: string | null;
   site_name: string | null;
   assignees: TodoAssignee[];
@@ -4679,6 +4681,7 @@ export async function listOpenTodosByAssigneeBucket(
               todos.status AS status,
               ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
               calls.recorded_at AS recorded_at,
+              todos.created_at AS created_at,
               todos.site_id AS site_id,
               todo_sites.name AS site_name
        FROM todos
@@ -4720,6 +4723,7 @@ export async function listOpenTodosByAssigneeBucket(
   );
   const items = rows.map((r) => ({
     ...r,
+    created_at: r.created_at ?? null,
     site_id: r.site_id ?? null,
     site_name: r.site_name ?? null,
     assignees: map.get(r.id) ?? [],
@@ -4763,6 +4767,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
               COALESCE(callers.name, 'Unknown caller') AS client_name,
               calls.recorded_at AS recorded_at,
               calls.recording_date AS recording_date,
+              todos.created_at AS created_at,
               todos.site_id AS site_id,
               todo_sites.name AS site_name
        FROM todos
@@ -4785,6 +4790,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
   );
   return rows.map((r) => ({
     ...r,
+    created_at: r.created_at ?? null,
     site_id: r.site_id ?? null,
     site_name: r.site_name ?? null,
     assignees: map.get(r.id) ?? [],
@@ -4911,6 +4917,7 @@ export async function listMyOpenTodos(
                 'Unknown caller'
               ) AS client_name,
               calls.recorded_at AS recorded_at,
+              todos.created_at AS created_at,
               todos.site_id AS site_id,
               todo_sites.name AS site_name
        FROM todos
@@ -4976,6 +4983,7 @@ export async function listMyOpenTodos(
 
   return rows.map((r) => ({
     ...r,
+    created_at: r.created_at ?? null,
     site_id: r.site_id ?? null,
     site_name: r.site_name ?? null,
     assignees: map.get(r.id) ?? [],
