@@ -9,6 +9,7 @@
   padding: 14px 14px 12px;
   border-bottom: 1px solid var(--color-line);
   box-sizing: border-box;
+  background: var(--color-surface, #fff);
 }
 
 .sbm-open-todo-card:last-child {
@@ -25,6 +26,11 @@
 
 .sbm-open-todo-card.is-standalone:last-child {
   margin-bottom: 0;
+}
+
+/* Pastel red when the card has unresolved items (Blocked bookmark). */
+.sbm-open-todo-card.is-blocked {
+  background: var(--color-danger-bg);
 }
 
 /* ── Header: call + highlighted Extracted by / Extracted / Assigned ── */
@@ -185,6 +191,57 @@
   gap: 10px;
   padding: 0 0 0 var(--sbm-todo-body-inset);
   min-width: 0;
+}
+
+/* Call-level unresolved that put the card on Blocked */
+.sbm-open-todo-card__unresolved {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 0 var(--sbm-todo-body-inset);
+  padding-left: 12px;
+  border-left: 2px solid var(--color-line);
+  min-width: 0;
+}
+
+.sbm-open-todo-card__unresolved-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--color-slate);
+}
+
+.sbm-open-todo-card__unresolved-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sbm-open-todo-card__unresolved-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-ink);
+}
+
+.sbm-open-todo-card__unresolved-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.sbm-open-todo-card__unresolved-blocked {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--color-warn);
+  white-space: nowrap;
 }
 
 .sbm-open-todo-card__facts {

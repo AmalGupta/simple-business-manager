@@ -155,7 +155,7 @@ export async function fetchMyOpenTodos({ forUserId } = {}) {
 }
 
 /**
- * Admin Open tasks — paginated by assignee bucket (mine | unassigned | staff).
+ * Admin Open tasks — paginated by assignee bucket (mine | unassigned | staff | blocked).
  * Returns { items, total, limit, offset }.
  */
 export async function fetchOpenTodos({ bucket = "mine", limit = 20, offset = 0 } = {}) {
