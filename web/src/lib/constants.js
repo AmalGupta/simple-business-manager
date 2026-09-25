@@ -49,6 +49,47 @@ export const SITE_VISIT_CATEGORIES = [
   { key: "complaints", label: "Complaints" },
 ];
 
+/* ------------------------------------------------------------------
+   The fixed 5-step aluminium doors & windows production pipeline —
+   migration 0042, mirrors packages/core/src/production-steps.ts. Unlike
+   WORKFLOW_CATEGORIES above, this one genuinely runs in order: a step
+   can't be assigned until the step before it is done. See
+   migrations/0042_production_warehouse.sql.
+   ------------------------------------------------------------------ */
+export const PRODUCTION_STEPS = [
+  { key: "measurement", order: 1, label: "Measurement", description: "Calculated from the survey" },
+  { key: "cutting", order: 2, label: "Cutting", description: "" },
+  { key: "routing", order: 3, label: "Routing", description: "Assigned to a junior" },
+  { key: "assembly", order: 4, label: "Assembly", description: "" },
+  { key: "glass_integration", order: 5, label: "Glass integration", description: "" },
+];
+export const PRODUCTION_STEP_LABEL = Object.fromEntries(PRODUCTION_STEPS.map((s) => [s.key, s.label]));
+
+export const PRODUCTION_JOB_STATUS_LABEL = {
+  active: "In progress",
+  ready_for_dispatch: "Ready for dispatch",
+  dispatched: "Dispatched",
+  completed: "Completed",
+};
+
+/* ------------------------------------------------------------------
+   Warehouse register — migration 0042. Movement kinds and tool
+   locations; store list itself comes from the API (warehouse_stores),
+   not hardcoded here, so a store can be renamed without a redeploy.
+   ------------------------------------------------------------------ */
+export const WAREHOUSE_MOVEMENT_KINDS = [
+  { key: "in", label: "Material in" },
+  { key: "out", label: "Material out" },
+  { key: "dispatch", label: "Dispatch" },
+  { key: "maintenance", label: "Maintenance" },
+];
+export const WAREHOUSE_MOVEMENT_KIND_LABEL = Object.fromEntries(WAREHOUSE_MOVEMENT_KINDS.map((k) => [k.key, k.label]));
+
+export const TOOL_LOCATIONS = [
+  { key: "workshop", label: "Workshop" },
+  { key: "site", label: "Site" },
+];
+
 /* Sort rule — §4. Customer-waiting beats deadline proximity, beats recency. */
 export const sortCalls = (calls) =>
   [...calls].sort((a, b) => {

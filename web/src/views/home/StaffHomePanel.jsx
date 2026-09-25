@@ -6,6 +6,8 @@ import { PendingWorkTile } from "./PendingWorkTile.jsx";
 import { StaffScheduleTile } from "./StaffScheduleTile.jsx";
 import { SiteVisitTile } from "../site-visit/SiteVisitTile.jsx";
 import { ComplaintsTile } from "../site-visit/ComplaintsTile.jsx";
+import { MyProductionTile } from "../production/MyProductionTile.jsx";
+import { WarehouseTile } from "../warehouse/WarehouseTile.jsx";
 
 /* Staff home tile grid — used for staff login and when an admin opens a
    staff bookmark on home. Data is already scoped to that staff member. */
@@ -22,6 +24,8 @@ export function StaffHomePanel({
   onOpenComplaints,
   onOpenMyOpenTodos,
   onOpenSitesDirectory,
+  onOpenProduction,
+  onOpenWarehouse,
 }) {
   const confirmedSites = (sites ?? []).filter((s) => s.is_confirmed !== "N");
   const openTodosCount = myOpenTodosCount ?? myOpenTodos?.length ?? 0;
@@ -50,6 +54,10 @@ export function StaffHomePanel({
           forUserId={forUserId}
           onOpen={onOpenComplaints}
         />
+
+        <MyProductionTile forUserId={forUserId} onOpen={onOpenProduction} />
+
+        <WarehouseTile onOpen={onOpenWarehouse} />
 
         {openTodosCount > 0 && (
           <button
