@@ -154,6 +154,24 @@ export async function fetchMyOpenTodos({ forUserId } = {}) {
   return fetchJSON(`/api/my-open-todos${q}`);
 }
 
+/**
+ * Admin Open tasks — paginated by assignee bucket (mine | unassigned | staff).
+ * Returns { items, total, limit, offset }.
+ */
+export async function fetchOpenTodos({ bucket = "mine", limit = 20, offset = 0 } = {}) {
+  const params = new URLSearchParams({
+    bucket,
+    limit: String(limit),
+    offset: String(offset),
+  });
+  return fetchJSON(`/api/open-todos?${params}`);
+}
+
+/** Admin Open tasks tab badge counts: { mine, unassigned, staff, total }. */
+export async function fetchOpenTodosCounts() {
+  return fetchJSON("/api/open-todos/counts");
+}
+
 /* Single-call fetch, on demand — the bulk fetchCalls() list is never loaded
    for a `staff` session (no office dashboard for them), so opening a call
    from their site's timeline needs its own fetch. Same endpoint the admin

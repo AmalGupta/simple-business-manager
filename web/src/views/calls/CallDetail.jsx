@@ -26,7 +26,6 @@ export function CallDetail({
   call,
   onBack,
   onToggle,
-  onPark,
   busyIds,
   canManage = true,
   staffRoster = [],
@@ -220,7 +219,6 @@ export function CallDetail({
                   <TodoRow
                     todo={td}
                     onToggle={onToggle}
-                    onPark={canManage ? onPark : undefined}
                     busy={busyIds.has(td.id)}
                     readOnly={!canManage}
                   />

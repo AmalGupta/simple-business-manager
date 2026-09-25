@@ -48,7 +48,7 @@ export function CallCard({ call, onOpen, onToggle, onPark, busyIds, index = 0, s
       {call.summary && <p style={{ fontSize: 13, lineHeight: 1.6, color: t.edge2, margin: "0 0 10px" }}>{call.summary}</p>}
 
       {[...visible, ...done].map((todo) => (
-        <TodoRow key={todo.id} todo={todo} onToggle={onToggle} onPark={onPark} busy={busyIds.has(todo.id)} />
+        <TodoRow key={todo.id} todo={todo} onToggle={onToggle} busy={busyIds.has(todo.id)} />
       ))}
 
       {call.commitments?.length > 0 && (
