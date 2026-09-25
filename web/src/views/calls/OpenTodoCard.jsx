@@ -1,8 +1,7 @@
-import { fmtShort } from "../../lib/dates.js";
 import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { TodoRow } from "../../components/TodoRow.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
-import { TodoExtractionMeta, TodoStatusChips } from "./TodoFacts.jsx";
+import { TodoExtractionMeta } from "./TodoFacts.jsx";
 import "./OpenTodoCard.css";
 
 export const OPEN_TODO_PAGE_SIZE = 20;
@@ -18,13 +17,13 @@ export function sortTodosByRecordedAtDesc(list, getRecordedAt) {
 
 /**
  * Studio open-todo card — staff + admin:
- * top (call · date + Extracted by / Extracted / Assigned)
- * → checklist → chips → assign buttons under the todo text.
+ * top (call + highlighted Extracted by / Extracted / Assigned)
+ * → checklist → assign buttons under the todo text.
  */
 export function OpenTodoCard({
   todo,
   callName,
-  recordedAt,
+  recordedAt: _recordedAt,
   onOpenCall,
   onToggle,
   busy = false,
@@ -67,7 +66,6 @@ export function OpenTodoCard({
           >
             {callName || "Unknown caller"}
           </button>
-          {recordedAt ? <span className="sbm-open-todo-card__date">{fmtShort(recordedAt)}</span> : null}
         </div>
         <TodoExtractionMeta todo={todo} />
       </div>
@@ -84,9 +82,8 @@ export function OpenTodoCard({
         <p className="sbm-open-todo-card__text">{todo.text}</p>
       )}
 
-      <div className="sbm-open-todo-card__below-text">
-        <TodoStatusChips todo={todo} />
-        {onAssign ? (
+      {onAssign ? (
+        <div className="sbm-open-todo-card__below-text">
           <div className="sbm-open-todo-card__toolbar">
             <TodoAssignControl
               todo={todo}
@@ -98,8 +95,8 @@ export function OpenTodoCard({
               extraActions={trailing}
             />
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </article>
   );
 }
