@@ -386,7 +386,8 @@ export async function handleGetMyOpenTodos(request: Request, env: Env): Promise<
 
 /**
  * Admin Open tasks — paginated open todos by assignee bucket
- * (mine | unassigned | staff | blocked).
+ * (mine | unassigned | staff | blocked). Optional date_from / date_to filter
+ * on task identification date (todos.created_at).
  */
 export async function handleGetOpenTodos(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
@@ -400,23 +401,31 @@ export async function handleGetOpenTodos(request: Request, env: Env): Promise<Re
   const offsetParam = Number(url.searchParams.get("offset"));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 20;
   const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 0;
+  const dateFrom = url.searchParams.get("date_from")?.trim() || null;
+  const dateTo = url.searchParams.get("date_to")?.trim() || null;
   return json(
     await listOpenTodosByAssigneeBucket(env.DB, {
       viewerUserId: gate.user_id,
       bucket,
       limit,
       offset,
+      dateFrom,
+      dateTo,
     })
   );
 }
 
 /**
  * Admin Open tasks tab badge counts (mine / unassigned / staff / blocked / total).
+ * Honors the same optional date_from / date_to window as the list.
  */
 export async function handleGetOpenTodosCounts(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
-  return json(await countOpenTodosByAssigneeBucket(env.DB, gate.user_id));
+  const url = new URL(request.url);
+  const dateFrom = url.searchParams.get("date_from")?.trim() || null;
+  const dateTo = url.searchParams.get("date_to")?.trim() || null;
+  return json(await countOpenTodosByAssigneeBucket(env.DB, gate.user_id, { dateFrom, dateTo }));
 }
 
 /**
