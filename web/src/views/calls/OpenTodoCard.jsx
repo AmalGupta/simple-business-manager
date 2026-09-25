@@ -18,7 +18,7 @@ export function sortTodosByRecordedAtDesc(list, getRecordedAt) {
 /**
  * Studio open-todo card — staff + admin:
  * top (call + highlighted Extracted by / Extracted / Assigned)
- * → checklist → assign buttons under the todo text.
+ * → checklist → optional unresolved list → assign buttons under the todo text.
  */
 export function OpenTodoCard({
   todo,
@@ -36,6 +36,10 @@ export function OpenTodoCard({
   standalone = false,
 }) {
   const canOpen = typeof onOpenCall === "function";
+  const unresolved = Array.isArray(todo?.unresolved) ? todo.unresolved : [];
+  const hasUnresolved = unresolved.length > 0;
+  /* Pastel red when the call has unresolved items (Blocked bookmark). */
+  const blockedHighlight = hasUnresolved;
   const siteButton = onRequestSiteAssign ? (
     <button
       type="button"
@@ -55,7 +59,9 @@ export function OpenTodoCard({
     ) : null;
 
   return (
-    <article className={`sbm-open-todo-card${standalone ? " is-standalone" : ""}`}>
+    <article
+      className={`sbm-open-todo-card${standalone ? " is-standalone" : ""}${blockedHighlight ? " is-blocked" : ""}`}
+    >
       <div className="sbm-open-todo-card__top">
         <div className="sbm-open-todo-card__meta">
           <button
@@ -81,6 +87,22 @@ export function OpenTodoCard({
       ) : (
         <p className="sbm-open-todo-card__text">{todo.text}</p>
       )}
+
+      {hasUnresolved ? (
+        <div className="sbm-open-todo-card__unresolved">
+          <div className="sbm-open-todo-card__unresolved-label">Left unresolved on the call</div>
+          <ul className="sbm-open-todo-card__unresolved-list">
+            {unresolved.map((u, i) => (
+              <li key={i} className="sbm-open-todo-card__unresolved-item">
+                <span className="sbm-open-todo-card__unresolved-text">{u.item}</span>
+                {u.blocked_on ? (
+                  <span className="sbm-open-todo-card__unresolved-blocked">blocked on {u.blocked_on}</span>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {onAssign ? (
         <div className="sbm-open-todo-card__below-text">

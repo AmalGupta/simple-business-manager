@@ -4472,6 +4472,8 @@ export interface AssignedTodoRow {
   site_id: string | null;
   site_name: string | null;
   assignees: TodoAssignee[];
+  /** Present on Blocked bookmark rows — call-level unresolved that put the card here. */
+  unresolved?: UnresolvedRow[];
 }
 
 /** Open call todos for one site — confirmed-sites Open-count popup. */
@@ -4479,8 +4481,8 @@ export interface SiteOpenTodoRow extends AssignedTodoRow {
   recording_date: string | null;
 }
 
-/** Admin Open tasks bookmarks — partition of open call todos by assignee. */
-export type OpenTodoAssigneeBucket = "mine" | "unassigned" | "staff";
+/** Admin Open tasks bookmarks — assignee partitions + cross-cut Blocked (unresolved). */
+export type OpenTodoAssigneeBucket = "mine" | "unassigned" | "staff" | "blocked";
 
 export interface ListOpenTodosByBucketOptions {
   viewerUserId: string;
@@ -4500,6 +4502,8 @@ export interface OpenTodoBucketCounts {
   mine: number;
   unassigned: number;
   staff: number;
+  /** Open todos on calls with a non-empty unresolved list (overlaps assignee buckets). */
+  blocked: number;
   /** mine + unassigned + staff (all open on non-deleted calls). */
   total: number;
 }
@@ -4621,6 +4625,8 @@ const OPEN_TODO_CLIENT_NAME_SQL = `COALESCE(
                 'Unknown caller'
               )`;
 
+const OPEN_TODO_HAS_UNRESOLVED_SQL = `(calls.unresolved IS NOT NULL AND calls.unresolved != '' AND calls.unresolved != '[]')`;
+
 function openTodoBucketWhere(bucket: OpenTodoAssigneeBucket, viewerUserId: string): { sql: string; binds: unknown[] } {
   const base = `todos.status = 'open' AND calls.deleted_at IS NULL`;
   if (bucket === "mine") {
@@ -4639,6 +4645,12 @@ function openTodoBucketWhere(bucket: OpenTodoAssigneeBucket, viewerUserId: strin
          AND NOT EXISTS (
            SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id
          )`,
+      binds: [],
+    };
+  }
+  if (bucket === "blocked") {
+    return {
+      sql: `${base} AND ${OPEN_TODO_HAS_UNRESOLVED_SQL}`,
       binds: [],
     };
   }
@@ -4676,6 +4688,10 @@ export async function listOpenTodosByAssigneeBucket(
     .first<{ n: number }>();
   const total = Number(countRow?.n) || 0;
 
+  type OpenTodoListRow = Omit<AssignedTodoRow, "assignees" | "unresolved"> & {
+    unresolved_json: string | null;
+  };
+
   const { results } = await db
     .prepare(
       `SELECT todos.id AS id,
@@ -4688,7 +4704,8 @@ export async function listOpenTodosByAssigneeBucket(
               calls.recorded_at AS recorded_at,
               todos.created_at AS created_at,
               todos.site_id AS site_id,
-              todo_sites.name AS site_name
+              todo_sites.name AS site_name,
+              calls.unresolved AS unresolved_json
        FROM todos
        JOIN calls ON calls.id = todos.call_id
        LEFT JOIN callers ON callers.id = calls.client_id
@@ -4699,7 +4716,7 @@ export async function listOpenTodosByAssigneeBucket(
        LIMIT ? OFFSET ?`
     )
     .bind(...whereBinds, limit, offset)
-    .all<Omit<AssignedTodoRow, "assignees">>();
+    .all<OpenTodoListRow>();
 
   const rows = results ?? [];
   if (rows.length === 0) {
@@ -4726,13 +4743,21 @@ export async function listOpenTodosByAssigneeBucket(
     db,
     rows.map((r) => r.id)
   );
-  const items = rows.map((r) => ({
-    ...r,
-    created_at: r.created_at ?? null,
-    site_id: r.site_id ?? null,
-    site_name: r.site_name ?? null,
-    assignees: map.get(r.id) ?? [],
-  }));
+  const includeUnresolved = opts.bucket === "blocked";
+  const items = rows.map((r) => {
+    const { unresolved_json, ...rest } = r;
+    const item: AssignedTodoRow = {
+      ...rest,
+      created_at: r.created_at ?? null,
+      site_id: r.site_id ?? null,
+      site_name: r.site_name ?? null,
+      assignees: map.get(r.id) ?? [],
+    };
+    if (includeUnresolved) {
+      item.unresolved = parseUnresolvedArray(unresolved_json);
+    }
+    return item;
+  });
   return { items, total, limit, offset };
 }
 
@@ -4741,8 +4766,8 @@ export async function countOpenTodosByAssigneeBucket(
   db: D1Database,
   viewerUserId: string
 ): Promise<OpenTodoBucketCounts> {
-  const [mine, unassigned, staff] = await Promise.all(
-    (["mine", "unassigned", "staff"] as const).map(async (bucket) => {
+  const [mine, unassigned, staff, blocked] = await Promise.all(
+    (["mine", "unassigned", "staff", "blocked"] as const).map(async (bucket) => {
       const { sql, binds } = openTodoBucketWhere(bucket, viewerUserId);
       const row = await db
         .prepare(
@@ -4756,7 +4781,7 @@ export async function countOpenTodosByAssigneeBucket(
       return Number(row?.n) || 0;
     })
   );
-  return { mine, unassigned, staff, total: mine + unassigned + staff };
+  return { mine, unassigned, staff, blocked, total: mine + unassigned + staff };
 }
 
 /** Open call todos linked to a site via call_sites, newest call first. */

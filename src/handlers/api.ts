@@ -386,15 +386,15 @@ export async function handleGetMyOpenTodos(request: Request, env: Env): Promise<
 
 /**
  * Admin Open tasks — paginated open todos by assignee bucket
- * (mine | unassigned | staff).
+ * (mine | unassigned | staff | blocked).
  */
 export async function handleGetOpenTodos(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
   const url = new URL(request.url);
   const bucket = url.searchParams.get("bucket")?.trim() || "mine";
-  if (bucket !== "mine" && bucket !== "unassigned" && bucket !== "staff") {
-    return json({ error: "bucket must be mine, unassigned, or staff" }, 400);
+  if (bucket !== "mine" && bucket !== "unassigned" && bucket !== "staff" && bucket !== "blocked") {
+    return json({ error: "bucket must be mine, unassigned, staff, or blocked" }, 400);
   }
   const limitParam = Number(url.searchParams.get("limit"));
   const offsetParam = Number(url.searchParams.get("offset"));
@@ -411,7 +411,7 @@ export async function handleGetOpenTodos(request: Request, env: Env): Promise<Re
 }
 
 /**
- * Admin Open tasks tab badge counts (mine / unassigned / staff / total).
+ * Admin Open tasks tab badge counts (mine / unassigned / staff / blocked / total).
  */
 export async function handleGetOpenTodosCounts(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
