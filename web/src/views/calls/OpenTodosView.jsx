@@ -43,16 +43,18 @@ const BUCKETS = [
   { id: "mine", label: "Assigned to me" },
   { id: "unassigned", label: "Unassigned" },
   { id: "staff", label: "Staff assigned" },
+  { id: "blocked", label: "Blocked" },
 ];
 
 const EMPTY_COPY = {
   mine: "Nothing assigned to you right now.",
   unassigned: "No unassigned open tasks right now.",
   staff: "No tasks assigned only to staff right now.",
+  blocked: "No open tasks with unresolved items right now.",
 };
 
 /**
- * Admin Open tasks — three assignee bookmarks, server-paginated, newest first.
+ * Admin Open tasks — assignee bookmarks + Blocked (unresolved), server-paginated, newest first.
  * Cards: complete + Assign to me / Assign·Reassign / Assign to Site.
  */
 export function OpenTodosView({
@@ -70,7 +72,7 @@ export function OpenTodosView({
   const [bucket, setBucket] = useState(initialBucket);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
-  const [counts, setCounts] = useState({ mine: 0, unassigned: 0, staff: 0, total: 0 });
+  const [counts, setCounts] = useState({ mine: 0, unassigned: 0, staff: 0, blocked: 0, total: 0 });
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [siteTodo, setSiteTodo] = useState(null);
@@ -82,6 +84,7 @@ export function OpenTodosView({
           mine: data?.mine ?? 0,
           unassigned: data?.unassigned ?? 0,
           staff: data?.staff ?? 0,
+          blocked: data?.blocked ?? 0,
           total: data?.total ?? 0,
         });
       })
@@ -137,6 +140,7 @@ export function OpenTodosView({
     const assignedToMe = Boolean(myId && assignees.some((a) => a.id === myId));
     const unassigned = assignees.length === 0;
     const stays =
+      bucket === "blocked" ||
       (bucket === "mine" && assignedToMe) ||
       (bucket === "unassigned" && unassigned) ||
       (bucket === "staff" && !unassigned && !assignedToMe);
