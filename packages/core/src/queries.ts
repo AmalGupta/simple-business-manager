@@ -4774,20 +4774,17 @@ export async function listOpenTodosByAssigneeBucket(
     db,
     rows.map((r) => r.id)
   );
-  const includeUnresolved = opts.bucket === "blocked";
+  /* Always attach unresolved so collapsed cards can show Blocked count on every tab. */
   const items = rows.map((r) => {
     const { unresolved_json, ...rest } = r;
-    const item: AssignedTodoRow = {
+    return {
       ...rest,
       created_at: r.created_at ?? null,
       site_id: r.site_id ?? null,
       site_name: r.site_name ?? null,
       assignees: map.get(r.id) ?? [],
+      unresolved: parseUnresolvedArray(unresolved_json),
     };
-    if (includeUnresolved) {
-      item.unresolved = parseUnresolvedArray(unresolved_json);
-    }
-    return item;
   });
   return { items, total, limit, offset };
 }
@@ -4832,7 +4829,8 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
               calls.recording_date AS recording_date,
               todos.created_at AS created_at,
               todos.site_id AS site_id,
-              todo_sites.name AS site_name
+              todo_sites.name AS site_name,
+              calls.unresolved AS unresolved_json
        FROM todos
        JOIN calls ON calls.id = todos.call_id
        JOIN call_sites ON call_sites.call_id = calls.id
@@ -4844,20 +4842,24 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
        ORDER BY calls.recorded_at DESC, todos.created_at DESC`
     )
     .bind(siteId)
-    .all<Omit<SiteOpenTodoRow, "assignees">>();
+    .all<Omit<SiteOpenTodoRow, "assignees" | "unresolved"> & { unresolved_json: string | null }>();
   const rows = results ?? [];
   if (rows.length === 0) return [];
   const map = await getAssigneesByTodoIds(
     db,
     rows.map((r) => r.id)
   );
-  return rows.map((r) => ({
-    ...r,
-    created_at: r.created_at ?? null,
-    site_id: r.site_id ?? null,
-    site_name: r.site_name ?? null,
-    assignees: map.get(r.id) ?? [],
-  }));
+  return rows.map((r) => {
+    const { unresolved_json, ...rest } = r;
+    return {
+      ...rest,
+      created_at: r.created_at ?? null,
+      site_id: r.site_id ?? null,
+      site_name: r.site_name ?? null,
+      assignees: map.get(r.id) ?? [],
+      unresolved: parseUnresolvedArray(unresolved_json),
+    };
+  });
 }
 
 /**
@@ -4982,7 +4984,8 @@ export async function listMyOpenTodos(
               calls.recorded_at AS recorded_at,
               todos.created_at AS created_at,
               todos.site_id AS site_id,
-              todo_sites.name AS site_name
+              todo_sites.name AS site_name,
+              calls.unresolved AS unresolved_json
        FROM todos
        JOIN calls ON calls.id = todos.call_id
        LEFT JOIN callers ON callers.id = calls.client_id
@@ -4992,7 +4995,7 @@ export async function listMyOpenTodos(
        ORDER BY calls.recorded_at DESC, todos.id DESC`
     )
     .bind(...binds)
-    .all<Omit<AssignedTodoRow, "assignees">>();
+    .all<Omit<AssignedTodoRow, "assignees" | "unresolved"> & { unresolved_json: string | null }>();
   const rows = results ?? [];
   if (rows.length === 0) return [];
 
@@ -5044,13 +5047,17 @@ export async function listMyOpenTodos(
     }
   }
 
-  return rows.map((r) => ({
-    ...r,
-    created_at: r.created_at ?? null,
-    site_id: r.site_id ?? null,
-    site_name: r.site_name ?? null,
-    assignees: map.get(r.id) ?? [],
-  }));
+  return rows.map((r) => {
+    const { unresolved_json, ...rest } = r;
+    return {
+      ...rest,
+      created_at: r.created_at ?? null,
+      site_id: r.site_id ?? null,
+      site_name: r.site_name ?? null,
+      assignees: map.get(r.id) ?? [],
+      unresolved: parseUnresolvedArray(unresolved_json),
+    };
+  });
 }
 
 /**
