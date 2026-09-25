@@ -2,6 +2,7 @@
    Shared by Open tasks, My call tasks, call detail, site open-todos popup. */
 
 .sbm-open-todo-card {
+  --sbm-todo-body-inset: 38px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -26,15 +27,21 @@
   margin-bottom: 0;
 }
 
-/* ── Header: call name (left) · recorded date (right) + divider ── */
+/* ── Header: call · date, then Extracted by / Extracted / Assigned ── */
+
+.sbm-open-todo-card__top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-line);
+}
 
 .sbm-open-todo-card__meta {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
   gap: 8px 12px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--color-line);
 }
 
 .sbm-open-todo-card__call {
@@ -64,6 +71,41 @@
   font-size: 12px;
   color: var(--color-slate);
   white-space: nowrap;
+}
+
+/* Inline extraction meta on the top block */
+.sbm-open-todo-card__meta-facts {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.sbm-open-todo-card__meta-fact {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sbm-open-todo-card__meta-fact dt {
+  margin: 0;
+  color: var(--color-slate);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sbm-open-todo-card__meta-fact dt::after {
+  content: ":";
+}
+
+.sbm-open-todo-card__meta-fact dd {
+  margin: 0;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 /* ── Embedded checklist row (TodoRow embedded) ── */
@@ -138,13 +180,21 @@
   border-color: var(--color-danger);
 }
 
-/* ── Facts: chips + Extracted by / Extracted / Assigned ── */
+/* ── Below todo text: chips then assign buttons ── */
+
+.sbm-open-todo-card__below-text {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 0 0 var(--sbm-todo-body-inset);
+  min-width: 0;
+}
 
 .sbm-open-todo-card__facts {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 0 0 0 38px; /* align under task text (past checkbox) */
+  padding: 0 0 0 var(--sbm-todo-body-inset);
 }
 
 .sbm-open-todo-card__labels {
@@ -183,38 +233,19 @@
   border-color: var(--color-danger);
 }
 
-.sbm-open-todo-card__dl {
-  margin: 0;
-  display: flex;
+/* Stacked meta (TodoFacts legacy / non-card) */
+.sbm-open-todo-card__facts .sbm-open-todo-card__meta-facts {
   flex-direction: column;
   gap: 4px;
 }
 
-.sbm-open-todo-card__dl-row {
-  display: flex;
+.sbm-open-todo-card__facts .sbm-open-todo-card__meta-fact {
   justify-content: space-between;
-  align-items: baseline;
-  gap: 12px;
-  font-size: 12px;
-  line-height: 1.4;
+  width: 100%;
 }
 
-.sbm-open-todo-card__dl-row dt {
-  margin: 0;
-  flex: 0 0 auto;
-  color: var(--color-slate);
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.sbm-open-todo-card__dl-row dd {
-  margin: 0;
-  flex: 1 1 auto;
-  min-width: 0;
+.sbm-open-todo-card__facts .sbm-open-todo-card__meta-fact dd {
   text-align: right;
-  color: var(--color-ink);
-  overflow-wrap: anywhere;
-  word-break: break-word;
 }
 
 .sbm-open-todo-card__text {
@@ -226,7 +257,7 @@
   word-break: break-word;
 }
 
-/* ── Assign toolbar ── */
+/* ── Assign toolbar under todo text ── */
 
 .sbm-open-todo-card__toolbar {
   display: flex;
@@ -234,7 +265,8 @@
   gap: 6px;
   width: 100%;
   min-width: 0;
-  padding-top: 2px;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .sbm-open-todo-card__toolbar .cna-todo-toolbar {
@@ -255,7 +287,32 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+/* Equal-height compact buttons — override TodoAssignControl inline compact styles */
+.sbm-open-todo-card__toolbar .cna-todo-toolbar__actions > button,
+.sbm-open-todo-card__btn {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 30px !important;
+  height: 30px !important;
+  padding: 0 12px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  line-height: 1;
+  border-radius: var(--radius-card) !important;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sbm-open-todo-card__btn--secondary {
+  border: 1px solid var(--color-line) !important;
+  background: #fff !important;
+  color: var(--color-ink) !important;
 }
 
 .sbm-open-todo-card__load-more {
