@@ -38,8 +38,6 @@ export function OpenTodoCard({
   const canOpen = typeof onOpenCall === "function";
   const unresolved = Array.isArray(todo?.unresolved) ? todo.unresolved : [];
   const hasUnresolved = unresolved.length > 0;
-  /* Pastel red when the call has unresolved items (Blocked bookmark). */
-  const blockedHighlight = hasUnresolved;
   const siteButton = onRequestSiteAssign ? (
     <button
       type="button"
@@ -59,9 +57,7 @@ export function OpenTodoCard({
     ) : null;
 
   return (
-    <article
-      className={`sbm-open-todo-card${standalone ? " is-standalone" : ""}${blockedHighlight ? " is-blocked" : ""}`}
-    >
+    <article className={`sbm-open-todo-card${standalone ? " is-standalone" : ""}`}>
       <div className="sbm-open-todo-card__top">
         <div className="sbm-open-todo-card__meta">
           <button
