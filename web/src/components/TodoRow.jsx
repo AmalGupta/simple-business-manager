@@ -18,6 +18,11 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
   const parked = todo.status === "snoozed";
   const urgent = isUrgent(todo);
   const Icon = done ? Check : parked ? Clock : Circle;
+  const assignees = todo.assignees ?? [];
+  const assigneeLabel =
+    assignees.length > 0
+      ? assignees.map((a) => a.name).filter(Boolean).join(", ")
+      : "Unassigned";
 
   return (
     <div
@@ -69,8 +74,12 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
       </span>
 
       <span
+        title={assigneeLabel}
         style={{
           flexShrink: 0,
+          maxWidth: 140,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
           fontSize: 11,
           fontWeight: 600,
           padding: "2px 8px",
@@ -80,7 +89,7 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false }) {
           whiteSpace: "nowrap",
         }}
       >
-        {todo.owner === "self" ? "him" : todo.owner}
+        {assigneeLabel}
       </span>
 
       {!done && todo.due_date && (
