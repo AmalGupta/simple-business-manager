@@ -1,10 +1,10 @@
-/* Shared open-todo card — Studio surface inside a list Card.
-   Flat white parent, hairline dividers, CNA-style site chip. */
+/* Studio open-todo card — hairline surface, meta divider, checklist + facts + actions.
+   Shared by Open tasks, My call tasks, call detail, site open-todos popup. */
 
 .sbm-open-todo-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   padding: 14px 14px 12px;
   border-bottom: 1px solid var(--color-line);
   box-sizing: border-box;
@@ -14,20 +14,40 @@
   border-bottom: none;
 }
 
+/* Standalone cards (call detail / site popup) — full hairline border */
+.sbm-open-todo-card.is-standalone {
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+  background: var(--color-surface, #fff);
+  margin-bottom: 10px;
+}
+
+.sbm-open-todo-card.is-standalone:last-child {
+  margin-bottom: 0;
+}
+
+/* ── Header: call name (left) · recorded date (right) + divider ── */
+
 .sbm-open-todo-card__meta {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: baseline;
   gap: 8px 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--color-line);
 }
 
 .sbm-open-todo-card__call {
   all: unset;
   cursor: pointer;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 13px;
   font-weight: 500;
   color: var(--color-accent);
   line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sbm-open-todo-card__call:hover {
@@ -40,47 +60,91 @@
 }
 
 .sbm-open-todo-card__date {
+  flex: 0 0 auto;
   font-size: 12px;
   color: var(--color-slate);
-}
-
-.sbm-open-todo-card__due {
-  font-size: 11px;
-  font-weight: 600;
-  padding: 2px 8px;
-  border-radius: var(--radius-card);
-  color: var(--color-slate);
-  background: transparent;
-  border: 1px solid var(--color-line);
   white-space: nowrap;
 }
 
-.sbm-open-todo-card__due.is-urgent {
+/* ── Embedded checklist row (TodoRow embedded) ── */
+
+.sbm-todo-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sbm-todo-row.is-busy {
+  opacity: 0.5;
+}
+
+.sbm-todo-row__check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  margin: -2px 0 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-slate);
+  cursor: pointer;
+}
+
+.sbm-todo-row__check:disabled {
+  cursor: default;
+}
+
+.sbm-todo-row.is-done .sbm-todo-row__check {
+  color: var(--color-accent);
+}
+
+.sbm-todo-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding-top: 3px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--color-ink);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.sbm-todo-row__text.is-muted {
+  color: var(--color-slate);
+  text-decoration: line-through;
+}
+
+.sbm-todo-row__due {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  color: var(--color-slate);
+  background: var(--color-canvas);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
+
+.sbm-todo-row__due.is-urgent {
   color: #fff;
   background: var(--color-danger);
   border-color: var(--color-danger);
 }
 
-.sbm-open-todo-card__site {
-  display: inline-block;
-  align-self: flex-start;
-  max-width: 100%;
-  padding: 2px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--color-accent);
-  border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
+/* ── Facts: chips + Extracted by / Extracted / Assigned ── */
 
 .sbm-open-todo-card__facts {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 2px 0 0;
+  gap: 10px;
+  padding: 0 0 0 38px; /* align under task text (past checkbox) */
 }
 
 .sbm-open-todo-card__labels {
@@ -162,12 +226,15 @@
   word-break: break-word;
 }
 
+/* ── Assign toolbar ── */
+
 .sbm-open-todo-card__toolbar {
   display: flex;
   flex-direction: column;
   gap: 6px;
   width: 100%;
   min-width: 0;
+  padding-top: 2px;
 }
 
 .sbm-open-todo-card__toolbar .cna-todo-toolbar {
