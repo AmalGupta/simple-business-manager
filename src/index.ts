@@ -58,6 +58,26 @@ import {
   handlePatchSiteTask,
 } from "./handlers/site-tasks";
 import {
+  handleCreateProductionJob,
+  handleGetProductionJob,
+  handleListOpenProductionSteps,
+  handleListProductionJobs,
+  handlePatchProductionJobProblem,
+  handlePatchProductionStep,
+  handlePostProductionJobProblem,
+} from "./handlers/production";
+import {
+  handleGetOpenToolMovements,
+  handleGetWarehouseItemSuggestions,
+  handleGetWarehouseMovements,
+  handleGetWarehouseStock,
+  handleGetWarehouseStores,
+  handlePostToolMovement,
+  handlePostWarehouseMovement,
+  handleReturnToolMovement,
+  handleVoidWarehouseMovement,
+} from "./handlers/warehouse";
+import {
   handleAdminCreateUser,
   handleAdminRevokeSessions,
   handleCreateStaff,
@@ -395,6 +415,87 @@ export default {
     if (siteTaskMatch && request.method === "PATCH") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handlePatchSiteTask(request, env, siteTaskMatch[1]);
+    }
+
+    // --- Production job tracker — migration 0041. Same X-SBM-Key +
+    // session pattern as the site-task routes above. ---
+
+    if (url.pathname === "/api/production-jobs" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleListProductionJobs(request, env);
+    }
+    if (url.pathname === "/api/production-jobs" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleCreateProductionJob(request, env);
+    }
+    if (url.pathname === "/api/production-steps/open" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleListOpenProductionSteps(request, env);
+    }
+
+    const productionJobProblemsMatch = url.pathname.match(/^\/api\/production-jobs\/([^/]+)\/problems$/);
+    if (productionJobProblemsMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostProductionJobProblem(request, env, productionJobProblemsMatch[1]);
+    }
+
+    const productionJobMatch = url.pathname.match(/^\/api\/production-jobs\/([^/]+)$/);
+    if (productionJobMatch && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetProductionJob(request, env, productionJobMatch[1]);
+    }
+
+    const productionStepMatch = url.pathname.match(/^\/api\/production-steps\/([^/]+)$/);
+    if (productionStepMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePatchProductionStep(request, env, productionStepMatch[1]);
+    }
+
+    const productionJobProblemMatch = url.pathname.match(/^\/api\/production-job-problems\/([^/]+)$/);
+    if (productionJobProblemMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePatchProductionJobProblem(request, env, productionJobProblemMatch[1]);
+    }
+
+    // --- Warehouse register — migration 0041. Same X-SBM-Key + session pattern. ---
+
+    if (url.pathname === "/api/warehouse/stores" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetWarehouseStores(request, env);
+    }
+    if (url.pathname === "/api/warehouse/stock" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetWarehouseStock(request, env);
+    }
+    if (url.pathname === "/api/warehouse/movements" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetWarehouseMovements(request, env);
+    }
+    if (url.pathname === "/api/warehouse/movements" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostWarehouseMovement(request, env);
+    }
+    const warehouseMovementVoidMatch = url.pathname.match(/^\/api\/warehouse\/movements\/([^/]+)\/void$/);
+    if (warehouseMovementVoidMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleVoidWarehouseMovement(request, env, warehouseMovementVoidMatch[1]);
+    }
+    if (url.pathname === "/api/warehouse/item-suggestions" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetWarehouseItemSuggestions(request, env);
+    }
+    if (url.pathname === "/api/warehouse/tools" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetOpenToolMovements(request, env);
+    }
+    if (url.pathname === "/api/warehouse/tools" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostToolMovement(request, env);
+    }
+    const toolReturnMatch = url.pathname.match(/^\/api\/warehouse\/tools\/([^/]+)\/return$/);
+    if (toolReturnMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleReturnToolMovement(request, env, toolReturnMatch[1]);
     }
 
     if (url.pathname === "/api/escalations" && request.method === "GET") {

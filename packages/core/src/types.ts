@@ -165,7 +165,7 @@ export interface Commitment {
 }
 
 /** Manual only — see docs/ADDITIONAL_FEATURES_M0.md "Tile 4 — Escalations". */
-export type EscalationSource = "admin" | "staff_field";
+export type EscalationSource = "admin" | "staff_field" | "production";
 
 export interface Escalation {
   id: string;
@@ -179,6 +179,8 @@ export interface Escalation {
   source: EscalationSource;
   /** Set when filed from a specific installation checklist row; NULL for a site-level complaint. */
   installation_update_id: string | null;
+  /** migration 0041: set when dual-written from a production job's "site problem" — NULL otherwise. */
+  production_job_problem_id: string | null;
   assigned_to_user_id: string | null;
   assigned_by_user_id: string | null;
   assigned_at: string | null;
@@ -420,4 +422,99 @@ export interface DrivePollProgress {
   scanned: number;
   skippedExisting: number;
   message?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Production job tracker + warehouse register — migration 0041. See
+// packages/core/src/production-steps.ts for the fixed step catalog and
+// migrations/0041_production_warehouse.sql for the design rationale.
+// ---------------------------------------------------------------------------
+
+export type ProductionJobStatus = "active" | "ready_for_dispatch" | "dispatched" | "completed";
+
+export interface ProductionJob {
+  id: string;
+  site_id: string;
+  title: string;
+  survey_note: string | null;
+  status: ProductionJobStatus;
+  created_by_user_id: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export type ProductionJobStepStatus = "pending" | "assigned" | "done" | "blocked";
+
+export interface ProductionJobStep {
+  id: string;
+  job_id: string;
+  step_key: string;
+  step_order: number;
+  status: ProductionJobStepStatus;
+  assigned_to_user_id: string | null;
+  assigned_by_user_id: string | null;
+  assigned_at: string | null;
+  completed_at: string | null;
+  completed_by_user_id: string | null;
+  note: string | null;
+  blocked_note: string | null;
+  blocked_at: string | null;
+}
+
+export type ProductionJobProblemStatus = "open" | "resolved";
+
+export interface ProductionJobProblem {
+  id: string;
+  job_id: string;
+  site_id: string;
+  description: string;
+  status: ProductionJobProblemStatus;
+  raised_by_user_id: string | null;
+  raised_at: string;
+  resolved_by_user_id: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
+}
+
+export interface WarehouseStore {
+  id: string;
+  key: string;
+  label: string;
+}
+
+export type WarehouseMovementKind = "in" | "out" | "dispatch" | "maintenance";
+export type WarehouseMovementStatus = "active" | "voided";
+
+export interface WarehouseMovement {
+  id: string;
+  store_id: string;
+  kind: WarehouseMovementKind;
+  item: string;
+  quantity: number;
+  unit: string | null;
+  batch_no: string | null;
+  site_id: string | null;
+  production_job_id: string | null;
+  supplier: string | null;
+  machine_or_area: string | null;
+  note: string | null;
+  status: WarehouseMovementStatus;
+  created_by_user_id: string | null;
+  created_at: string;
+  voided_by_user_id: string | null;
+  voided_at: string | null;
+}
+
+export type ToolMovementLocation = "workshop" | "site";
+
+export interface ToolMovement {
+  id: string;
+  tool_name: string;
+  taken_by_user_id: string;
+  location: ToolMovementLocation;
+  site_id: string | null;
+  note: string | null;
+  taken_at: string;
+  returned_at: string | null;
+  created_by_user_id: string | null;
 }
