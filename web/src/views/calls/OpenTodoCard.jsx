@@ -25,7 +25,6 @@ export function OpenTodoCard({
   recordedAt,
   onOpenCall,
   onToggle,
-  onPark,
   busy = false,
   staffRoster,
   currentUser = null,
@@ -56,7 +55,7 @@ export function OpenTodoCard({
       {todo.site_name ? <span className="sbm-open-todo-card__site">{todo.site_name}</span> : null}
 
       {onToggle ? (
-        <TodoRow todo={todo} onToggle={onToggle} onPark={onPark} busy={busy} />
+        <TodoRow todo={todo} onToggle={onToggle} busy={busy} />
       ) : (
         <p className="sbm-open-todo-card__text">{todo.text}</p>
       )}

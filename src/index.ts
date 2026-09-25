@@ -23,6 +23,8 @@ import {
   handleGetCallTranscripts,
   handleGetDashboardSummary,
   handleGetMyOpenTodos,
+  handleGetOpenTodos,
+  handleGetOpenTodosCounts,
   handleGetEscalations,
   handleGetSites,
   handlePostSite,
@@ -249,6 +251,14 @@ export default {
     if (url.pathname === "/api/my-open-todos" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetMyOpenTodos(request, env);
+    }
+
+    if (url.pathname === "/api/open-todos" && request.method === "GET") {
+      return handleGetOpenTodos(request, env);
+    }
+
+    if (url.pathname === "/api/open-todos/counts" && request.method === "GET") {
+      return handleGetOpenTodosCounts(request, env);
     }
 
     const callMatch = url.pathname.match(/^\/api\/calls\/([^/]+)$/);

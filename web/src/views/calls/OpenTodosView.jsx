@@ -1,18 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { t } from "../../theme.js";
-import { TILE_ROW_STYLE } from "../../styles.js";
-import { getCachedCallsByTodoStatus, loadCallsByTodoStatus, refreshCallsByTodoStatus } from "../../lib/api.js";
-import { fmtShort, isUrgent } from "../../lib/dates.js";
+import { fetchOpenTodos, fetchOpenTodosCounts } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
-import { TodoRow } from "../../components/TodoRow.jsx";
 import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
-import {
-  OPEN_TODO_PAGE_SIZE,
-  OpenTodoCard,
-  OpenTodoLoadMore,
-  sortTodosByRecordedAtDesc,
-} from "./OpenTodoCard.jsx";
+import { OPEN_TODO_PAGE_SIZE, OpenTodoCard, OpenTodoLoadMore } from "./OpenTodoCard.jsx";
 
 const OPEN_TABS_CSS = `
 .sbm-open-todos-tabs {
@@ -47,14 +39,22 @@ const OPEN_TABS_CSS = `
 }
 `;
 
-function isAssignedToUser(todo, userId) {
-  if (!userId) return false;
-  return (todo.assignees ?? []).some((a) => a.id === userId);
-}
+const BUCKETS = [
+  { id: "mine", label: "Assigned to me" },
+  { id: "unassigned", label: "Unassigned" },
+  { id: "staff", label: "Staff assigned" },
+];
 
-/* Admin drilldown from the "open today" / "parked" home tiles.
-   Open today: bookmark tabs — Assigned to me | Others — shared OpenTodoCard.
-   Parked: flat TodoRow list (unpark / complete). */
+const EMPTY_COPY = {
+  mine: "Nothing assigned to you right now.",
+  unassigned: "No unassigned open tasks right now.",
+  staff: "No tasks assigned only to staff right now.",
+};
+
+/**
+ * Admin Open tasks — three assignee bookmarks, server-paginated, newest first.
+ * Cards: complete + Assign to me / Assign·Reassign / Assign to Site.
+ */
 export function OpenTodosView({
   staffRoster,
   currentUser = null,
@@ -62,189 +62,172 @@ export function OpenTodosView({
   onOpen,
   onAssign,
   onToggle,
-  onPark,
   onTodoSiteAssigned,
   busyIds,
-  status = "open",
   refreshKey = 0,
+  initialBucket = "mine",
 }) {
-  const cached = getCachedCallsByTodoStatus(status);
-  const [calls, setCalls] = useState(cached ?? []);
-  const [loading, setLoading] = useState(cached === null);
-  const [bookmark, setBookmark] = useState("mine");
+  const [bucket, setBucket] = useState(initialBucket);
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({ mine: 0, unassigned: 0, staff: 0, total: 0 });
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [siteTodo, setSiteTodo] = useState(null);
-  const [visibleCount, setVisibleCount] = useState(OPEN_TODO_PAGE_SIZE);
-  const lastRefreshKey = useRef(refreshKey);
 
-  useEffect(() => {
-    let cancelled = false;
-    const forceRefresh = lastRefreshKey.current !== refreshKey;
-    lastRefreshKey.current = refreshKey;
-    if (!forceRefresh) {
-      const hit = getCachedCallsByTodoStatus(status);
-      if (hit) setCalls(hit);
-    }
-    setLoading(getCachedCallsByTodoStatus(status) === null);
-    (forceRefresh ? refreshCallsByTodoStatus(status) : loadCallsByTodoStatus(status))
+  const loadCounts = useCallback(() => {
+    return fetchOpenTodosCounts()
       .then((data) => {
-        if (!cancelled) setCalls(Array.isArray(data) ? data : []);
+        setCounts({
+          mine: data?.mine ?? 0,
+          unassigned: data?.unassigned ?? 0,
+          staff: data?.staff ?? 0,
+          total: data?.total ?? 0,
+        });
       })
-      .catch(() => {
-        if (!cancelled) setCalls((prev) => prev);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [status, refreshKey]);
+      .catch((err) => console.error("[sbm] open-todos counts failed", err));
+  }, []);
 
-  useEffect(() => {
-    setVisibleCount(OPEN_TODO_PAGE_SIZE);
-  }, [bookmark, status]);
-
-  const allTodos = useMemo(
-    () =>
-      calls.flatMap((c) =>
-        c.todos.filter((td) => td.status === status).map((td) => ({ ...td, call: c }))
-      ),
-    [calls, status]
+  const loadPage = useCallback(
+    async (bucketId, offset, { append } = {}) => {
+      if (append) setLoadingMore(true);
+      else setLoading(true);
+      try {
+        const page = await fetchOpenTodos({
+          bucket: bucketId,
+          limit: OPEN_TODO_PAGE_SIZE,
+          offset,
+        });
+        const next = Array.isArray(page?.items) ? page.items : [];
+        setTotal(Number(page?.total) || 0);
+        setItems((prev) => (append ? [...prev, ...next] : next));
+      } catch (err) {
+        console.error("[sbm] open-todos fetch failed", err);
+        if (!append) setItems([]);
+      } finally {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    },
+    []
   );
 
-  const mineTodos = useMemo(() => {
-    if (!currentUser?.id) return [];
-    return sortTodosByRecordedAtDesc(
-      allTodos.filter((td) => isAssignedToUser(td, currentUser.id)),
-      (td) => td.call?.recorded_at
-    );
-  }, [allTodos, currentUser?.id]);
+  useEffect(() => {
+    setItems([]);
+    setTotal(0);
+    loadPage(bucket, 0, { append: false });
+    loadCounts();
+  }, [bucket, refreshKey, loadPage, loadCounts]);
 
-  const othersTodos = useMemo(() => {
-    const list = !currentUser?.id ? allTodos : allTodos.filter((td) => !isAssignedToUser(td, currentUser.id));
-    return sortTodosByRecordedAtDesc(list, (td) => td.call?.recorded_at);
-  }, [allTodos, currentUser?.id]);
+  const patchLocalTodo = (todoId, patch) => {
+    setItems((prev) => prev.map((td) => (td.id === todoId ? { ...td, ...patch } : td)));
+  };
 
-  const visibleTodos = status === "open" ? (bookmark === "mine" ? mineTodos : othersTodos) : allTodos;
-  const pagedTodos = visibleTodos.slice(0, visibleCount);
-  const remaining = Math.max(0, visibleTodos.length - visibleCount);
-  const title = status === "snoozed" ? "Parked" : "Open today";
-  const empty =
-    status === "snoozed"
-      ? "Nothing parked right now."
-      : bookmark === "mine"
-        ? "Nothing assigned to you right now."
-        : "Nothing assigned to others (or unassigned) right now.";
+  const removeLocalTodo = (todoId) => {
+    setItems((prev) => prev.filter((td) => td.id !== todoId));
+    setTotal((n) => Math.max(0, n - 1));
+    loadCounts();
+  };
 
-  if (loading) {
-    return (
-      <div>
-        <BackLink onClick={onBack}>Back</BackLink>
-        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
-      </div>
-    );
-  }
+  const handleAssign = async (todoId, userIds) => {
+    const updated = await onAssign?.(todoId, userIds);
+    if (!updated) return updated;
+    const assignees = updated.assignees ?? [];
+    const myId = currentUser?.id;
+    const assignedToMe = Boolean(myId && assignees.some((a) => a.id === myId));
+    const unassigned = assignees.length === 0;
+    const stays =
+      (bucket === "mine" && assignedToMe) ||
+      (bucket === "unassigned" && unassigned) ||
+      (bucket === "staff" && !unassigned && !assignedToMe);
+    if (stays) patchLocalTodo(todoId, { assignees });
+    else removeLocalTodo(todoId);
+    return updated;
+  };
+
+  const handleToggle = (todo) => {
+    onToggle?.(todo);
+    /* Completing moves it out of open lists. */
+    if (todo.status !== "done") removeLocalTodo(todo.id);
+  };
+
+  const handleSiteAssigned = (result) => {
+    const updated = result?.todo;
+    if (updated?.id) {
+      patchLocalTodo(updated.id, {
+        ...updated,
+        site_id: result.site_id ?? updated.site_id,
+        site_name: result.site_name ?? updated.site_name,
+        assignees: updated.assignees,
+      });
+    }
+    onTodoSiteAssigned?.(result);
+    setSiteTodo(null);
+  };
+
+  const remaining = Math.max(0, total - items.length);
+  const empty = EMPTY_COPY[bucket] ?? "Nothing here right now.";
 
   return (
     <div>
       <style>{OPEN_TABS_CSS}</style>
       <BackLink onClick={onBack}>Back</BackLink>
       <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
-        {title}
+        Open tasks
       </h1>
 
-      {status === "open" ? (
-        <div className="sbm-open-todos-tabs" role="tablist" aria-label="Open todos">
-          <button
-            type="button"
-            role="tab"
-            className="sbm-open-todos-tab"
-            aria-selected={bookmark === "mine"}
-            onClick={() => setBookmark("mine")}
-          >
-            Assigned to me{mineTodos.length > 0 ? ` (${mineTodos.length})` : ""}
-          </button>
-          <button
-            type="button"
-            role="tab"
-            className="sbm-open-todos-tab"
-            aria-selected={bookmark === "others"}
-            onClick={() => setBookmark("others")}
-          >
-            Assigned to others{othersTodos.length > 0 ? ` (${othersTodos.length})` : ""}
-          </button>
-        </div>
-      ) : null}
+      <div className="sbm-open-todos-tabs" role="tablist" aria-label="Open tasks">
+        {BUCKETS.map((tab) => {
+          const n = counts[tab.id] ?? 0;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              role="tab"
+              className="sbm-open-todos-tab"
+              aria-selected={bucket === tab.id}
+              onClick={() => setBucket(tab.id)}
+            >
+              {tab.label}
+              {n > 0 ? ` (${n})` : ""}
+            </button>
+          );
+        })}
+      </div>
 
-      {visibleTodos.length === 0 ? (
+      {loading && items.length === 0 ? (
+        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+      ) : items.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>{empty}</p>
         </Card>
-      ) : status === "open" ? (
+      ) : (
         <Card style={{ padding: 0 }}>
-          {pagedTodos.map((td) => (
+          {items.map((td) => (
             <OpenTodoCard
               key={td.id}
               todo={td}
-              callName={td.call.client_name}
-              recordedAt={td.call.recorded_at}
+              callName={td.client_name}
+              recordedAt={td.recorded_at}
               onOpenCall={onOpen}
+              onToggle={onToggle ? handleToggle : undefined}
+              busy={busyIds?.has(td.id)}
               staffRoster={staffRoster}
               currentUser={currentUser}
-              onAssign={onAssign}
+              onAssign={onAssign ? handleAssign : undefined}
               onRequestSiteAssign={onAssign ? setSiteTodo : undefined}
             />
           ))}
           <OpenTodoLoadMore
-            remaining={remaining}
-            onLoadMore={() => setVisibleCount((n) => n + OPEN_TODO_PAGE_SIZE)}
+            remaining={loadingMore ? 0 : remaining}
+            onLoadMore={() => loadPage(bucket, items.length, { append: true })}
           />
-        </Card>
-      ) : (
-        <Card>
-          {visibleTodos.map((td) => {
-            const urgent = isUrgent(td);
-            return (
-              <div key={td.id} style={{ ...TILE_ROW_STYLE, display: "flex", flexDirection: "column", gap: 4 }}>
-                <TodoRow
-                  todo={td}
-                  urgent={urgent}
-                  onToggle={onToggle}
-                  onPark={onPark}
-                  busy={busyIds?.has(td.id)}
-                  showDue
-                />
-                <button
-                  type="button"
-                  onClick={() => onOpen(td.call_id)}
-                  style={{
-                    all: "unset",
-                    cursor: "pointer",
-                    fontSize: 13,
-                    color: t.accent,
-                    fontWeight: 500,
-                    alignSelf: "flex-start",
-                    paddingLeft: 28,
-                  }}
-                >
-                  {td.call.client_name}
-                  {td.call.recorded_at ? ` · ${fmtShort(td.call.recorded_at)}` : ""}
-                </button>
-              </div>
-            );
-          })}
+          {loadingMore ? <p style={{ fontSize: 13, color: t.edge2, padding: "8px 12px" }}>Loading…</p> : null}
         </Card>
       )}
 
       {siteTodo ? (
-        <AssignTodoSiteModal
-          todo={siteTodo}
-          onClose={() => setSiteTodo(null)}
-          onAssigned={(result) => {
-            onTodoSiteAssigned?.(result);
-            setSiteTodo(null);
-          }}
-        />
+        <AssignTodoSiteModal todo={siteTodo} onClose={() => setSiteTodo(null)} onAssigned={handleSiteAssigned} />
       ) : null}
     </div>
   );

@@ -4351,6 +4351,11 @@ function todayKeyKolkata(now = new Date()): string {
 
 export interface DashboardSummary {
   open_today: number;
+  /**
+   * All open call todos (non-deleted calls) — admin Open tasks home tile.
+   * Prefer this over `open_today` (legacy alias of the same count).
+   */
+  open_todos_count: number;
   closed_today: number;
   parked_count: number;
   calls_count: number;
@@ -4467,6 +4472,31 @@ export interface SiteOpenTodoRow extends AssignedTodoRow {
   recording_date: string | null;
 }
 
+/** Admin Open tasks bookmarks — partition of open call todos by assignee. */
+export type OpenTodoAssigneeBucket = "mine" | "unassigned" | "staff";
+
+export interface ListOpenTodosByBucketOptions {
+  viewerUserId: string;
+  bucket: OpenTodoAssigneeBucket;
+  limit?: number;
+  offset?: number;
+}
+
+export interface OpenTodosPage {
+  items: AssignedTodoRow[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface OpenTodoBucketCounts {
+  mine: number;
+  unassigned: number;
+  staff: number;
+  /** mine + unassigned + staff (all open on non-deleted calls). */
+  total: number;
+}
+
 export interface ListMyOpenTodosOptions {
   /** Admin personal queue: also include owner=self. */
   includeIdentifiedForViewer?: boolean;
@@ -4567,6 +4597,157 @@ export async function countMyOpenTodos(
     .bind(...binds)
     .first<{ n: number }>();
   return Number(row?.n) || 0;
+}
+
+const OPEN_TODO_CLIENT_NAME_SQL = `COALESCE(
+                callers.name,
+                recorded_sites.name,
+                (
+                  SELECT sites.name FROM call_sites
+                  JOIN sites ON sites.id = call_sites.site_id
+                  WHERE call_sites.call_id = calls.id
+                    AND sites.is_confirmed IS NOT 'N'
+                  ORDER BY sites.name ASC
+                  LIMIT 1
+                ),
+                CASE WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'Desk conversation' END,
+                'Unknown caller'
+              )`;
+
+function openTodoBucketWhere(bucket: OpenTodoAssigneeBucket, viewerUserId: string): { sql: string; binds: unknown[] } {
+  const base = `todos.status = 'open' AND calls.deleted_at IS NULL`;
+  if (bucket === "mine") {
+    return {
+      sql: `${base}
+         AND EXISTS (
+           SELECT 1 FROM todo_assignees
+           WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?
+         )`,
+      binds: [viewerUserId],
+    };
+  }
+  if (bucket === "unassigned") {
+    return {
+      sql: `${base}
+         AND NOT EXISTS (
+           SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id
+         )`,
+      binds: [],
+    };
+  }
+  return {
+    sql: `${base}
+         AND EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = todos.id)
+         AND NOT EXISTS (
+           SELECT 1 FROM todo_assignees
+           WHERE todo_assignees.todo_id = todos.id AND todo_assignees.user_id = ?
+         )`,
+    binds: [viewerUserId],
+  };
+}
+
+/**
+ * Admin Open tasks — paginated open call todos for one assignee bucket.
+ * Site backfill runs only on the returned page (best-effort).
+ */
+export async function listOpenTodosByAssigneeBucket(
+  db: D1Database,
+  opts: ListOpenTodosByBucketOptions
+): Promise<OpenTodosPage> {
+  const limit = Math.min(Math.max(1, opts.limit ?? 20), 100);
+  const offset = Math.max(0, opts.offset ?? 0);
+  const { sql: whereSql, binds: whereBinds } = openTodoBucketWhere(opts.bucket, opts.viewerUserId);
+
+  const countRow = await db
+    .prepare(
+      `SELECT COUNT(*) AS n
+       FROM todos
+       JOIN calls ON calls.id = todos.call_id
+       WHERE ${whereSql}`
+    )
+    .bind(...whereBinds)
+    .first<{ n: number }>();
+  const total = Number(countRow?.n) || 0;
+
+  const { results } = await db
+    .prepare(
+      `SELECT todos.id AS id,
+              todos.call_id AS call_id,
+              todos.owner AS owner,
+              todos.text AS text,
+              todos.due_date AS due_date,
+              todos.status AS status,
+              ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
+              calls.recorded_at AS recorded_at,
+              todos.site_id AS site_id,
+              todo_sites.name AS site_name
+       FROM todos
+       JOIN calls ON calls.id = todos.call_id
+       LEFT JOIN callers ON callers.id = calls.client_id
+       LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
+       LEFT JOIN sites AS todo_sites ON todo_sites.id = todos.site_id
+       WHERE ${whereSql}
+       ORDER BY calls.recorded_at DESC, todos.id DESC
+       LIMIT ? OFFSET ?`
+    )
+    .bind(...whereBinds, limit, offset)
+    .all<Omit<AssignedTodoRow, "assignees">>();
+
+  const rows = results ?? [];
+  if (rows.length === 0) {
+    return { items: [], total, limit, offset };
+  }
+
+  try {
+    const filled = await backfillTodoSitesFromCallContext(
+      db,
+      rows.map((r) => ({ id: r.id, call_id: r.call_id, site_id: r.site_id ?? null }))
+    );
+    for (const r of rows) {
+      const hit = filled.get(r.id);
+      if (hit) {
+        r.site_id = hit.site_id;
+        r.site_name = hit.site_name;
+      }
+    }
+  } catch (err) {
+    console.error("[sbm] backfillTodoSitesFromCallContext failed (open-todos page)", err);
+  }
+
+  const map = await getAssigneesByTodoIds(
+    db,
+    rows.map((r) => r.id)
+  );
+  const items = rows.map((r) => ({
+    ...r,
+    site_id: r.site_id ?? null,
+    site_name: r.site_name ?? null,
+    assignees: map.get(r.id) ?? [],
+  }));
+  return { items, total, limit, offset };
+}
+
+/** Tab badge counts for admin Open tasks (same partition as the list). */
+export async function countOpenTodosByAssigneeBucket(
+  db: D1Database,
+  viewerUserId: string
+): Promise<OpenTodoBucketCounts> {
+  const [mine, unassigned, staff] = await Promise.all(
+    (["mine", "unassigned", "staff"] as const).map(async (bucket) => {
+      const { sql, binds } = openTodoBucketWhere(bucket, viewerUserId);
+      const row = await db
+        .prepare(
+          `SELECT COUNT(*) AS n
+           FROM todos
+           JOIN calls ON calls.id = todos.call_id
+           WHERE ${sql}`
+        )
+        .bind(...binds)
+        .first<{ n: number }>();
+      return Number(row?.n) || 0;
+    })
+  );
+  return { mine, unassigned, staff, total: mine + unassigned + staff };
 }
 
 /** Open call todos linked to a site via call_sites, newest call first. */
@@ -4823,6 +5004,7 @@ export async function getDashboardSummary(
     ]);
     return {
       open_today: 0,
+      open_todos_count: 0,
       closed_today: 0,
       parked_count: 0,
       calls_count: 0,
@@ -4860,7 +5042,14 @@ export async function getDashboardSummary(
     my_open_todos_count,
     staff_with_open_todos,
   ] = await Promise.all([
-    db.prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'open'`).first<{ n: number }>(),
+    db
+      .prepare(
+        `SELECT COUNT(*) AS n
+         FROM todos
+         JOIN calls ON calls.id = todos.call_id
+         WHERE todos.status = 'open' AND calls.deleted_at IS NULL`
+      )
+      .first<{ n: number }>(),
     db
       .prepare(`SELECT COUNT(*) AS n FROM todos WHERE status = 'done' AND substr(completed_at, 1, 10) = ?`)
       .bind(todayKey)
@@ -4884,8 +5073,10 @@ export async function getDashboardSummary(
     listStaffWithOpenCallTodos(db),
   ]);
 
+  const openCount = openRow?.n ?? 0;
   return {
-    open_today: openRow?.n ?? 0,
+    open_today: openCount,
+    open_todos_count: openCount,
     closed_today: closedRow?.n ?? 0,
     parked_count: parkedRow?.n ?? 0,
     calls_count,
