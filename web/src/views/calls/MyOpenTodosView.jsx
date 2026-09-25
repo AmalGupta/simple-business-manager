@@ -10,9 +10,9 @@ import {
   sortTodosByRecordedAtDesc,
 } from "./OpenTodoCard.jsx";
 
-/* Personal queue — open call todos for this user.
-   Staff: assignee-only, mark done via TodoRow.
-   Admin (canManage): also owner=self / name-matched; Assign to me / staff / site. */
+/* Personal queue — open call todos for this user (staff + admin).
+   Uses OpenTodoCard (facts: extracted by / date / assignees). Staff: mark done only.
+   Admin (canManage): also Assign / site. */
 export function MyOpenTodosView({
   todos,
   onBack,

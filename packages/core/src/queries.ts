@@ -1106,6 +1106,8 @@ export interface TodoRow {
   site_id: string | null;
   /** Joined site name when site_id is set. */
   site_name: string | null;
+  /** Row create time (extraction / manual). */
+  created_at: string | null;
   /** migration 0025 — a todo can be assigned to more than one staff member. */
   assignees: TodoAssignee[];
 }
@@ -1215,6 +1217,7 @@ interface RawTodoRow {
   customer_waiting: 0 | 1;
   site_id: string | null;
   site_name: string | null;
+  created_at: string | null;
 }
 
 interface RawCommitmentRow {
@@ -1269,6 +1272,7 @@ const CALL_LIST_SELECT = `
 const TODO_SELECT = `
   SELECT todos.id, todos.call_id, todos.owner, todos.text, todos.due_date, todos.status,
          todos.completed_at, todos.closed_by_call_id, todos.customer_waiting,
+         todos.created_at AS created_at,
          todos.site_id AS site_id, sites.name AS site_name
   FROM todos
   LEFT JOIN sites ON sites.id = todos.site_id
@@ -1299,6 +1303,7 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     closed_by_call_id: t.closed_by_call_id,
     site_id: t.site_id ?? null,
     site_name: t.site_name ?? null,
+    created_at: t.created_at ?? null,
     assignees: [], // filled in by hydrateTodoAssignees — see hydrateCallRows/getCallWithTodos
   };
 }
