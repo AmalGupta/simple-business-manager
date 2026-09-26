@@ -564,6 +564,30 @@ export async function postCreateCaller(input) {
   return res.json();
 }
 
+/** Promote a contact to a staff login (creates user + PIN when missing). */
+export async function postPromoteCallerStaff(callerId) {
+  const res = await fetch(`/api/callers/${callerId}/promote-staff`, { method: "POST" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/callers/${callerId}/promote-staff → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Confirm editable login name / PIN / alias after promote. */
+export async function postConfirmCallerStaffPromotion(callerId, { login_name, pin, alias }) {
+  const res = await fetch(`/api/callers/${callerId}/confirm-staff-promotion`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ login_name, pin, alias }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/callers/${callerId}/confirm-staff-promotion → ${res.status}`);
+  }
+  return res.json();
+}
+
 /* Maintenance — session-cookie only, admin/superadmin. */
 export async function fetchSiteContactProposals() {
   const res = await fetch("/api/maintenance/site-contact-proposals", { credentials: "same-origin" });

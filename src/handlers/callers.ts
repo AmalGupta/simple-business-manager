@@ -14,11 +14,19 @@ import {
   listCallerAliases,
   addCallerAlias,
   deleteCallerAlias,
+  createUser,
+  getUserByName,
+  getUserById,
+  updateUserName,
+  updateUserPin,
+  updateUserPhone,
+  revokeAllSessionsForUser,
   CALLER_CATEGORIES,
   type CallerBucket,
   type CallerCategory,
 } from "@sbm/core";
 import { requireAdmin } from "./auth";
+import { decryptPin, encryptPin, generateRandomPin, hashPin } from "../lib/auth";
 import type { Env } from "../index";
 
 function json(data: unknown, status = 200): Response {
@@ -29,7 +37,7 @@ function json(data: unknown, status = 200): Response {
 }
 
 const VALID_CATEGORIES = new Set<CallerCategory>(CALLER_CATEGORIES);
-const VALID_BUCKETS = new Set<CallerBucket>(["saved", "unsaved", "spam"]);
+const VALID_BUCKETS = new Set<CallerBucket>(["saved", "unsaved", "spam", "staff"]);
 
 function parseCategory(value: unknown): CallerCategory | undefined | null {
   if (value === undefined) return undefined;
@@ -58,12 +66,13 @@ function parsePositiveInt(value: string | null, max: number): number | null | un
 /**
  * GET /api/callers — Callers Directory list and category counts.
  *
- * `?category=` filters as before. `?bucket=saved|unsaved|spam` drives the
- * Contacts directory tabs (saved = named contacts, unsaved = phone-only labels).
- * `?siteId=` narrows saved rows linked to one site via caller_sites.
- * `?linked_sites=1` on Saved: only contacts with any site link (paginated total respects this).
+ * `?category=` filters as before. `?bucket=saved|unsaved|spam|staff` drives the
+ * Contacts directory tabs (saved = named contacts, unsaved = phone-only labels,
+ * staff = category staff with linked sites).
+ * `?siteId=` narrows saved/staff rows linked to one site via caller_sites.
+ * `?linked_sites=1` on Saved/Staff: only contacts with any site link.
  * `?include_linked_sites=1`: hydrate each row's linked_sites (Contacts directory Sites column).
- * site. `?q=` (substring on name or phone) and `?limit=`/`?offset=` were added
+ * `?q=` (substring on name or phone) and `?limit=`/`?offset=` were added
  * for the site-contacts picker, which can't load the whole directory.
  */
 export async function handleListCallers(request: Request, env: Env): Promise<Response> {
@@ -83,7 +92,7 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
 
   const bucket = parseBucket(url.searchParams.get("bucket"));
   if (url.searchParams.has("bucket") && bucket === null) {
-    return json({ error: "bucket must be one of saved, unsaved, spam" }, 400);
+    return json({ error: "bucket must be one of saved, unsaved, spam, staff" }, 400);
   }
 
   const siteId = url.searchParams.get("siteId")?.trim() || undefined;
@@ -119,7 +128,9 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
     bucket
       ? countCallersByCategory(env.DB)
       : Promise.resolve({ client: 0, staff: 0, family: 0, spam: 0 }),
-    bucket ? countCallersByBucket(env.DB) : Promise.resolve({ saved: 0, unsaved: 0, spam: 0 }),
+    bucket
+      ? countCallersByBucket(env.DB)
+      : Promise.resolve({ saved: 0, unsaved: 0, spam: 0, staff: 0 }),
   ]);
   return json({ items, total, counts, bucket_counts });
 }
@@ -138,7 +149,10 @@ export async function handleCreateCaller(request: Request, env: Env): Promise<Re
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
   const name = typeof record.name === "string" ? record.name.trim() : "";
   const phone = typeof record.phone === "string" && record.phone.trim() ? record.phone.trim() : null;
-  const staffUserId = typeof record.staff_user_id === "string" && record.staff_user_id.trim() ? record.staff_user_id.trim() : null;
+  const staffUserId =
+    typeof record.staff_user_id === "string" && record.staff_user_id.trim()
+      ? record.staff_user_id.trim()
+      : null;
 
   if (!name) return json({ error: "name is required" }, 400);
 
@@ -146,7 +160,12 @@ export async function handleCreateCaller(request: Request, env: Env): Promise<Re
   if (category === null) return json({ error: "category must be one of family, staff, client, spam" }, 400);
 
   try {
-    const caller = await createCaller(env.DB, { name, phone, category: category ?? "client", staffUserId });
+    const caller = await createCaller(env.DB, {
+      name,
+      phone,
+      category: category ?? "client",
+      staffUserId,
+    });
     return json(caller, 201);
   } catch (err) {
     // UNIQUE(phone) conflict — see callers.phone in schema.sql.
@@ -168,7 +187,12 @@ export async function handleUpdateCaller(request: Request, env: Env, id: string)
   }
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
 
-  const patch: Partial<{ name: string; phone: string | null; category: CallerCategory; staff_user_id: string | null }> = {};
+  const patch: Partial<{
+    name: string;
+    phone: string | null;
+    category: CallerCategory;
+    staff_user_id: string | null;
+  }> = {};
 
   if ("name" in record) {
     const name = typeof record.name === "string" ? record.name.trim() : "";
@@ -184,7 +208,10 @@ export async function handleUpdateCaller(request: Request, env: Env, id: string)
     if (category !== undefined) patch.category = category;
   }
   if ("staff_user_id" in record) {
-    patch.staff_user_id = typeof record.staff_user_id === "string" && record.staff_user_id.trim() ? record.staff_user_id.trim() : null;
+    patch.staff_user_id =
+      typeof record.staff_user_id === "string" && record.staff_user_id.trim()
+        ? record.staff_user_id.trim()
+        : null;
   }
 
   try {
@@ -195,6 +222,201 @@ export async function handleUpdateCaller(request: Request, env: Env, id: string)
     if (String(err).includes("UNIQUE")) return json({ error: "a caller with that phone already exists" }, 409);
     return json({ error: `update failed: ${String(err)}` }, 500);
   }
+}
+
+export interface PromoteStaffResult {
+  caller_id: string;
+  contact_name: string;
+  alias: string;
+  login_name: string;
+  pin: string;
+  user_id: string;
+  created: boolean;
+  already_linked: boolean;
+}
+
+/**
+ * Ensure a contact marked Staff has a login account. Creates a staff user +
+ * PIN when missing; links an existing staff user with the same name when
+ * present. Always sets category=staff and callers.staff_user_id.
+ */
+export async function promoteCallerToStaff(env: Env, callerId: string): Promise<PromoteStaffResult | Response> {
+  const caller = await getCallerById(env.DB, callerId);
+  if (!caller) return json({ error: "not found" }, 404);
+
+  const aliases = await listCallerAliases(env.DB, callerId);
+  const aliasPreview = aliases[0]?.alias?.trim() || caller.name;
+
+  if (caller.staff_user_id) {
+    const user = await getUserById(env.DB, caller.staff_user_id);
+    if (!user) return json({ error: "linked staff account missing" }, 500);
+    if (caller.category !== "staff") {
+      await updateCaller(env.DB, callerId, { category: "staff" });
+    }
+    const decrypted = user.pin_encrypted ? await decryptPin(env, user.pin_encrypted) : null;
+    const pin = decrypted ?? generateRandomPin();
+    if (!user.pin_encrypted || !decrypted) {
+      const { hash, salt } = await hashPin(env, pin);
+      const pinEncrypted = await encryptPin(env, pin);
+      await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
+    }
+    return {
+      caller_id: callerId,
+      contact_name: caller.name,
+      alias: aliasPreview,
+      login_name: user.name,
+      pin,
+      user_id: user.id,
+      created: false,
+      already_linked: true,
+    };
+  }
+
+  const preferredName = caller.name.trim();
+  const existing = preferredName ? await getUserByName(env.DB, preferredName) : null;
+  if (existing && existing.role === "staff") {
+    await updateCaller(env.DB, callerId, { category: "staff", staff_user_id: existing.id });
+    if (!existing.phone && caller.phone) {
+      await updateUserPhone(env.DB, existing.id, caller.phone);
+    }
+    const decrypted = existing.pin_encrypted ? await decryptPin(env, existing.pin_encrypted) : null;
+    const pin = decrypted ?? generateRandomPin();
+    if (!existing.pin_encrypted || !decrypted) {
+      const { hash, salt } = await hashPin(env, pin);
+      const pinEncrypted = await encryptPin(env, pin);
+      await updateUserPin(env.DB, existing.id, hash, salt, pinEncrypted);
+    }
+    return {
+      caller_id: callerId,
+      contact_name: caller.name,
+      alias: aliasPreview,
+      login_name: existing.name,
+      pin,
+      user_id: existing.id,
+      created: false,
+      already_linked: false,
+    };
+  }
+
+  let loginName = preferredName || "Staff";
+  if (existing && existing.role !== "staff") {
+    loginName = `${preferredName} (staff)`;
+    let n = 2;
+    while (await getUserByName(env.DB, loginName)) {
+      loginName = `${preferredName} (staff ${n})`;
+      n += 1;
+    }
+  }
+
+  const pin = generateRandomPin();
+  const { hash, salt } = await hashPin(env, pin);
+  const pinEncrypted = await encryptPin(env, pin);
+  const user = await createUser(env.DB, loginName, hash, salt, "staff", caller.phone, pinEncrypted);
+  await updateCaller(env.DB, callerId, { category: "staff", staff_user_id: user.id });
+
+  return {
+    caller_id: callerId,
+    contact_name: caller.name,
+    alias: aliasPreview,
+    login_name: user.name,
+    pin,
+    user_id: user.id,
+    created: true,
+    already_linked: false,
+  };
+}
+
+/** POST /api/callers/:id/promote-staff — create/link staff login + return PIN for confirm UI. */
+export async function handlePromoteCallerStaff(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const result = await promoteCallerToStaff(env, id);
+  if (result instanceof Response) return result;
+  return json(result, result.created ? 201 : 200);
+}
+
+/**
+ * POST /api/callers/:id/confirm-staff-promotion — apply editable login name / PIN / alias
+ * after the promote notification. Staff can then log in with the confirmed PIN.
+ */
+export async function handleConfirmCallerStaffPromotion(
+  request: Request,
+  env: Env,
+  id: string
+): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const caller = await getCallerById(env.DB, id);
+  if (!caller) return json({ error: "not found" }, 404);
+  if (!caller.staff_user_id) {
+    return json({ error: "contact is not linked to a staff account — promote first" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const loginName = typeof record.login_name === "string" ? record.login_name.trim() : "";
+  const pin = typeof record.pin === "string" ? record.pin.trim() : "";
+  const alias = typeof record.alias === "string" ? record.alias.trim() : "";
+
+  if (!loginName) return json({ error: "login_name is required" }, 400);
+  if (!/^\d{4,6}$/.test(pin)) return json({ error: "pin must be 4-6 digits" }, 400);
+
+  const user = await getUserById(env.DB, caller.staff_user_id);
+  if (!user) return json({ error: "linked staff account missing" }, 500);
+
+  const nameOwner = await getUserByName(env.DB, loginName);
+  if (nameOwner && nameOwner.id !== user.id) {
+    return json({ error: "a user with that login name already exists" }, 409);
+  }
+
+  if (user.name !== loginName) {
+    try {
+      await updateUserName(env.DB, user.id, loginName);
+    } catch (err) {
+      if (String(err).includes("UNIQUE")) {
+        return json({ error: "a user with that login name already exists" }, 409);
+      }
+      throw err;
+    }
+  }
+
+  const { hash, salt } = await hashPin(env, pin);
+  const pinEncrypted = await encryptPin(env, pin);
+  await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
+  await revokeAllSessionsForUser(env.DB, user.id);
+
+  if (caller.category !== "staff") {
+    await updateCaller(env.DB, id, { category: "staff" });
+  }
+
+  if (alias) {
+    const existing = await listCallerAliases(env.DB, id);
+    const hasAlias = existing.some((a) => a.alias.toLowerCase() === alias.toLowerCase());
+    if (!hasAlias) {
+      try {
+        await addCallerAlias(env.DB, id, alias);
+      } catch (err) {
+        if (!String(err).includes("UNIQUE")) throw err;
+        /* Alias owned elsewhere — leave it; login still works. */
+      }
+    }
+  }
+
+  return json({
+    ok: true,
+    caller_id: id,
+    user_id: user.id,
+    login_name: loginName,
+    pin,
+    alias: alias || null,
+  });
 }
 
 /** GET /api/callers/:id/aliases — list aliases for one contact. */
