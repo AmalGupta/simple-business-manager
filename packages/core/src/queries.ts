@@ -3790,7 +3790,14 @@ export async function updateUserName(db: D1Database, userId: string, name: strin
 }
 
 export async function getUserByName(db: D1Database, name: string): Promise<User | null> {
-  const row = await db.prepare(`SELECT * FROM users WHERE name = ?`).bind(name).first<User>();
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+  /* COLLATE NOCASE so promoting "Manglesh" links the existing staff login
+     even when casing differs; login still uses the stored users.name. */
+  const row = await db
+    .prepare(`SELECT * FROM users WHERE name = ? COLLATE NOCASE`)
+    .bind(trimmed)
+    .first<User>();
   return row ?? null;
 }
 

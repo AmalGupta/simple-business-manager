@@ -2,22 +2,31 @@ import { useState } from "react";
 import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
 
+function cleanPin(value) {
+  return String(value ?? "")
+    .replace(/\s+/g, "")
+    .replace(/\D/g, "")
+    .trim();
+}
+
 /**
- * After a contact is promoted to staff: show generated login + PIN, allow
- * edits, then Confirm persists them so the staff member can log in.
+ * After a contact is promoted to staff: show generated or linked login + PIN,
+ * allow edits, then Confirm persists them so the staff member can log in.
  */
 export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
-  const [loginName, setLoginName] = useState(promotion.login_name ?? "");
-  const [pin, setPin] = useState(promotion.pin ?? "");
-  const [alias, setAlias] = useState(promotion.alias ?? "");
-  const [editingLogin, setEditingLogin] = useState(false);
-  const [editingPin, setEditingPin] = useState(false);
+  const linkedExisting = Boolean(promotion.linked_existing || promotion.already_linked);
+  const [loginName, setLoginName] = useState((promotion.login_name ?? "").trim());
+  const [pin, setPin] = useState(cleanPin(promotion.pin));
+  const [alias, setAlias] = useState((promotion.alias ?? "").trim());
+  /* Linked accounts: start in edit mode so the admin can change name/PIN if needed. */
+  const [editingLogin, setEditingLogin] = useState(linkedExisting);
+  const [editingPin, setEditingPin] = useState(linkedExisting);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const submit = async () => {
     const name = loginName.trim();
-    const nextPin = pin.trim();
+    const nextPin = cleanPin(pin);
     if (!name) {
       setError("Enter a login name.");
       return;
@@ -38,16 +47,31 @@ export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
     } catch (err) {
       console.error("[sbm] failed to confirm staff promotion", err);
       setError(err.message || "Failed to save — try again.");
+      setEditingLogin(true);
     } finally {
       setSaving(false);
     }
   };
 
+  const headline = linkedExisting ? "Linked to existing staff login" : "Contact promoted to staff";
+  const body = linkedExisting ? (
+    <>
+      Contact <strong style={{ color: t.edge }}>{promotion.contact_name}</strong> is linked to staff
+      login <strong style={{ color: t.edge }}>{promotion.login_name}</strong>. Edit the login name or
+      PIN if needed, then Confirm.
+    </>
+  ) : (
+    <>
+      Contact <strong style={{ color: t.edge }}>{promotion.contact_name}</strong> promoted to staff.
+      Confirm the login details below so they can sign in to SBM.
+    </>
+  );
+
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Contact promoted to staff"
+      aria-label={headline}
       onClick={onClose}
       style={{
         position: "fixed",
@@ -73,13 +97,8 @@ export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
           gap: 12,
         }}
       >
-        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>
-          Contact promoted to staff
-        </span>
-        <p style={{ margin: 0, fontSize: 13, color: t.edge2, lineHeight: 1.45 }}>
-          Contact <strong style={{ color: t.edge }}>{promotion.contact_name}</strong> promoted to staff.
-          Confirm the login details below so they can sign in to SBM.
-        </p>
+        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>{headline}</span>
+        <p style={{ margin: 0, fontSize: 13, color: t.edge2, lineHeight: 1.45 }}>{body}</p>
 
         <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <span style={{ fontFamily: t.label, fontSize: 11, fontWeight: 700, color: t.edge2, textTransform: "uppercase" }}>
@@ -172,13 +191,14 @@ export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
           </span>
           <input
             value={pin}
-            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            onChange={(e) => setPin(cleanPin(e.target.value).slice(0, 6))}
             readOnly={!editingPin}
             inputMode="numeric"
+            autoComplete="off"
             style={{
               ...TEXT_INPUT_STYLE,
               fontVariantNumeric: "tabular-nums",
-              letterSpacing: editingPin ? 1 : 2,
+              letterSpacing: 0.5,
               fontWeight: 600,
               background: editingPin ? t.white : "var(--color-canvas, #f6f7f9)",
             }}
