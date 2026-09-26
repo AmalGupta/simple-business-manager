@@ -13,5 +13,5 @@
     "skipLibCheck": true
   },
   "include": ["src/**/*", "packages/core/src/**/*", "packages/core/prompts/**/*"],
-  "exclude": ["node_modules", "web", "dist", "packages/core/prompts/evals"]
+  "exclude": ["node_modules", "web", "dist", "packages/core/prompts/evals", "**/*.test.ts"]
 }
