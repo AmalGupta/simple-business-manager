@@ -108,33 +108,46 @@ function LinkedSitesCell({ sites, bucket, onSiteClick }) {
 }
 
 function AliasesCell({ aliases, onManage }) {
-  const preview = aliases?.length ? aliases.join(", ") : "—";
+  const list = aliases?.length ? aliases.join(", ") : "";
   return (
-    <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          fontSize: 13,
-          color: aliases?.length ? t.edge : t.edge2,
-        }}
-        title={aliases?.length ? aliases.join(", ") : undefined}
-      >
-        {preview}
-      </span>
+    <span
+      className="sbm-contacts-aliases-cell"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: list ? 4 : 0,
+        width: "100%",
+        minWidth: 0,
+      }}
+    >
+      {list ? (
+        <span
+          style={{
+            width: "100%",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            fontSize: 13,
+            color: t.edge,
+            textAlign: "center",
+          }}
+          title={list}
+        >
+          {list}
+        </span>
+      ) : null}
       <button
         type="button"
         onClick={onManage}
         style={{
           flexShrink: 0,
-          padding: "4px 8px",
+          padding: "4px 10px",
           border: `1px solid ${t.frost}`,
           borderRadius: t.radiusButton,
           background: t.white,
-          color: t.edge,
+          color: t.accent,
           fontSize: 11,
           fontWeight: 600,
           cursor: "pointer",
@@ -290,6 +303,8 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
         colId: "aliases",
         flex: 1,
         minWidth: 160,
+        headerClass: "sbm-contacts-aliases-header",
+        cellClass: "sbm-contacts-aliases-cell-wrap",
         cellRenderer: (p) =>
           p.data ? (
             <AliasesCell aliases={p.data.aliases} onManage={() => onManageAliases(p.data)} />
