@@ -1077,3 +1077,157 @@ export async function postDrivePoll() {
   }
   return res.json();
 }
+
+/* ------------------------------------------------------------------
+   Production job tracker — migration 0042. Same X-SBM-Key pattern as the
+   site-tasks functions above.
+   ------------------------------------------------------------------ */
+
+export async function fetchProductionJobs(status) {
+  const q = status ? `?status=${encodeURIComponent(status)}` : "";
+  return fetchJSON(`/api/production-jobs${q}`);
+}
+
+export async function postProductionJob({ siteId, title, surveyNote }) {
+  const res = await fetch("/api/production-jobs", {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ site_id: siteId, title, survey_note: surveyNote || null }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/production-jobs → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Returns { job, steps, problems }. */
+export async function fetchProductionJob(id) {
+  return fetchJSON(`/api/production-jobs/${id}`);
+}
+
+/** `staff` gets their own assigned steps only; admin/superadmin get every currently-assigned step. Admin may pass forUserId for a staff home bookmark. */
+export async function fetchOpenProductionSteps({ forUserId } = {}) {
+  const q = forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
+  return fetchJSON(`/api/production-steps/open${q}`);
+}
+
+export async function patchProductionStep(id, patch) {
+  const res = await fetch(`/api/production-steps/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/production-steps/${id} → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function postProductionJobProblem(jobId, description) {
+  const res = await fetch(`/api/production-jobs/${jobId}/problems`, {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ description }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/production-jobs/${jobId}/problems → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function patchProductionJobProblem(id, resolutionNote) {
+  const res = await fetch(`/api/production-job-problems/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify({ resolution_note: resolutionNote || null }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/production-job-problems/${id} → ${res.status}`);
+  }
+  return res.json();
+}
+
+/* ------------------------------------------------------------------
+   Warehouse register — migration 0042. Same X-SBM-Key pattern.
+   ------------------------------------------------------------------ */
+
+export async function fetchWarehouseStores() {
+  return fetchJSON("/api/warehouse/stores");
+}
+
+export async function fetchWarehouseStock(storeId) {
+  const q = storeId ? `?store_id=${encodeURIComponent(storeId)}` : "";
+  return fetchJSON(`/api/warehouse/stock${q}`);
+}
+
+export async function fetchWarehouseMovements({ storeId, kind, siteId, limit } = {}) {
+  const params = new URLSearchParams();
+  if (storeId) params.set("store_id", storeId);
+  if (kind) params.set("kind", kind);
+  if (siteId) params.set("site_id", siteId);
+  if (limit) params.set("limit", String(limit));
+  const qs = params.toString();
+  return fetchJSON(`/api/warehouse/movements${qs ? `?${qs}` : ""}`);
+}
+
+export async function postWarehouseMovement(fields) {
+  const res = await fetch("/api/warehouse/movements", {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify(fields),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/warehouse/movements → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function voidWarehouseMovement(id) {
+  const res = await fetch(`/api/warehouse/movements/${id}/void`, {
+    method: "PATCH",
+    headers: { "X-SBM-Key": SBM_KEY },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/warehouse/movements/${id}/void → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchWarehouseItemSuggestions(storeId) {
+  return fetchJSON(`/api/warehouse/item-suggestions?store_id=${encodeURIComponent(storeId)}`);
+}
+
+export async function fetchOpenToolMovements() {
+  return fetchJSON("/api/warehouse/tools");
+}
+
+export async function postToolMovement(fields) {
+  const res = await fetch("/api/warehouse/tools", {
+    method: "POST",
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    body: JSON.stringify(fields),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST /api/warehouse/tools → ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function returnToolMovement(id) {
+  const res = await fetch(`/api/warehouse/tools/${id}/return`, {
+    method: "PATCH",
+    headers: { "X-SBM-Key": SBM_KEY },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/warehouse/tools/${id}/return → ${res.status}`);
+  }
+  return res.json();
+}
