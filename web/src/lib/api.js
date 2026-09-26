@@ -479,6 +479,29 @@ export async function postResetStaffPin(id) {
   return res.json();
 }
 
+export async function fetchStaffDeletePreview(id) {
+  const res = await fetch(`/api/staff/${id}/delete-preview`);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `GET /api/staff/${id}/delete-preview → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** @param {{ contact_action: string, relink_user_id?: string, create?: { name: string, phone?: string, pin?: string } }} body */
+export async function postDeleteStaff(id, body) {
+  const res = await fetch(`/api/staff/${id}/delete`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `POST /api/staff/${id}/delete → ${res.status}`);
+  }
+  return res.json();
+}
+
 /* Callers Directory (migration 0021) — session-cookie only, admin/superadmin
    gated server-side, same pattern as /api/staff* above. */
 /* `q` / `limit` / `offset` are for the site-contacts picker — the directory

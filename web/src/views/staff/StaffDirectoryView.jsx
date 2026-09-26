@@ -6,6 +6,7 @@ import { fetchStaff, patchStaffPhone, postResetStaffPin, postCreateStaff } from 
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { AddStaffModal } from "./AddStaffModal.jsx";
+import { DeleteStaffModal } from "./DeleteStaffModal.jsx";
 
 /* ------------------------------------------------------------------
    Staff — admin/superadmin only (migration 0011). Lists every `staff`
@@ -17,11 +18,13 @@ import { AddStaffModal } from "./AddStaffModal.jsx";
 export function StaffDirectoryView({ onBack }) {
   const [staff, setStaff] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [deleting, setDeleting] = useState(null);
   const [revealed, setRevealed] = useState(new Set());
   const [phoneDrafts, setPhoneDrafts] = useState({});
   const [confirmingResetId, setConfirmingResetId] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const load = useCallback(() => {
     return fetchStaff()
@@ -111,6 +114,7 @@ export function StaffDirectoryView({ onBack }) {
       </div>
 
       {error && <p style={{ fontSize: 12, color: t.signal, marginTop: 0 }}>{error}</p>}
+      {notice && <p style={{ fontSize: 12, color: t.edge2, marginTop: 0 }}>{notice}</p>}
 
       {staff === null ? (
         <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
@@ -125,6 +129,7 @@ export function StaffDirectoryView({ onBack }) {
             const dirty = draft !== (s.phone ?? "");
             const isRevealed = revealed.has(s.id);
             const busy = busyId === s.id;
+            const canDelete = s.role === "staff" && !s.is_self;
             return (
               <div key={s.id} style={{ ...TILE_ROW_STYLE, display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
@@ -132,7 +137,32 @@ export function StaffDirectoryView({ onBack }) {
                     {s.name}
                     {s.is_self && <span style={{ fontWeight: 400, color: t.edge2 }}> (you)</span>}
                   </span>
-                  <span style={{ fontSize: 12, color: t.edge2, textTransform: "capitalize" }}>{s.role}</span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12, color: t.edge2, textTransform: "capitalize" }}>{s.role}</span>
+                    {canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setError("");
+                          setNotice("");
+                          setDeleting(s);
+                        }}
+                        disabled={busy}
+                        style={{
+                          border: "none",
+                          background: "none",
+                          color: t.signal,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          padding: 0,
+                          opacity: busy ? 0.6 : 1,
+                        }}
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </span>
                 </div>
 
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -187,6 +217,24 @@ export function StaffDirectoryView({ onBack }) {
             await load();
             setRevealed((s) => new Set(s).add(created.id));
             return created;
+          }}
+        />
+      )}
+
+      {deleting && (
+        <DeleteStaffModal
+          staffUser={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={async (result) => {
+            await load();
+            if (result?.created?.pin) {
+              setNotice(
+                `Created ${result.created.name} with PIN ${result.created.pin}. Deleted the old login.`
+              );
+              setRevealed((s) => new Set(s).add(result.created.id));
+            } else {
+              setNotice(`Deleted ${deleting.name}.`);
+            }
           }}
         />
       )}
