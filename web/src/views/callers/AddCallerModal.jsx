@@ -4,8 +4,13 @@ import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
 
 const CATEGORY_OPTIONS = [
   { value: "client", label: "Client" },
+  { value: "vendor", label: "Vendor" },
+  { value: "supplier", label: "Supplier" },
+  { value: "transporter", label: "Transporter" },
+  { value: "tech", label: "Tech" },
   { value: "staff", label: "Staff" },
   { value: "family", label: "Family" },
+  { value: "relative", label: "Relative" },
   { value: "spam", label: "Spam" },
 ];
 

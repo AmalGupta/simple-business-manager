@@ -13,6 +13,7 @@ import {
   setCallSubmitted,
   setDrivePollProgress,
   shouldSkipDriveIngest,
+  driveSkipArchiveKind,
   DRIVE_POLL_LAST_AT_KEY,
   DRIVE_POLL_LAST_RESULT_KEY,
   type DrivePollProgress,
@@ -223,15 +224,15 @@ async function ingestOne(
   const callId = crypto.randomUUID();
   const callTime = parsed.recordedAt ?? new Date().toISOString();
 
-  // Family / known-spam: never touch R2/Sarvam. Client and staff always
-  // process — shouldSkipDriveIngest is the single gate (reclassifying spam →
-  // client/staff must resume normal ingest on the next poll).
+  // Family / relative / known-spam: never touch R2/Sarvam. Business roles
+  // always process — shouldSkipDriveIngest is the single gate.
   if (shouldSkipDriveIngest(caller.category)) {
     onStep("skip", caller.name);
-    const destinationFolderId = caller.category === "family" ? archiveId : spamId;
+    const kind = driveSkipArchiveKind(caller.category);
+    const destinationFolderId = kind === "archive" ? archiveId : spamId;
     if (!destinationFolderId) {
       throw new Error(
-        caller.category === "spam"
+        kind === "spam"
           ? "GOOGLE_DRIVE_SPAM_FOLDER_ID not configured"
           : "GOOGLE_DRIVE_ARCHIVE_FOLDER_ID not configured"
       );
