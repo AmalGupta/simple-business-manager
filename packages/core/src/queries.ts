@@ -177,7 +177,7 @@ export interface CallerRow {
   created_at: string;
 }
 
-export type CallerBucket = "saved" | "unsaved" | "spam";
+export type CallerBucket = "saved" | "unsaved" | "spam" | "staff";
 
 export interface CallerLinkedSite {
   id: string;
@@ -204,6 +204,7 @@ export interface CallerBucketCounts {
   saved: number;
   unsaved: number;
   spam: number;
+  staff: number;
 }
 
 const CALLER_SELECT = `
@@ -255,11 +256,14 @@ function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (strin
   const binds: (string | number)[] = [];
   if (opts?.bucket === "spam") {
     where.push(`callers.category = 'spam'`);
+  } else if (opts?.bucket === "staff") {
+    where.push(`callers.category = 'staff'`);
   } else if (opts?.bucket === "saved") {
-    where.push(`callers.category != 'spam'`);
+    /* Staff contacts live on the Staff bookmark — not mixed into Saved. */
+    where.push(`callers.category NOT IN ('spam', 'staff')`);
     where.push(`NOT ${SQL_CALLER_UNSAVED_CONTACT}`);
   } else if (opts?.bucket === "unsaved") {
-    where.push(`callers.category != 'spam'`);
+    where.push(`callers.category NOT IN ('spam', 'staff')`);
     where.push(SQL_CALLER_UNSAVED_CONTACT);
   } else if (opts?.category) {
     where.push(`callers.category = ?`);
@@ -313,13 +317,15 @@ export async function countCallersByBucket(db: D1Database): Promise<CallerBucket
     .prepare(
       `SELECT
          SUM(CASE WHEN category = 'spam' THEN 1 ELSE 0 END) AS spam,
-         SUM(CASE WHEN category != 'spam' AND NOT ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS saved,
-         SUM(CASE WHEN category != 'spam' AND ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS unsaved
+         SUM(CASE WHEN category = 'staff' THEN 1 ELSE 0 END) AS staff,
+         SUM(CASE WHEN category NOT IN ('spam', 'staff') AND NOT ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS saved,
+         SUM(CASE WHEN category NOT IN ('spam', 'staff') AND ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS unsaved
        FROM callers`
     )
-    .first<{ spam: number; saved: number; unsaved: number }>();
+    .first<{ spam: number; staff: number; saved: number; unsaved: number }>();
   return {
     spam: row?.spam ?? 0,
+    staff: row?.staff ?? 0,
     saved: row?.saved ?? 0,
     unsaved: row?.unsaved ?? 0,
   };
@@ -3775,6 +3781,12 @@ export async function listStaffRoster(db: D1Database): Promise<StaffRosterRow[]>
 
 export async function updateUserPhone(db: D1Database, userId: string, phone: string | null): Promise<void> {
   await db.prepare(`UPDATE users SET phone = ? WHERE id = ?`).bind(phone, userId).run();
+}
+
+export async function updateUserName(db: D1Database, userId: string, name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("name cannot be empty");
+  await db.prepare(`UPDATE users SET name = ? WHERE id = ?`).bind(trimmed, userId).run();
 }
 
 export async function getUserByName(db: D1Database, name: string): Promise<User | null> {
