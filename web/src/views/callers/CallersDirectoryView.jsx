@@ -217,9 +217,8 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
       setError("");
       try {
         if (nextCategory === "staff") {
+          /* Preview only — persist on Confirm in the modal. */
           await runPromoteFlow(id);
-          await load(queryOpts, true);
-          await refreshContactsDirectory({ bucket: "staff", limit: PAGE_SIZE, offset: 0 }).catch(() => {});
         } else {
           await patchCaller(id, { category: nextCategory });
           await load(queryOpts, true);

@@ -231,35 +231,29 @@ export interface PromoteStaffResult {
   alias: string;
   login_name: string;
   pin: string;
-  user_id: string;
+  /** Existing staff user id when linking / already linked; null when Confirm will create. */
+  user_id: string | null;
+  /** True only after Confirm creates a new login — preview always false for new. */
   created: boolean;
   already_linked: boolean;
-  /** True when we attached the contact to a pre-existing staff login (same name). */
+  /** True when preview/confirm targets a pre-existing staff login (phone/name match). */
   linked_existing: boolean;
 }
 
-async function pinForUser(env: Env, user: { id: string; pin_encrypted: string | null }): Promise<string> {
+/** Read recoverable PIN; if missing, return a fresh proposal without writing. */
+async function proposedPinForUser(
+  env: Env,
+  user: { pin_encrypted: string | null }
+): Promise<string> {
   const decrypted = user.pin_encrypted ? await decryptPin(env, user.pin_encrypted) : null;
   const cleaned = decrypted ? normalizePin(decrypted) : "";
-  if (cleaned && /^\d{4,6}$/.test(cleaned)) {
-    if (cleaned !== decrypted) {
-      const { hash, salt } = await hashPin(env, cleaned);
-      const pinEncrypted = await encryptPin(env, cleaned);
-      await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
-    }
-    return cleaned;
-  }
-  const pin = normalizePin(generateRandomPin());
-  const { hash, salt } = await hashPin(env, pin);
-  const pinEncrypted = await encryptPin(env, pin);
-  await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
-  return pin;
+  if (cleaned && /^\d{4,6}$/.test(cleaned)) return cleaned;
+  return normalizePin(generateRandomPin());
 }
 
 /**
- * Ensure a contact marked Staff has a login account. Creates a staff user +
- * PIN when missing; links an existing staff user with the same phone or name
- * when present. Always sets category=staff and callers.staff_user_id.
+ * Preview staff login setup — does NOT create a user or write staff_user_id.
+ * Persist happens only in handleConfirmCallerStaffPromotion.
  */
 export async function promoteCallerToStaff(env: Env, callerId: string): Promise<PromoteStaffResult | Response> {
   const caller = await getCallerById(env.DB, callerId);
@@ -271,10 +265,7 @@ export async function promoteCallerToStaff(env: Env, callerId: string): Promise<
   if (caller.staff_user_id) {
     const user = await getUserById(env.DB, caller.staff_user_id);
     if (!user) return json({ error: "linked staff account missing" }, 500);
-    if (caller.category !== "staff") {
-      await updateCaller(env.DB, callerId, { category: "staff" });
-    }
-    const pin = await pinForUser(env, user);
+    const pin = await proposedPinForUser(env, user);
     return {
       caller_id: callerId,
       contact_name: caller.name,
@@ -294,11 +285,7 @@ export async function promoteCallerToStaff(env: Env, callerId: string): Promise<
     phone: caller.phone,
   });
   if (existing) {
-    await updateCaller(env.DB, callerId, { category: "staff", staff_user_id: existing.id });
-    if (!existing.phone && caller.phone) {
-      await updateUserPhone(env.DB, existing.id, caller.phone);
-    }
-    const pin = await pinForUser(env, existing);
+    const pin = await proposedPinForUser(env, existing);
     return {
       caller_id: callerId,
       contact_name: caller.name,
@@ -324,40 +311,35 @@ export async function promoteCallerToStaff(env: Env, callerId: string): Promise<
   }
 
   const pin = normalizePin(generateRandomPin());
-  const { hash, salt } = await hashPin(env, pin);
-  const pinEncrypted = await encryptPin(env, pin);
-  const user = await createUser(env.DB, loginName, hash, salt, "staff", caller.phone, pinEncrypted);
-  await updateCaller(env.DB, callerId, { category: "staff", staff_user_id: user.id });
-
   return {
     caller_id: callerId,
     contact_name: caller.name,
     alias: aliasPreview,
-    login_name: user.name,
+    login_name: loginName,
     pin,
-    user_id: user.id,
-    created: true,
+    user_id: null,
+    created: false,
     already_linked: false,
     linked_existing: false,
   };
 }
 
-/** POST /api/callers/:id/promote-staff — create/link staff login + return PIN for confirm UI. */
+/** POST /api/callers/:id/promote-staff — preview login details for confirm UI (no write). */
 export async function handlePromoteCallerStaff(request: Request, env: Env, id: string): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
 
   const result = await promoteCallerToStaff(env, id);
   if (result instanceof Response) return result;
-  return json(result, result.created ? 201 : 200);
+  return json(result, 200);
 }
 
 /**
- * POST /api/callers/:id/confirm-staff-promotion — apply editable login name / PIN / alias
- * after the promote notification. Staff can then log in with the confirmed PIN.
+ * POST /api/callers/:id/confirm-staff-promotion — create or link staff login + apply
+ * login name / PIN / alias. This is the only step that persists a new login.
  *
- * If the chosen login_name already belongs to another staff account, re-link
- * this contact to that account and update that account's PIN (instead of 409).
+ * If the chosen login_name already belongs to another staff account, link this
+ * contact to that account and update that account's PIN.
  */
 export async function handleConfirmCallerStaffPromotion(
   request: Request,
@@ -369,9 +351,6 @@ export async function handleConfirmCallerStaffPromotion(
 
   const caller = await getCallerById(env.DB, id);
   if (!caller) return json({ error: "not found" }, 404);
-  if (!caller.staff_user_id) {
-    return json({ error: "contact is not linked to a staff account — promote first" }, 400);
-  }
 
   let body: unknown;
   try {
@@ -387,11 +366,44 @@ export async function handleConfirmCallerStaffPromotion(
   if (!loginName) return json({ error: "login_name is required" }, 400);
   if (!/^\d{4,6}$/.test(pin)) return json({ error: "pin must be 4-6 digits" }, 400);
 
-  let user = await getUserById(env.DB, caller.staff_user_id);
-  if (!user) return json({ error: "linked staff account missing" }, 500);
+  const { hash, salt } = await hashPin(env, pin);
+  const pinEncrypted = await encryptPin(env, pin);
+
+  let user = caller.staff_user_id ? await getUserById(env.DB, caller.staff_user_id) : null;
+  let created = false;
+  let linkedExisting = false;
 
   const nameOwner = await getUserByName(env.DB, loginName);
-  if (nameOwner && nameOwner.id !== user.id) {
+
+  if (user) {
+    if (nameOwner && nameOwner.id !== user.id) {
+      if (nameOwner.role !== "staff") {
+        return json(
+          {
+            error:
+              "that login name is already used by a non-staff account — edit the login name",
+          },
+          409
+        );
+      }
+      await updateCaller(env.DB, id, { category: "staff", staff_user_id: nameOwner.id });
+      user = nameOwner;
+      linkedExisting = true;
+    } else if (user.name !== loginName) {
+      try {
+        await updateUserName(env.DB, user.id, loginName);
+      } catch (err) {
+        if (String(err).includes("UNIQUE")) {
+          return json({
+            error: "a user with that login name already exists — edit the login name",
+          }, 409);
+        }
+        throw err;
+      }
+    }
+    await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
+    await revokeAllSessionsForUser(env.DB, user.id);
+  } else if (nameOwner) {
     if (nameOwner.role !== "staff") {
       return json(
         {
@@ -401,26 +413,47 @@ export async function handleConfirmCallerStaffPromotion(
         409
       );
     }
-    /* Re-link to the existing staff login the admin typed. */
-    await updateCaller(env.DB, id, { category: "staff", staff_user_id: nameOwner.id });
     user = nameOwner;
-  } else if (user.name !== loginName) {
-    try {
-      await updateUserName(env.DB, user.id, loginName);
-    } catch (err) {
-      if (String(err).includes("UNIQUE")) {
-        return json({
-          error: "a user with that login name already exists — edit the login name",
-        }, 409);
+    linkedExisting = true;
+    await updateCaller(env.DB, id, { category: "staff", staff_user_id: user.id });
+    if (!user.phone && caller.phone) {
+      await updateUserPhone(env.DB, user.id, caller.phone);
+    }
+    await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
+    await revokeAllSessionsForUser(env.DB, user.id);
+  } else {
+    /* Also prefer phone match if login name is new but phone matches staff. */
+    const byContact = await findStaffUserForContact(env.DB, {
+      name: loginName,
+      phone: caller.phone,
+    });
+    if (byContact) {
+      user = byContact;
+      linkedExisting = true;
+      if (user.name !== loginName) {
+        try {
+          await updateUserName(env.DB, user.id, loginName);
+        } catch (err) {
+          if (String(err).includes("UNIQUE")) {
+            return json({
+              error: "a user with that login name already exists — edit the login name",
+            }, 409);
+          }
+          throw err;
+        }
       }
-      throw err;
+      await updateCaller(env.DB, id, { category: "staff", staff_user_id: user.id });
+      if (!user.phone && caller.phone) {
+        await updateUserPhone(env.DB, user.id, caller.phone);
+      }
+      await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
+      await revokeAllSessionsForUser(env.DB, user.id);
+    } else {
+      user = await createUser(env.DB, loginName, hash, salt, "staff", caller.phone, pinEncrypted);
+      created = true;
+      await updateCaller(env.DB, id, { category: "staff", staff_user_id: user.id });
     }
   }
-
-  const { hash, salt } = await hashPin(env, pin);
-  const pinEncrypted = await encryptPin(env, pin);
-  await updateUserPin(env.DB, user.id, hash, salt, pinEncrypted);
-  await revokeAllSessionsForUser(env.DB, user.id);
 
   if (caller.category !== "staff") {
     await updateCaller(env.DB, id, { category: "staff" });
@@ -438,14 +471,16 @@ export async function handleConfirmCallerStaffPromotion(
     }
   }
 
+  const finalUser = await getUserById(env.DB, user.id);
   return json({
     ok: true,
     caller_id: id,
     user_id: user.id,
-    login_name: user.name === loginName ? loginName : (await getUserById(env.DB, user.id))?.name ?? loginName,
+    login_name: finalUser?.name ?? loginName,
     pin,
     alias: alias || null,
-    linked_existing: Boolean(nameOwner && nameOwner.role === "staff"),
+    created,
+    linked_existing: linkedExisting,
   });
 }
 
