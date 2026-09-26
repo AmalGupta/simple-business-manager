@@ -3,6 +3,7 @@
 import { matchStaffByOwner, normalizeOwnerName, type OwnerAliasMatch } from "./assignment";
 import { normalizeCallerPhone } from "./caller-category";
 import { SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
+import { pickExistingSiteId, type SiteMatchCandidate } from "./site-match";
 import type {
   AppRequest,
   Call,
@@ -763,13 +764,42 @@ export async function setCallTranscribed(
  * `discoveredFromCallId` (migration 0028) is written on the INSERT branch
  * only, for the same reason: it records the call that first produced the
  * name, so the tenth call to mention a site must not overwrite it.
+ *
+ * Before inserting, prefer a high-confidence match against existing sites
+ * (house+sector / unique sector / exact name) so desk notes saying
+ * "House 1818, Sector 80" attach to "H.NO 1818 Sector 80" instead of
+ * creating a duplicate "Sector 80".
  */
+export async function listSiteMatchCandidates(db: D1Database): Promise<SiteMatchCandidate[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, name, site_name_being_used, house_no, sector, is_confirmed
+       FROM sites`
+    )
+    .all<SiteMatchCandidate>();
+  return results ?? [];
+}
+
+export async function findExistingSiteId(
+  db: D1Database,
+  spoken: string,
+  candidates?: SiteMatchCandidate[]
+): Promise<string | null> {
+  const list = candidates ?? (await listSiteMatchCandidates(db));
+  return pickExistingSiteId(spoken, list, { allowWeakContains: true });
+}
+
 export async function upsertSite(
   db: D1Database,
   name: string,
-  discoveredFromCallId?: string | null
+  discoveredFromCallId?: string | null,
+  candidates?: SiteMatchCandidate[]
 ): Promise<string> {
   const trimmed = name.trim();
+  if (trimmed) {
+    const matched = await findExistingSiteId(db, trimmed, candidates);
+    if (matched) return matched;
+  }
   const row = await db
     .prepare(
       `INSERT INTO sites (id, name, discovered_from_call_id) VALUES (?, ?, ?)
@@ -839,7 +869,8 @@ export async function touchSiteActivity(
 export async function linkCallToSites(db: D1Database, callId: string, siteNames: string[]): Promise<void> {
   const names = [...new Set(siteNames.map((s) => s.trim()).filter(Boolean))];
   if (names.length === 0) return;
-  const siteIds = await Promise.all(names.map((name) => upsertSite(db, name, callId)));
+  const candidates = await listSiteMatchCandidates(db);
+  const siteIds = await Promise.all(names.map((name) => upsertSite(db, name, callId, candidates)));
   await db.batch(
     siteIds.map((siteId) =>
       db.prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`).bind(callId, siteId)
@@ -861,6 +892,71 @@ export async function linkCallToSiteExplicit(db: D1Database, callId: string, sit
   await touchSiteActivity(db, siteId, { at: call?.recorded_at ?? null, source: "call", refId: callId });
 }
 
+export interface RematchDeskCallSitesResult {
+  callsScanned: number;
+  todosUpdated: number;
+  callSitesLinked: number;
+}
+
+/**
+ * One-shot: for desk conversations (uploaded_by set, no recorded_for_site)
+ * with open todos missing site_id, match todo.text against existing sites and
+ * write todos.site_id + call_sites. Does not create new sites.
+ */
+export async function rematchDeskCallSites(db: D1Database): Promise<RematchDeskCallSitesResult> {
+  const candidates = await listSiteMatchCandidates(db);
+  const { results } = await db
+    .prepare(
+      `SELECT todos.id AS todo_id,
+              todos.call_id AS call_id,
+              todos.text AS text,
+              calls.recorded_at AS recorded_at
+       FROM todos
+       JOIN calls ON calls.id = todos.call_id
+       WHERE calls.uploaded_by_user_id IS NOT NULL
+         AND calls.recorded_for_site_id IS NULL
+         AND calls.deleted_at IS NULL
+         AND todos.status = 'open'
+         AND todos.site_id IS NULL`
+    )
+    .all<{ todo_id: string; call_id: string; text: string; recorded_at: string | null }>();
+
+  const rows = results ?? [];
+  const callIds = new Set(rows.map((r) => r.call_id));
+  let todosUpdated = 0;
+  let callSitesLinked = 0;
+  const linkedPairs = new Set<string>();
+
+  for (const row of rows) {
+    const siteId = pickExistingSiteId(row.text, candidates, { allowWeakContains: true });
+    if (!siteId) continue;
+    await db.prepare(`UPDATE todos SET site_id = ? WHERE id = ? AND site_id IS NULL`).bind(siteId, row.todo_id).run();
+    todosUpdated += 1;
+    const pairKey = `${row.call_id}:${siteId}`;
+    if (!linkedPairs.has(pairKey)) {
+      linkedPairs.add(pairKey);
+      const before = await db
+        .prepare(`SELECT 1 AS ok FROM call_sites WHERE call_id = ? AND site_id = ?`)
+        .bind(row.call_id, siteId)
+        .first<{ ok: number }>();
+      await db
+        .prepare(`INSERT OR IGNORE INTO call_sites (call_id, site_id) VALUES (?, ?)`)
+        .bind(row.call_id, siteId)
+        .run();
+      if (!before) {
+        callSitesLinked += 1;
+        await touchSiteActivity(db, siteId, {
+          at: row.recorded_at,
+          source: "call",
+          refId: row.call_id,
+        });
+      }
+    }
+  }
+
+  return { callsScanned: callIds.size, todosUpdated, callSitesLinked };
+}
+
 /**
  * Backfills the reverse pointer once both rows exist — insertCall runs
  * before its installation_updates row can exist (the row's own
@@ -880,8 +976,9 @@ export async function saveExtraction(
   extraction: CallExtraction,
   promptVersion: string
 ): Promise<void> {
+  const siteCandidates = await listSiteMatchCandidates(db);
   const siteNames = [...new Set(extraction.sites.map((s) => s.trim()).filter(Boolean))];
-  const siteIds = await Promise.all(siteNames.map((name) => upsertSite(db, name, callId)));
+  const siteIds = await Promise.all(siteNames.map((name) => upsertSite(db, name, callId, siteCandidates)));
   /* name → id for resolving todos[].site (v7). Case-insensitive lookup so
      roster drift in spelling/case still hits the call-level upsert. */
   const siteIdByName = new Map<string, string>();
@@ -937,7 +1034,10 @@ export async function saveExtraction(
   const soleCallSiteId = siteIds.length === 1 ? siteIds[0] : null;
   const recordedForSiteId = call?.recorded_for_site_id ?? null;
 
-  const resolveTodoSiteId = async (spokenSite: string | undefined): Promise<string | null> => {
+  const resolveTodoSiteId = async (
+    spokenSite: string | undefined,
+    todoText: string
+  ): Promise<string | null> => {
     const trimmed = spokenSite?.trim() ?? "";
     if (trimmed) {
       const existing = siteIdByName.get(trimmed.toLowerCase());
@@ -945,13 +1045,20 @@ export async function saveExtraction(
         linkCallSite(existing);
         return existing;
       }
-      const id = await upsertSite(db, trimmed, callId);
+      const matched = pickExistingSiteId(trimmed, siteCandidates, { allowWeakContains: true });
+      if (matched) {
+        siteIdByName.set(trimmed.toLowerCase(), matched);
+        linkCallSite(matched);
+        return matched;
+      }
+      const id = await upsertSite(db, trimmed, callId, siteCandidates);
       siteIdByName.set(trimmed.toLowerCase(), id);
       linkCallSite(id);
       return id;
     }
     /* Fallbacks when the model left todos[].site empty: single call site,
-       else the site this voice memo was recorded for. */
+       else the site this voice memo was recorded for, else high-confidence
+       match from todo text against existing sites (desk conversations). */
     if (soleCallSiteId) {
       linkCallSite(soleCallSiteId);
       return soleCallSiteId;
@@ -959,6 +1066,11 @@ export async function saveExtraction(
     if (recordedForSiteId) {
       linkCallSite(recordedForSiteId);
       return recordedForSiteId;
+    }
+    const fromText = pickExistingSiteId(todoText, siteCandidates, { allowWeakContains: true });
+    if (fromText) {
+      linkCallSite(fromText);
+      return fromText;
     }
     return null;
   };
@@ -974,7 +1086,7 @@ export async function saveExtraction(
         : null;
     const assigneeId = matched?.id ?? selfAssigneeId;
     const todoId = crypto.randomUUID();
-    const todoSiteId = await resolveTodoSiteId(todo.site);
+    const todoSiteId = await resolveTodoSiteId(todo.site, todo.text);
     statements.push(
       db
         .prepare(
@@ -1233,13 +1345,28 @@ interface RawSiteRow {
   name: string;
 }
 
+const CALL_CLIENT_NAME_SQL = `COALESCE(
+         callers.name,
+         recorded_sites.name,
+         (
+           SELECT sites.name FROM call_sites
+           JOIN sites ON sites.id = call_sites.site_id
+           WHERE call_sites.call_id = calls.id
+             AND sites.is_confirmed IS NOT 'N'
+           ORDER BY sites.name ASC
+           LIMIT 1
+         ),
+         CASE WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'Desk conversation' END,
+         'Unknown caller'
+       )`;
+
 const CALL_SELECT = `
   SELECT calls.id, calls.duration_s, calls.recorded_at, calls.recording_date, calls.source,
          calls.call_type, calls.recorded_for_site_id, calls.summary, calls.key_takeaways,
          calls.unresolved, calls.material_needs, calls.deadline,
          transcripts.transcript AS transcript,
          CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
-         COALESCE(callers.name, 'Unknown caller') AS client_name,
+         ${CALL_CLIENT_NAME_SQL} AS client_name,
          callers.phone AS client_phone,
          uploaders.name AS uploaded_by_name,
          recorded_sites.name AS recorded_for_site_name
@@ -1258,7 +1385,7 @@ const CALL_LIST_SELECT = `
          calls.unresolved, calls.material_needs, calls.deadline,
          NULL AS transcript,
          CASE WHEN transcripts.r2_key IS NOT NULL THEN 1 ELSE 0 END AS has_transcript,
-         COALESCE(callers.name, 'Unknown caller') AS client_name,
+         ${CALL_CLIENT_NAME_SQL} AS client_name,
          callers.phone AS client_phone,
          uploaders.name AS uploaded_by_name,
          recorded_sites.name AS recorded_for_site_name
@@ -4614,20 +4741,8 @@ export async function countMyOpenTodos(
   return Number(row?.n) || 0;
 }
 
-const OPEN_TODO_CLIENT_NAME_SQL = `COALESCE(
-                callers.name,
-                recorded_sites.name,
-                (
-                  SELECT sites.name FROM call_sites
-                  JOIN sites ON sites.id = call_sites.site_id
-                  WHERE call_sites.call_id = calls.id
-                    AND sites.is_confirmed IS NOT 'N'
-                  ORDER BY sites.name ASC
-                  LIMIT 1
-                ),
-                CASE WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'Desk conversation' END,
-                'Unknown caller'
-              )`;
+/* Same preference as CALL_CLIENT_NAME_SQL (caller → recorded_for → call_sites → desk label). */
+const OPEN_TODO_CLIENT_NAME_SQL = CALL_CLIENT_NAME_SQL;
 
 const OPEN_TODO_HAS_UNRESOLVED_SQL = `(calls.unresolved IS NOT NULL AND calls.unresolved != '' AND calls.unresolved != '[]')`;
 
