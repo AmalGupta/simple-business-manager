@@ -20,6 +20,7 @@ import { BackLink } from "../../components/BackLink.jsx";
 import { AddCallerModal } from "./AddCallerModal.jsx";
 import { ManageAliasesModal } from "./ManageAliasesModal.jsx";
 import { PromoteStaffConfirmModal } from "./PromoteStaffConfirmModal.jsx";
+import { EditContactModal } from "./EditContactModal.jsx";
 import "./CallersDirectoryView.css";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -187,6 +188,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const [bucketCounts, setBucketCounts] = useState(EMPTY_BUCKET_COUNTS);
   const [showAddModal, setShowAddModal] = useState(false);
   const [aliasCaller, setAliasCaller] = useState(null);
+  const [editCaller, setEditCaller] = useState(null);
   const [promotion, setPromotion] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState("");
@@ -258,6 +260,10 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
 
   const onManageAliases = useCallback((caller) => {
     setAliasCaller(caller);
+  }, []);
+
+  const onEditContact = useCallback((caller) => {
+    setEditCaller(caller);
   }, []);
 
   const columnDefs = useMemo(
@@ -346,8 +352,35 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
             },
           ]
         : []),
+      {
+        headerName: "",
+        colId: "edit",
+        width: 120,
+        headerClass: "sbm-contacts-edit-header",
+        cellClass: "sbm-contacts-edit-cell",
+        cellRenderer: (p) =>
+          p.data ? (
+            <button
+              type="button"
+              onClick={() => onEditContact(p.data)}
+              style={{
+                padding: "4px 10px",
+                border: `1px solid ${t.frost}`,
+                borderRadius: t.radiusButton,
+                background: t.white,
+                color: t.accent,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Edit contact
+            </button>
+          ) : null,
+      },
     ],
-    [bucket, busyId, changeCategory, onSiteClick, onManageAliases]
+    [bucket, busyId, changeCategory, onSiteClick, onManageAliases, onEditContact]
   );
 
   const defaultColDef = useMemo(
@@ -686,6 +719,20 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
           caller={aliasCaller}
           onClose={() => setAliasCaller(null)}
           onChanged={() => load(queryOpts, true)}
+        />
+      )}
+
+      {editCaller && (
+        <EditContactModal
+          caller={editCaller}
+          onClose={() => setEditCaller(null)}
+          onSaved={async () => {
+            await load(queryOpts, true);
+            await refreshContactsDirectory(queryOpts).catch(() => {});
+          }}
+          onRequestPromote={async (callerId) => {
+            await runPromoteFlow(callerId);
+          }}
         />
       )}
     </div>

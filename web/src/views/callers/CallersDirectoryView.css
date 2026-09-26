@@ -18,13 +18,13 @@
   --ag-font-family: var(--font-body), system-ui, sans-serif;
   --ag-font-size: 13px;
   --ag-background-color: var(--color-surface);
-  --ag-header-background-color: #e8eef6;
+  --ag-header-background-color: #ebe4f5;
   --ag-odd-row-background-color: var(--color-surface);
-  --ag-even-row-background-color: #f7f9fc;
-  --ag-row-hover-color: color-mix(in srgb, var(--color-accent) 7%, white);
+  --ag-even-row-background-color: #f8f6fc;
+  --ag-row-hover-color: color-mix(in srgb, #7c6aad 8%, white);
   --ag-border-color: var(--color-line);
   --ag-row-border-color: var(--color-line-soft);
-  --ag-header-foreground-color: #3d4a5c;
+  --ag-header-foreground-color: #4a3f63;
   --ag-foreground-color: var(--color-ink);
   --ag-border-radius: 0;
   --ag-wrapper-border-radius: 0;
@@ -60,11 +60,11 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #3d4a5c;
+  color: #4a3f63;
 }
 
 .sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header {
-  border-bottom: 1px solid #d5dde8;
+  border-bottom: 1px solid #d9d0e8;
 }
 
 .sbm-contacts-grid-wrap .sbm-contacts-grid .ag-cell {
@@ -81,6 +81,10 @@
 .sbm-contacts-grid-wrap .sbm-contacts-grid .sbm-contacts-aliases-header .ag-header-cell-label {
   justify-content: center;
   width: 100%;
+}
+
+.sbm-contacts-grid-wrap .sbm-contacts-grid .sbm-contacts-edit-cell {
+  justify-content: flex-end;
 }
 
 .sbm-contacts-site-link {
