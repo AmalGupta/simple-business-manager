@@ -4024,7 +4024,6 @@ export async function deleteStaffUser(
     db.prepare(`UPDATE escalations SET assigned_to_user_id = NULL WHERE assigned_to_user_id = ?`).bind(userId),
     db.prepare(`UPDATE escalations SET assigned_by_user_id = NULL WHERE assigned_by_user_id = ?`).bind(userId),
     db.prepare(`UPDATE escalations SET created_by_user_id = NULL WHERE created_by_user_id = ?`).bind(userId),
-    db.prepare(`UPDATE escalations SET resolved_by_user_id = NULL WHERE resolved_by_user_id = ?`).bind(userId),
     db.prepare(`UPDATE material_shortages SET resolved_by_user_id = NULL WHERE resolved_by_user_id = ?`).bind(userId),
     db.prepare(`UPDATE site_team_members SET user_id = NULL WHERE user_id = ?`).bind(userId),
     db.prepare(`UPDATE site_team_members SET added_by = NULL WHERE added_by = ?`).bind(userId),
