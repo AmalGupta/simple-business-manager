@@ -74,7 +74,16 @@ import {
   handleUpdateStaffPhone,
 } from "./handlers/auth";
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
-import { handleCreateCaller, handleListCallers, handleUpdateCaller, handleListCallerAliases, handleAddCallerAlias, handleDeleteCallerAlias } from "./handlers/callers";
+import {
+  handleCreateCaller,
+  handleListCallers,
+  handleUpdateCaller,
+  handleListCallerAliases,
+  handleAddCallerAlias,
+  handleDeleteCallerAlias,
+  handlePromoteCallerStaff,
+  handleConfirmCallerStaffPromotion,
+} from "./handlers/callers";
 import { handleGetSiteContactProposals, handlePostSiteContactMappings } from "./handlers/maintenance";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handlePostDeskVoiceNote } from "./handlers/desk-voice-note";
@@ -489,6 +498,16 @@ export default {
     }
     if (url.pathname === "/api/callers" && request.method === "POST") {
       return handleCreateCaller(request, env);
+    }
+    const callerPromoteMatch = url.pathname.match(/^\/api\/callers\/([^/]+)\/promote-staff$/);
+    if (callerPromoteMatch && request.method === "POST") {
+      return handlePromoteCallerStaff(request, env, callerPromoteMatch[1]);
+    }
+    const callerConfirmStaffMatch = url.pathname.match(
+      /^\/api\/callers\/([^/]+)\/confirm-staff-promotion$/
+    );
+    if (callerConfirmStaffMatch && request.method === "POST") {
+      return handleConfirmCallerStaffPromotion(request, env, callerConfirmStaffMatch[1]);
     }
     const callerAliasMatch = url.pathname.match(/^\/api\/callers\/([^/]+)\/aliases(?:\/([^/]+))?$/);
     if (callerAliasMatch) {
