@@ -18,13 +18,21 @@ export type CallType = "client" | "internal" | "low_signal";
 export type EscalationStatus = "open" | "done";
 
 /**
- * Callers Directory — migration 0021. Renamed from `Client`: every caller
- * who reaches the pipeline (family, staff, client, or spam) gets a row
- * here, not just real clients, so ingestion can gate on `category`.
- * Orthogonal to `CallType` — that's the LLM's per-call content classifier
- * (client/internal/low_signal); this is the caller's own identity.
+ * Callers Directory — migration 0021 + SBM-56. Renamed from `Client`: every
+ * caller who reaches the pipeline gets a row here so ingestion can gate on
+ * `category`. Orthogonal to `CallType` — that's the LLM's per-call content
+ * classifier; this is the caller's own identity.
  */
-export type CallerCategory = "family" | "staff" | "client" | "spam";
+export type CallerCategory =
+  | "family"
+  | "relative"
+  | "staff"
+  | "client"
+  | "vendor"
+  | "supplier"
+  | "transporter"
+  | "tech"
+  | "spam";
 
 export interface Caller {
   id: string;

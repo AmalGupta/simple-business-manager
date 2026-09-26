@@ -86,7 +86,7 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
   if (categoryParam) {
     const parsed = parseCategory(categoryParam);
     if (parsed === null || parsed === undefined) {
-      return json({ error: "category must be one of spam, client, family, staff" }, 400);
+      return json({ error: "category must be one of " + CALLER_CATEGORIES.join(", ") }, 400);
     }
     category = parsed;
   }
@@ -128,7 +128,12 @@ export async function handleListCallers(request: Request, env: Env): Promise<Res
     countCallers(env.DB, opts),
     bucket
       ? countCallersByCategory(env.DB)
-      : Promise.resolve({ client: 0, staff: 0, family: 0, spam: 0 }),
+      : Promise.resolve(
+          Object.fromEntries(CALLER_CATEGORIES.map((c) => [c, 0])) as Record<
+            (typeof CALLER_CATEGORIES)[number],
+            number
+          >
+        ),
     bucket
       ? countCallersByBucket(env.DB)
       : Promise.resolve({ saved: 0, unsaved: 0, spam: 0, staff: 0 }),
@@ -158,7 +163,7 @@ export async function handleCreateCaller(request: Request, env: Env): Promise<Re
   if (!name) return json({ error: "name is required" }, 400);
 
   const category = parseCategory(record.category ?? "client");
-  if (category === null) return json({ error: "category must be one of family, staff, client, spam" }, 400);
+  if (category === null) return json({ error: "category must be one of " + CALLER_CATEGORIES.join(", ") }, 400);
 
   try {
     const caller = await createCaller(env.DB, {
@@ -205,7 +210,7 @@ export async function handleUpdateCaller(request: Request, env: Env, id: string)
   }
   if ("category" in record) {
     const category = parseCategory(record.category);
-    if (category === null) return json({ error: "category must be one of family, staff, client, spam" }, 400);
+    if (category === null) return json({ error: "category must be one of " + CALLER_CATEGORIES.join(", ") }, 400);
     if (category !== undefined) patch.category = category;
   }
   if ("staff_user_id" in record) {
