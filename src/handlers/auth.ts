@@ -29,6 +29,10 @@ import {
   setUserSetting,
   updateUserPhone,
   updateUserPin,
+  listCallersLinkedToStaffUser,
+  findSimilarStaffUsers,
+  relinkCallersFromStaffUser,
+  deleteStaffUser,
   type SessionWithUser,
   type User,
   type UserCustomization,
@@ -42,6 +46,7 @@ import {
   hashPin,
   hashToken,
   newSessionToken,
+  normalizePin,
   readSessionToken,
   requireSession,
   sessionCookieHeader,
@@ -432,4 +437,113 @@ export async function handleResetStaffPin(request: Request, env: Env, id: string
   await updateUserPin(env.DB, id, hash, salt, pinEncrypted);
   await revokeAllSessionsForUser(env.DB, id);
   return json({ pin });
+}
+
+/** GET /api/staff/:id/delete-preview — linked contacts + similar staff for the delete wizard. */
+export async function handleStaffDeletePreview(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const user = await getUserById(env.DB, id);
+  if (!user) return json({ error: "not found" }, 404);
+  if (user.role !== "staff") return json({ error: "only staff accounts can be deleted" }, 400);
+  if (user.id === gate.user_id) return json({ error: "cannot delete your own account" }, 400);
+
+  const [linked_contacts, recommendations, roster] = await Promise.all([
+    listCallersLinkedToStaffUser(env.DB, id),
+    findSimilarStaffUsers(env.DB, user.name, id),
+    listStaffRoster(env.DB),
+  ]);
+
+  return json({
+    user: { id: user.id, name: user.name, phone: user.phone, role: user.role },
+    linked_contacts,
+    recommendations,
+    roster: roster.filter((r) => r.id !== id).map((r) => ({ id: r.id, name: r.name, phone: r.phone })),
+    has_linked_contacts: linked_contacts.length > 0,
+    has_similar: recommendations.length > 0,
+  });
+}
+
+/**
+ * POST /api/staff/:id/delete — body:
+ * `{ contact_action: 'none' | 'unlink' | 'relink' | 'create', relink_user_id?, create?: { name, phone?, pin? } }`
+ */
+export async function handleDeleteStaff(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+
+  const user = await getUserById(env.DB, id);
+  if (!user) return json({ error: "not found" }, 404);
+  if (user.role !== "staff") return json({ error: "only staff accounts can be deleted" }, 400);
+  if (user.id === gate.user_id) return json({ error: "cannot delete your own account" }, 400);
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    body = {};
+  }
+  const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const contactAction =
+    typeof record.contact_action === "string" ? record.contact_action.trim() : "none";
+  if (!["none", "unlink", "relink", "create"].includes(contactAction)) {
+    return json({ error: "contact_action must be none, unlink, relink, or create" }, 400);
+  }
+
+  const linked = await listCallersLinkedToStaffUser(env.DB, id);
+  if (linked.length > 0 && contactAction === "none") {
+    return json({ error: "linked contacts require unlink, relink, or create before delete" }, 400);
+  }
+
+  let createdUser: { id: string; name: string; pin: string } | null = null;
+
+  if (contactAction === "unlink") {
+    await relinkCallersFromStaffUser(env.DB, id, null);
+  } else if (contactAction === "relink") {
+    const relinkId =
+      typeof record.relink_user_id === "string" && record.relink_user_id.trim()
+        ? record.relink_user_id.trim()
+        : "";
+    if (!relinkId) return json({ error: "relink_user_id is required" }, 400);
+    if (relinkId === id) return json({ error: "cannot relink to the account being deleted" }, 400);
+    const target = await getUserById(env.DB, relinkId);
+    if (!target || target.role !== "staff") {
+      return json({ error: "relink target must be an existing staff account" }, 400);
+    }
+    await relinkCallersFromStaffUser(env.DB, id, relinkId);
+  } else if (contactAction === "create") {
+    const create =
+      typeof record.create === "object" && record.create !== null
+        ? (record.create as Record<string, unknown>)
+        : {};
+    const name = typeof create.name === "string" ? create.name.trim() : "";
+    const phone =
+      typeof create.phone === "string" && create.phone.trim() ? create.phone.trim() : null;
+    const pinRaw = typeof create.pin === "string" ? create.pin : generateRandomPin();
+    const pin = normalizePin(pinRaw);
+    if (!name) return json({ error: "create.name is required" }, 400);
+    if (!/^\d{4,6}$/.test(pin)) return json({ error: "create.pin must be 4-6 digits" }, 400);
+    if (await getUserByName(env.DB, name)) {
+      return json({ error: "a user with that login name already exists" }, 409);
+    }
+    const { hash, salt } = await hashPin(env, pin);
+    const pinEncrypted = await encryptPin(env, pin);
+    const newUser = await createUser(env.DB, name, hash, salt, "staff", phone, pinEncrypted);
+    await relinkCallersFromStaffUser(env.DB, id, newUser.id);
+    createdUser = { id: newUser.id, name: newUser.name, pin };
+  }
+
+  try {
+    await deleteStaffUser(env.DB, id, gate.user_id);
+  } catch (err) {
+    const msg = String(err);
+    if (msg.includes("not found")) return json({ error: "not found" }, 404);
+    if (msg.includes("only staff") || msg.includes("cannot delete self")) {
+      return json({ error: msg.replace(/^Error:\s*/, "") }, 400);
+    }
+    return json({ error: `delete failed: ${msg}` }, 500);
+  }
+
+  return json({ ok: true, deleted_id: id, created: createdUser });
 }
