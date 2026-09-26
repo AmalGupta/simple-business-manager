@@ -6,7 +6,7 @@ const STEP_LABEL = {
   insert: "Saving call",
   submit: "Submitting for transcription",
   archive: "Moving to Archive",
-  skip: "Skipping (family / spam)",
+  skip: "Skipping (family / relative / spam)",
 };
 
 /**
