@@ -288,7 +288,8 @@ export async function fetchSiteContacts(siteId) {
 export async function postSiteContacts(siteId, callerIds) {
   const res = await fetch(`/api/sites/${siteId}/contacts`, {
     method: "POST",
-    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
     body: JSON.stringify({ caller_ids: callerIds }),
   });
   if (!res.ok) {
@@ -301,7 +302,7 @@ export async function postSiteContacts(siteId, callerIds) {
 export async function deleteSiteContact(siteId, callerId) {
   const res = await fetch(`/api/sites/${siteId}/contacts/${callerId}`, {
     method: "DELETE",
-    headers: { "X-SBM-Key": SBM_KEY },
+    credentials: "same-origin",
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
