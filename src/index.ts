@@ -72,6 +72,8 @@ import {
   handleResetStaffPin,
   handleUpdateMyPhone,
   handleUpdateStaffPhone,
+  handleStaffDeletePreview,
+  handleDeleteStaff,
 } from "./handlers/auth";
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
 import {
@@ -488,6 +490,16 @@ export default {
     const staffResetMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/reset-pin$/);
     if (staffResetMatch && request.method === "POST") {
       return handleResetStaffPin(request, env, staffResetMatch[1]);
+    }
+
+    const staffDeletePreviewMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/delete-preview$/);
+    if (staffDeletePreviewMatch && request.method === "GET") {
+      return handleStaffDeletePreview(request, env, staffDeletePreviewMatch[1]);
+    }
+
+    const staffDeleteMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/delete$/);
+    if (staffDeleteMatch && request.method === "POST") {
+      return handleDeleteStaff(request, env, staffDeleteMatch[1]);
     }
 
     // --- Callers Directory (migration 0021) — admin/superadmin only,

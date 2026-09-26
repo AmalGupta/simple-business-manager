@@ -3903,6 +3903,162 @@ export async function revokeAllSessionsForUser(db: D1Database, userId: string): 
     .run();
 }
 
+export interface StaffLinkedCaller {
+  id: string;
+  name: string;
+  phone: string | null;
+}
+
+export interface SimilarStaffUser {
+  id: string;
+  name: string;
+  phone: string | null;
+  score: number;
+}
+
+export async function listCallersLinkedToStaffUser(
+  db: D1Database,
+  userId: string
+): Promise<StaffLinkedCaller[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, name, phone FROM callers
+       WHERE staff_user_id = ?
+       ORDER BY name ASC`
+    )
+    .bind(userId)
+    .all<StaffLinkedCaller>();
+  return results ?? [];
+}
+
+function normalizePersonNameKey(name: string): string {
+  return String(name ?? "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Rank other staff logins whose names look like `name` (exact / contains /
+ * shared prefix). Used when deleting a duplicate staff login.
+ */
+export async function findSimilarStaffUsers(
+  db: D1Database,
+  name: string,
+  excludeId: string
+): Promise<SimilarStaffUser[]> {
+  const needle = normalizePersonNameKey(name);
+  if (!needle || needle.length < 2) return [];
+
+  const { results } = await db
+    .prepare(`SELECT id, name, phone FROM users WHERE role = 'staff' AND id != ? ORDER BY name ASC`)
+    .bind(excludeId)
+    .all<{ id: string; name: string; phone: string | null }>();
+
+  const scored: SimilarStaffUser[] = [];
+  for (const row of results ?? []) {
+    const hay = normalizePersonNameKey(row.name);
+    if (!hay) continue;
+    let score = 0;
+    if (hay === needle) score = 100;
+    else if (hay.includes(needle) || needle.includes(hay)) {
+      if (Math.min(hay.length, needle.length) >= 3) score = 80;
+    } else {
+      const minLen = Math.min(hay.length, needle.length);
+      let prefix = 0;
+      while (prefix < minLen && hay[prefix] === needle[prefix]) prefix += 1;
+      if (prefix >= 3) score = 40 + prefix;
+    }
+    if (score > 0) scored.push({ ...row, score });
+  }
+  scored.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return scored.slice(0, 3);
+}
+
+export async function relinkCallersFromStaffUser(
+  db: D1Database,
+  fromUserId: string,
+  toUserId: string | null
+): Promise<number> {
+  const result = await db
+    .prepare(`UPDATE callers SET staff_user_id = ? WHERE staff_user_id = ?`)
+    .bind(toUserId, fromUserId)
+    .run();
+  return result.meta?.changes ?? 0;
+}
+
+/**
+ * Hard-delete a staff login. Caller must already have re-linked or unlinked
+ * contacts. `reassignToUserId` absorbs NOT NULL FK rows (e.g. uploaded_by).
+ */
+export async function deleteStaffUser(
+  db: D1Database,
+  userId: string,
+  reassignToUserId: string
+): Promise<void> {
+  const user = await getUserById(db, userId);
+  if (!user) throw new Error("not found");
+  if (user.role !== "staff") throw new Error("only staff accounts can be deleted");
+  if (userId === reassignToUserId) throw new Error("cannot delete self");
+
+  await revokeAllSessionsForUser(db, userId);
+  await db.prepare(`DELETE FROM sessions WHERE user_id = ?`).bind(userId).run();
+  await db.prepare(`DELETE FROM user_settings WHERE user_id = ?`).bind(userId).run();
+
+  /* Clear remaining contact links (wizard should have moved them already). */
+  await db.prepare(`UPDATE callers SET staff_user_id = NULL WHERE staff_user_id = ?`).bind(userId).run();
+
+  /* Assignees: drop rows for this user; clear assigned_by elsewhere. */
+  await db.prepare(`DELETE FROM todo_assignees WHERE user_id = ?`).bind(userId).run();
+  await db
+    .prepare(`UPDATE todo_assignees SET assigned_by_user_id = NULL WHERE assigned_by_user_id = ?`)
+    .bind(userId)
+    .run();
+
+  /* Nullable assignee / actor FKs. */
+  await db.batch([
+    db.prepare(`UPDATE site_tasks SET assigned_to_user_id = NULL WHERE assigned_to_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE site_tasks SET assigned_by_user_id = NULL WHERE assigned_by_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE site_tasks SET completed_by_user_id = NULL WHERE completed_by_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE escalations SET assigned_to_user_id = NULL WHERE assigned_to_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE escalations SET assigned_by_user_id = NULL WHERE assigned_by_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE escalations SET created_by_user_id = NULL WHERE created_by_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE escalations SET resolved_by_user_id = NULL WHERE resolved_by_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE material_shortages SET resolved_by_user_id = NULL WHERE resolved_by_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE site_team_members SET user_id = NULL WHERE user_id = ?`).bind(userId),
+    db.prepare(`UPDATE site_team_members SET added_by = NULL WHERE added_by = ?`).bind(userId),
+    db.prepare(`UPDATE site_edits SET actor_user_id = NULL WHERE actor_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE calls SET uploaded_by_user_id = NULL WHERE uploaded_by_user_id = ?`).bind(userId),
+    db.prepare(`UPDATE calls SET resolved_by_user_id = NULL WHERE resolved_by_user_id = ?`).bind(userId),
+  ]);
+
+  /* NOT NULL user FKs — reassign to the admin performing the delete. */
+  await db.batch([
+    db
+      .prepare(`UPDATE site_media SET uploaded_by = ? WHERE uploaded_by = ?`)
+      .bind(reassignToUserId, userId),
+    db
+      .prepare(`UPDATE app_requests SET created_by_user_id = ? WHERE created_by_user_id = ?`)
+      .bind(reassignToUserId, userId),
+    db
+      .prepare(`UPDATE installations SET created_by = ? WHERE created_by = ?`)
+      .bind(reassignToUserId, userId),
+    db
+      .prepare(`UPDATE installation_updates SET reported_by_user_id = ? WHERE reported_by_user_id = ?`)
+      .bind(reassignToUserId, userId),
+    db
+      .prepare(`UPDATE material_shortages SET reported_by_user_id = ? WHERE reported_by_user_id = ?`)
+      .bind(reassignToUserId, userId),
+  ]);
+
+  const deleted = await db
+    .prepare(`DELETE FROM users WHERE id = ? AND role = 'staff'`)
+    .bind(userId)
+    .run();
+  if ((deleted.meta?.changes ?? 0) === 0) throw new Error("delete failed");
+}
+
 // ---------------------------------------------------------------------------
 // Site media (photos/videos) — voice notes are calls, not site_media rows;
 // see NewCallInput.recordedForSiteId.
