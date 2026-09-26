@@ -209,10 +209,58 @@ export interface CallerBucketCounts {
 
 const CALLER_SELECT = `
   SELECT callers.id, callers.name, callers.phone, callers.category,
-         callers.staff_user_id, users.name AS staff_user_name, callers.created_at
+         callers.staff_user_id,
+         COALESCE(
+           (SELECT users.name FROM users WHERE users.id = callers.staff_user_id),
+           (SELECT users.name FROM users
+            WHERE users.role = 'staff'
+              AND callers.phone IS NOT NULL AND trim(callers.phone) != ''
+              AND users.phone IS NOT NULL AND trim(users.phone) != ''
+              AND length(${sqlPhoneDigitsKey("callers.phone")}) >= 7
+              AND ${sqlPhoneDigitsKey("users.phone")} = ${sqlPhoneDigitsKey("callers.phone")}
+            ORDER BY users.name ASC LIMIT 1),
+           (SELECT users.name FROM users
+            WHERE users.role = 'staff'
+              AND trim(callers.name) != ''
+              AND lower(trim(users.name)) = lower(trim(callers.name))
+            ORDER BY users.name ASC LIMIT 1)
+         ) AS staff_user_name,
+         callers.created_at
   FROM callers
-  LEFT JOIN users ON users.id = callers.staff_user_id
 `;
+
+/** Digits-only phone key for SQL (last 10 digits — same idea as web contactMatch). */
+function sqlPhoneDigitsKey(column: string): string {
+  return `substr(replace(replace(replace(replace(replace(replace(coalesce(${column}, ''), ' ', ''), '-', ''), '(', ''), ')', ''), '+', ''), '.', ''), -10)`;
+}
+
+/** Digits-only phone key for TS matching (last 10). */
+export function phoneDigitsKey(raw: string | null | undefined): string | null {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  return digits.length > 10 ? digits.slice(-10) : digits;
+}
+
+/** Staff login for a contact: explicit link, else phone, else name. */
+export async function findStaffUserForContact(
+  db: D1Database,
+  opts: { name?: string | null; phone?: string | null }
+): Promise<User | null> {
+  const phoneKey = phoneDigitsKey(opts.phone);
+  if (phoneKey && phoneKey.length >= 7) {
+    const { results } = await db
+      .prepare(`SELECT * FROM users WHERE role = 'staff' AND phone IS NOT NULL AND trim(phone) != ''`)
+      .all<User>();
+    const byPhone = (results ?? []).find((u) => phoneDigitsKey(u.phone) === phoneKey);
+    if (byPhone) return byPhone;
+  }
+  const name = typeof opts.name === "string" ? opts.name.trim() : "";
+  if (name) {
+    const byName = await getUserByName(db, name);
+    if (byName && byName.role === "staff") return byName;
+  }
+  return null;
+}
 
 export interface CallerListOpts {
   category?: CallerCategory;
