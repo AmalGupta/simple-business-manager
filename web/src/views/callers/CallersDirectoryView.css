@@ -18,19 +18,19 @@
   --ag-font-family: var(--font-body), system-ui, sans-serif;
   --ag-font-size: 13px;
   --ag-background-color: var(--color-surface);
-  --ag-header-background-color: #dce6ff;
+  --ag-header-background-color: #e8eef6;
   --ag-odd-row-background-color: var(--color-surface);
-  --ag-even-row-background-color: color-mix(in srgb, #dce6ff 35%, white);
-  --ag-row-hover-color: color-mix(in srgb, var(--color-accent) 6%, white);
+  --ag-even-row-background-color: #f7f9fc;
+  --ag-row-hover-color: color-mix(in srgb, var(--color-accent) 7%, white);
   --ag-border-color: var(--color-line);
   --ag-row-border-color: var(--color-line-soft);
-  --ag-header-foreground-color: var(--color-ink);
+  --ag-header-foreground-color: #3d4a5c;
   --ag-foreground-color: var(--color-ink);
   --ag-border-radius: 0;
   --ag-wrapper-border-radius: 0;
   --ag-cell-horizontal-padding: 12px;
-  --ag-header-height: 42px;
-  --ag-row-height: 48px;
+  --ag-header-height: 44px;
+  --ag-row-height: 52px;
   width: 100%;
   flex: 1 1 auto;
   min-height: 0;
@@ -59,13 +59,28 @@
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
+  color: #3d4a5c;
+}
+
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header {
+  border-bottom: 1px solid #d5dde8;
 }
 
 .sbm-contacts-grid-wrap .sbm-contacts-grid .ag-cell {
   display: flex;
   align-items: center;
   font-weight: 600;
+}
+
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-cell[col-id="aliases"],
+.sbm-contacts-grid-wrap .sbm-contacts-grid .sbm-contacts-aliases-cell-wrap {
+  justify-content: center;
+}
+
+.sbm-contacts-grid-wrap .sbm-contacts-grid .sbm-contacts-aliases-header .ag-header-cell-label {
+  justify-content: center;
+  width: 100%;
 }
 
 .sbm-contacts-site-link {
