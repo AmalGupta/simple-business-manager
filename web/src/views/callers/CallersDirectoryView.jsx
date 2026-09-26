@@ -18,7 +18,6 @@ import {
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { AddCallerModal } from "./AddCallerModal.jsx";
-import { ManageAliasesModal } from "./ManageAliasesModal.jsx";
 import { PromoteStaffConfirmModal } from "./PromoteStaffConfirmModal.jsx";
 import { EditContactModal } from "./EditContactModal.jsx";
 import "./CallersDirectoryView.css";
@@ -108,55 +107,25 @@ function LinkedSitesCell({ sites, bucket, onSiteClick }) {
   );
 }
 
-function AliasesCell({ aliases, onManage }) {
+function AliasesCell({ aliases }) {
   const list = aliases?.length ? aliases.join(", ") : "";
+  if (!list) return null;
   return (
     <span
       className="sbm-contacts-aliases-cell"
       style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: list ? 4 : 0,
+        display: "block",
         width: "100%",
-        minWidth: 0,
+        overflow: "hidden",
+        textOverflow: "ellipsis",
+        whiteSpace: "nowrap",
+        fontSize: 13,
+        color: t.edge,
+        textAlign: "center",
       }}
+      title={list}
     >
-      {list ? (
-        <span
-          style={{
-            width: "100%",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-            fontSize: 13,
-            color: t.edge,
-            textAlign: "center",
-          }}
-          title={list}
-        >
-          {list}
-        </span>
-      ) : null}
-      <button
-        type="button"
-        onClick={onManage}
-        style={{
-          flexShrink: 0,
-          padding: "4px 10px",
-          border: `1px solid ${t.frost}`,
-          borderRadius: t.radiusButton,
-          background: t.white,
-          color: t.accent,
-          fontSize: 11,
-          fontWeight: 600,
-          cursor: "pointer",
-          whiteSpace: "nowrap",
-        }}
-      >
-        {aliases?.length ? "Manage" : "Add alias"}
-      </button>
+      {list}
     </span>
   );
 }
@@ -176,7 +145,7 @@ function listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }) {
 }
 
 /* Contacts directory — admin/superadmin. Bookmark tabs + AG Grid. */
-export function CallersDirectoryView({ onBack, innerScrolls = false }) {
+export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalScrolls = false }) {
   const gridRef = useRef(null);
   const [bucket, setBucket] = useState("saved");
   const [siteFilter, setSiteFilter] = useState(null);
@@ -187,11 +156,21 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
   const [total, setTotal] = useState(0);
   const [bucketCounts, setBucketCounts] = useState(EMPTY_BUCKET_COUNTS);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [aliasCaller, setAliasCaller] = useState(null);
   const [editCaller, setEditCaller] = useState(null);
   const [promotion, setPromotion] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState("");
+  const [narrow, setNarrow] = useState(
+    typeof window !== "undefined" ? window.matchMedia("(max-width: 640px)").matches : false
+  );
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const onChange = () => setNarrow(mq.matches);
+    onChange();
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   const queryOpts = useMemo(
     () => listQueryOpts({ bucket, siteFilter, linkedSitesOnly, q, pageIndex }),
@@ -258,33 +237,29 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
     setPageIndex(0);
   }, []);
 
-  const onManageAliases = useCallback((caller) => {
-    setAliasCaller(caller);
-  }, []);
-
   const onEditContact = useCallback((caller) => {
     setEditCaller(caller);
   }, []);
 
-  const columnDefs = useMemo(
-    () => [
+  const columnDefs = useMemo(() => {
+    /* Mobile: Name → Type → Sites first so those columns stay on-screen;
+       hide Aliases (edit modal covers them); pin Edit so it stays reachable.
+       Avoid sizeColumnsToFit crushing Type/Sites to ~0px on narrow viewports. */
+    const cols = [
       {
         headerName: "Name",
         colId: "name",
-        flex: 1.2,
-        minWidth: 140,
+        flex: narrow ? 1.1 : 1.2,
+        minWidth: narrow ? 110 : 140,
+        suppressSizeToFit: narrow,
         valueGetter: (p) => p.data?.name ?? "—",
-      },
-      {
-        headerName: "Phone number",
-        colId: "phone",
-        width: 130,
-        valueGetter: (p) => p.data?.phone || "—",
       },
       {
         headerName: "Type",
         colId: "type",
-        width: 130,
+        width: narrow ? 112 : 130,
+        minWidth: narrow ? 112 : 130,
+        suppressSizeToFit: true,
         cellRenderer: (p) =>
           p.data ? (
             <TypeCell
@@ -298,13 +273,25 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
       {
         headerName: "Sites",
         colId: "sites",
-        flex: 1.4,
-        minWidth: 160,
+        flex: narrow ? 1.2 : 1.4,
+        minWidth: narrow ? 120 : 160,
+        suppressSizeToFit: narrow,
         cellRenderer: (p) => (
           <LinkedSitesCell sites={p.data?.linked_sites} bucket={bucket} onSiteClick={onSiteClick} />
         ),
       },
       {
+        headerName: "Phone number",
+        colId: "phone",
+        width: narrow ? 110 : 130,
+        minWidth: narrow ? 110 : 130,
+        suppressSizeToFit: true,
+        valueGetter: (p) => p.data?.phone || "—",
+      },
+    ];
+
+    if (!narrow) {
+      cols.push({
         headerName: "Aliases",
         colId: "aliases",
         flex: 1,
@@ -312,99 +299,113 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
         headerClass: "sbm-contacts-aliases-header",
         cellClass: "sbm-contacts-aliases-cell-wrap",
         cellRenderer: (p) =>
-          p.data ? (
-            <AliasesCell aliases={p.data.aliases} onManage={() => onManageAliases(p.data)} />
-          ) : null,
-      },
-      ...(bucket === "staff"
-        ? [
-            {
-              headerName: "Login",
-              colId: "staff_login",
-              width: 160,
-              cellRenderer: (p) => {
-                if (!p.data) return null;
-                if (p.data.staff_user_name) {
-                  return <span style={{ fontSize: 13 }}>{p.data.staff_user_name}</span>;
-                }
-                const busy = busyId === p.data.id;
-                return (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => changeCategory(p.data.id, "staff")}
-                    style={{
-                      padding: "4px 8px",
-                      border: `1px solid ${t.frost}`,
-                      borderRadius: t.radiusButton,
-                      background: t.white,
-                      color: t.accent,
-                      fontSize: 11,
-                      fontWeight: 600,
-                      cursor: busy ? "not-allowed" : "pointer",
-                      opacity: busy ? 0.6 : 1,
-                    }}
-                  >
-                    Set up login
-                  </button>
-                );
-              },
-            },
-          ]
-        : []),
-      {
-        headerName: "",
-        colId: "edit",
-        width: 120,
-        headerClass: "sbm-contacts-edit-header",
-        cellClass: "sbm-contacts-edit-cell",
-        cellRenderer: (p) =>
-          p.data ? (
+          p.data ? <AliasesCell aliases={p.data.aliases} /> : null,
+      });
+    }
+
+    if (bucket === "staff" && !narrow) {
+      cols.push({
+        headerName: "Login",
+        colId: "staff_login",
+        width: 160,
+        cellRenderer: (p) => {
+          if (!p.data) return null;
+          if (p.data.staff_user_name) {
+            return <span style={{ fontSize: 13 }}>{p.data.staff_user_name}</span>;
+          }
+          const busy = busyId === p.data.id;
+          return (
             <button
               type="button"
-              onClick={() => onEditContact(p.data)}
+              disabled={busy}
+              onClick={() => changeCategory(p.data.id, "staff")}
               style={{
-                padding: "4px 10px",
+                padding: "4px 8px",
                 border: `1px solid ${t.frost}`,
                 borderRadius: t.radiusButton,
                 background: t.white,
                 color: t.accent,
                 fontSize: 11,
                 fontWeight: 600,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
+                cursor: busy ? "not-allowed" : "pointer",
+                opacity: busy ? 0.6 : 1,
               }}
             >
-              Edit contact
+              Set up login
             </button>
-          ) : null,
-      },
-    ],
-    [bucket, busyId, changeCategory, onSiteClick, onManageAliases, onEditContact]
-  );
+          );
+        },
+      });
+    }
+
+    cols.push({
+      headerName: "",
+      colId: "edit",
+      width: narrow ? 108 : 120,
+      minWidth: narrow ? 108 : 120,
+      maxWidth: narrow ? 108 : 120,
+      pinned: narrow ? "right" : null,
+      suppressSizeToFit: true,
+      headerClass: "sbm-contacts-edit-header",
+      cellClass: "sbm-contacts-edit-cell",
+      cellRenderer: (p) =>
+        p.data ? (
+          <button
+            type="button"
+            onClick={() => onEditContact(p.data)}
+            style={{
+              padding: "4px 10px",
+              border: `1px solid ${t.frost}`,
+              borderRadius: t.radiusButton,
+              background: t.white,
+              color: t.accent,
+              fontSize: 11,
+              fontWeight: 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            Edit contact
+          </button>
+        ) : null,
+    });
+
+    return cols;
+  }, [bucket, busyId, changeCategory, onSiteClick, onEditContact, narrow]);
 
   const defaultColDef = useMemo(
     () => ({
       sortable: false,
       filter: false,
-      resizable: true,
+      resizable: !narrow,
       suppressMovable: true,
     }),
-    []
+    [narrow]
   );
 
   const getRowId = useCallback((p) => p.data.id, []);
 
-  const onGridReady = useCallback((params) => {
-    params.api.sizeColumnsToFit?.();
-  }, []);
+  const fitColumns = useCallback(() => {
+    const api = gridRef.current?.api;
+    if (!api) return;
+    /* On phone, keep real column widths so Type/Sites are not crushed; swipe instead. */
+    if (narrow) return;
+    api.sizeColumnsToFit?.();
+  }, [narrow]);
+
+  const onGridReady = useCallback(
+    (params) => {
+      if (!narrow) params.api.sizeColumnsToFit?.();
+    },
+    [narrow]
+  );
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      gridRef.current?.api?.sizeColumnsToFit?.();
+      fitColumns();
     });
     return () => cancelAnimationFrame(id);
-  }, [rows, bucket, innerScrolls]);
+  }, [rows, bucket, innerScrolls, narrow, fitColumns]);
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rangeStart = total === 0 ? 0 : pageIndex * PAGE_SIZE + 1;
@@ -612,6 +613,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
                   rowHeight={48}
                   animateRows={false}
                   suppressCellFocus
+                  suppressHorizontalScroll={narrow ? false : !horizontalScrolls}
                   domLayout={innerScrolls ? "normal" : "autoHeight"}
                   overlayNoRowsTemplate="No contacts in this list."
                 />
@@ -711,14 +713,6 @@ export function CallersDirectoryView({ onBack, innerScrolls = false }) {
             await load(queryOpts, true);
             await refreshContactsDirectory({ bucket: "staff", limit: PAGE_SIZE, offset: 0 }).catch(() => {});
           }}
-        />
-      )}
-
-      {aliasCaller && (
-        <ManageAliasesModal
-          caller={aliasCaller}
-          onClose={() => setAliasCaller(null)}
-          onChanged={() => load(queryOpts, true)}
         />
       )}
 

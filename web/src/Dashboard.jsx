@@ -989,10 +989,17 @@ export default function SimpleBusinessManager() {
     );
 
   if (view.name === "callers-directory")
-    return shell(<CallersDirectoryView onBack={() => setView(homeView)} innerScrolls={innerScrolls} />, {
-      wide: true,
-      fillViewport: innerScrolls,
-    });
+    return shell(
+      <CallersDirectoryView
+        onBack={() => setView(homeView)}
+        innerScrolls={innerScrolls}
+        horizontalScrolls={horizontalScrolls}
+      />,
+      {
+        wide: true,
+        fillViewport: innerScrolls,
+      }
+    );
 
   if (view.name === "calls-needing-action")
     return shell(

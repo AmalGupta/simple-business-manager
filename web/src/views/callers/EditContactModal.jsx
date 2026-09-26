@@ -193,12 +193,12 @@ export function EditContactModal({ caller, onClose, onSaved, onRequestPromote })
         style={{
           margin: "-1.25rem -1.25rem 0",
           padding: "14px 1.25rem",
-          background: "#ebe4f5",
+          background: "#d6e8f8",
           borderRadius: `${t.radiusCard} ${t.radiusCard} 0 0`,
-          borderBottom: "1px solid #d9d0e8",
+          borderBottom: "1px solid #b8d0e6",
         }}
       >
-        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: "#4a3f63" }}>
+        <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: "#2f4a63" }}>
           Edit contact
         </span>
       </div>
