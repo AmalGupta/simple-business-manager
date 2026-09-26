@@ -1,7 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
-import { fetchStaffRoster } from "../../lib/api.js";
 
 const CATEGORY_OPTIONS = [
   { value: "client", label: "Client" },
@@ -10,27 +9,14 @@ const CATEGORY_OPTIONS = [
   { value: "spam", label: "Spam" },
 ];
 
-/* "Add caller" — name, phone, category. Single-phase (unlike AddStaffModal):
-   there's no generated secret to show back afterward. When category is
-   "staff", an optional staff-roster picker links this caller to their real
-   login account (callers.staff_user_id) — read-only lookup via
-   fetchStaffRoster, distinct from the onCreate mutation itself, which stays
-   parent-owned like every other Add*Modal in this app. */
+/* "Add contact" — name, phone, category. Choosing Staff creates/links a
+   staff login (parent handles promote + confirm PIN modal). */
 export function AddCallerModal({ onClose, onCreate }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [category, setCategory] = useState("client");
-  const [staffUserId, setStaffUserId] = useState("");
-  const [staffRoster, setStaffRoster] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (category !== "staff") return;
-    fetchStaffRoster()
-      .then(setStaffRoster)
-      .catch((err) => console.error("[sbm] failed to load staff roster", err));
-  }, [category]);
 
   const submit = async () => {
     const trimmed = name.trim();
@@ -45,7 +31,6 @@ export function AddCallerModal({ onClose, onCreate }) {
         name: trimmed,
         phone: phone.trim() || null,
         category,
-        staff_user_id: category === "staff" && staffUserId ? staffUserId : null,
       });
       onClose();
     } catch (err) {
@@ -108,14 +93,9 @@ export function AddCallerModal({ onClose, onCreate }) {
           ))}
         </select>
         {category === "staff" && (
-          <select value={staffUserId} onChange={(e) => setStaffUserId(e.target.value)} style={TEXT_INPUT_STYLE}>
-            <option value="">Not linked to a staff account</option>
-            {staffRoster.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <p style={{ margin: 0, fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>
+            A Staff login and PIN will be created so they can sign in to SBM.
+          </p>
         )}
         {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>

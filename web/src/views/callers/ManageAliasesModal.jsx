@@ -72,7 +72,7 @@ export function ManageAliasesModal({ caller, onClose, onChanged }) {
         Spoken names that should resolve to this contact during todo auto-assign.
         {staffUserId
           ? " Auto-assign uses the linked staff account."
-          : " Link a staff account on this contact for auto-assign; aliases can still be stored without one."}
+          : " Mark this contact as Staff (or Set up login on the Staff tab) to link a login account for auto-assign."}
       </p>
 
       {!staffUserId && (
