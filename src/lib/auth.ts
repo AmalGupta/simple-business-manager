@@ -108,7 +108,18 @@ export async function decryptPin(env: Env, encrypted: string): Promise<string | 
 
 /** Random 4-digit PIN for admin-created/reset staff accounts — shown once in the response, then only recoverable via decryptPin. */
 export function generateRandomPin(): string {
-  return String(crypto.getRandomValues(new Uint32Array(1))[0] % 10000).padStart(4, "0");
+  return String(crypto.getRandomValues(new Uint32Array(1))[0] % 10000)
+    .padStart(4, "0")
+    .replace(/\D/g, "")
+    .trim();
+}
+
+/** Digits-only PIN for storage / login — strips spaces and non-digits. */
+export function normalizePin(pin: string): string {
+  return String(pin ?? "")
+    .replace(/\s+/g, "")
+    .replace(/\D/g, "")
+    .trim();
 }
 
 function timingSafeEqualHex(a: string, b: string): boolean {
