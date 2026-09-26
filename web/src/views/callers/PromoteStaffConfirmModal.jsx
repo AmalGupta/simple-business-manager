@@ -10,8 +10,8 @@ function cleanPin(value) {
 }
 
 /**
- * After a contact is promoted to staff: show generated or linked login + PIN,
- * allow edits, then Confirm persists them so the staff member can log in.
+ * After Set up login / Type→Staff: preview login + PIN. Nothing is persisted
+ * until Confirm — Cancel / Later / dismiss leave the contact unchanged.
  */
 export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
   const linkedExisting = Boolean(promotion.linked_existing || promotion.already_linked);
@@ -20,7 +20,7 @@ export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
   const [alias, setAlias] = useState((promotion.alias ?? "").trim());
   /* Linked accounts: start in edit mode so the admin can change name/PIN if needed. */
   const [editingLogin, setEditingLogin] = useState(linkedExisting);
-  const [editingPin, setEditingPin] = useState(linkedExisting);
+  const [editingPin, setEditingPin] = useState(linkedExisting || !promotion.already_linked);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -53,17 +53,17 @@ export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
     }
   };
 
-  const headline = linkedExisting ? "Linked to existing staff login" : "Contact promoted to staff";
+  const headline = linkedExisting ? "Link staff login" : "Set up staff login";
   const body = linkedExisting ? (
     <>
-      Contact <strong style={{ color: t.edge }}>{promotion.contact_name}</strong> is linked to staff
+      Contact <strong style={{ color: t.edge }}>{promotion.contact_name}</strong> will link to staff
       login <strong style={{ color: t.edge }}>{promotion.login_name}</strong>. Edit the login name or
-      PIN if needed, then Confirm.
+      PIN if needed, then Confirm. Cancel leaves everything unchanged.
     </>
   ) : (
     <>
-      Contact <strong style={{ color: t.edge }}>{promotion.contact_name}</strong> promoted to staff.
-      Confirm the login details below so they can sign in to SBM.
+      Confirm login details for <strong style={{ color: t.edge }}>{promotion.contact_name}</strong>.
+      The staff account is created only when you Confirm — Cancel leaves everything unchanged.
     </>
   );
 
@@ -223,7 +223,7 @@ export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
               cursor: "pointer",
             }}
           >
-            Later
+            Cancel
           </button>
           <button
             type="button"
@@ -231,7 +231,7 @@ export function PromoteStaffConfirmModal({ promotion, onConfirm, onClose }) {
             disabled={saving}
             style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}
           >
-            {saving ? "Saving…" : "Confirm"}
+            {saving ? "Saving…" : linkedExisting ? "Confirm link" : "Create login"}
           </button>
         </div>
       </div>
