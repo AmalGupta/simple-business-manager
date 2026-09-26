@@ -17,6 +17,7 @@ import {
   createUser,
   getUserByName,
   getUserById,
+  findStaffUserForContact,
   updateUserName,
   updateUserPin,
   updateUserPhone,
@@ -257,8 +258,8 @@ async function pinForUser(env: Env, user: { id: string; pin_encrypted: string | 
 
 /**
  * Ensure a contact marked Staff has a login account. Creates a staff user +
- * PIN when missing; links an existing staff user with the same name when
- * present. Always sets category=staff and callers.staff_user_id.
+ * PIN when missing; links an existing staff user with the same phone or name
+ * when present. Always sets category=staff and callers.staff_user_id.
  */
 export async function promoteCallerToStaff(env: Env, callerId: string): Promise<PromoteStaffResult | Response> {
   const caller = await getCallerById(env.DB, callerId);
@@ -288,8 +289,11 @@ export async function promoteCallerToStaff(env: Env, callerId: string): Promise<
   }
 
   const preferredName = caller.name.trim();
-  const existing = preferredName ? await getUserByName(env.DB, preferredName) : null;
-  if (existing && existing.role === "staff") {
+  const existing = await findStaffUserForContact(env.DB, {
+    name: preferredName,
+    phone: caller.phone,
+  });
+  if (existing) {
     await updateCaller(env.DB, callerId, { category: "staff", staff_user_id: existing.id });
     if (!existing.phone && caller.phone) {
       await updateUserPhone(env.DB, existing.id, caller.phone);
@@ -309,7 +313,8 @@ export async function promoteCallerToStaff(env: Env, callerId: string): Promise<
   }
 
   let loginName = preferredName || "Staff";
-  if (existing && existing.role !== "staff") {
+  const nameCollision = preferredName ? await getUserByName(env.DB, preferredName) : null;
+  if (nameCollision && nameCollision.role !== "staff") {
     loginName = `${preferredName} (staff)`;
     let n = 2;
     while (await getUserByName(env.DB, loginName)) {
