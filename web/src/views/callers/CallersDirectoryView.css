@@ -18,13 +18,14 @@
   --ag-font-family: var(--font-body), system-ui, sans-serif;
   --ag-font-size: 13px;
   --ag-background-color: var(--color-surface);
-  --ag-header-background-color: #ebe4f5;
+  --ag-data-background-color: var(--color-surface);
+  --ag-header-background-color: #d6e8f8;
   --ag-odd-row-background-color: var(--color-surface);
-  --ag-even-row-background-color: #f8f6fc;
-  --ag-row-hover-color: color-mix(in srgb, #7c6aad 8%, white);
+  --ag-even-row-background-color: #f3f8fc;
+  --ag-row-hover-color: color-mix(in srgb, #4a90c8 8%, white);
   --ag-border-color: var(--color-line);
   --ag-row-border-color: var(--color-line-soft);
-  --ag-header-foreground-color: #4a3f63;
+  --ag-header-foreground-color: #2f4a63;
   --ag-foreground-color: var(--color-ink);
   --ag-border-radius: 0;
   --ag-wrapper-border-radius: 0;
@@ -54,17 +55,52 @@
   min-height: 280px;
 }
 
+/* Pastel blue on header chrome only — never on body .ag-grid-scrolling-cells
+   (AG Grid 36 uses that class for both header and body cell strips). */
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header,
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-row::after,
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-cell,
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-cell-label,
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-group-cell-label {
+  background-color: #d6e8f8 !important;
+}
+
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header {
+  border-bottom: 1px solid #b8d0e6;
+}
+
 .sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-cell-text {
   font-family: var(--font-label);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: #4a3f63;
+  color: #2f4a63;
 }
 
-.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header {
-  border-bottom: 1px solid #d9d0e8;
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-row:not(.ag-header-row) > .ag-grid-scrolling-cells,
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-row:not(.ag-header-row) > .ag-grid-pinned-left-cells,
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-row:not(.ag-header-row) > .ag-grid-pinned-right-cells {
+  background-color: transparent !important;
+}
+
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-row > .ag-grid-scrolling-cells,
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-row > .ag-grid-pinned-left-cells,
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-row > .ag-grid-pinned-right-cells {
+  background-color: transparent !important;
+}
+
+.sbm-contacts-grid-wrap .sbm-contacts-grid .ag-row:not(.ag-header-row)::after {
+  background-color: var(--ag-data-background-color, var(--color-surface)) !important;
+}
+
+/* Mobile: allow sideways swipe so Type / Sites stay full-width instead of crushed. */
+@media (max-width: 640px) {
+  .sbm-contacts-grid-wrap .sbm-contacts-grid .ag-body-viewport,
+  .sbm-contacts-grid-wrap .sbm-contacts-grid .ag-center-cols-viewport,
+  .sbm-contacts-grid-wrap .sbm-contacts-grid .ag-header-viewport {
+    overflow-x: auto !important;
+  }
 }
 
 .sbm-contacts-grid-wrap .sbm-contacts-grid .ag-cell {
