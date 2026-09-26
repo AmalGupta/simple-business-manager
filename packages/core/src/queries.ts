@@ -447,10 +447,20 @@ export async function countCallersByCategory(
   const { results } = await db
     .prepare(`SELECT category, COUNT(*) AS n FROM callers GROUP BY category`)
     .all<{ category: string; n: number }>();
-  const counts: Record<CallerCategory, number> = { client: 0, staff: 0, family: 0, spam: 0 };
+  const counts: Record<CallerCategory, number> = {
+    client: 0,
+    vendor: 0,
+    supplier: 0,
+    transporter: 0,
+    tech: 0,
+    staff: 0,
+    family: 0,
+    relative: 0,
+    spam: 0,
+  };
   for (const row of results ?? []) {
-    if (row.category === "client" || row.category === "staff" || row.category === "family" || row.category === "spam") {
-      counts[row.category] = row.n;
+    if (row.category in counts) {
+      counts[row.category as CallerCategory] = row.n;
     }
   }
   return counts;

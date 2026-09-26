@@ -33,8 +33,13 @@ const BUCKETS = [
 
 const TYPE_OPTIONS = [
   { value: "client", label: "Client" },
-  { value: "family", label: "Family" },
+  { value: "vendor", label: "Vendor" },
+  { value: "supplier", label: "Supplier" },
+  { value: "transporter", label: "Transporter" },
+  { value: "tech", label: "Tech" },
   { value: "staff", label: "Staff" },
+  { value: "family", label: "Family" },
+  { value: "relative", label: "Relative" },
 ];
 
 const CATEGORY_SELECT_STYLE = {
