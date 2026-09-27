@@ -9,7 +9,6 @@ const CATEGORY_OPTIONS = [
   { value: "relative", label: "Relative" },
   { value: "spam", label: "Spam" },
   { value: "staff", label: "Staff" },
-  { value: "supplier", label: "Supplier" },
   { value: "tech", label: "Tech" },
   { value: "transporter", label: "Transporter" },
   { value: "vendor", label: "Vendor" },

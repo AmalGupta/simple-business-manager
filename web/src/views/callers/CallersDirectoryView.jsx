@@ -37,7 +37,6 @@ const TYPE_OPTIONS = [
   { value: "family", label: "Family" },
   { value: "relative", label: "Relative" },
   { value: "staff", label: "Staff" },
-  { value: "supplier", label: "Supplier" },
   { value: "tech", label: "Tech" },
   { value: "transporter", label: "Transporter" },
   { value: "vendor", label: "Vendor" },
