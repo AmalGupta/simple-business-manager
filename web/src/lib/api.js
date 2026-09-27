@@ -839,6 +839,13 @@ export async function fetchSiteTimeline(siteId) {
   return res.json();
 }
 
+/** Calls mentioning a site, discovering call first — review-screen "Listen". */
+export async function fetchSiteCalls(siteId) {
+  const res = await fetch(`/api/sites/${siteId}/calls`);
+  if (!res.ok) throw new Error(`GET /api/sites/${siteId}/calls → ${res.status}`);
+  return res.json();
+}
+
 /* Site-task workflow system — migration 0013. See WORKFLOW_CATEGORIES below
    for the tile grouping; these fetchers back the home-page workflow tiles,
    the admin "View work timeline" popup, and the staff mark-done/handoff flow. */
