@@ -1263,6 +1263,29 @@ export default function SimpleBusinessManager() {
           marginBottom: "1.5rem",
         }}
       >
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <StaffRosterTile staffCount={staffRoster.length} onOpen={() => setView({ name: "staff-roster", from: { name: "home" } })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <CallsNeedingActionTile
+            count={callsNeedingActionCount}
+            onOpen={() => setView({ name: "calls-needing-action", from: { name: "home" } })}
+          />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <button
+            onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
+            style={{ all: "unset", cursor: "pointer", display: "block" }}
+            aria-label={`Open tasks — ${openTodosCount}`}
+          >
+            <Card tile>
+              <TileLabel>Open tasks</TileLabel>
+              <div style={TILE_VALUE_ROW_STYLE}>
+                <span style={TILE_NUMBER_STYLE}>{openTodosCount}</span>
+              </div>
+            </Card>
+          </button>
+        )}
         <button
           onClick={() => setView({ name: "calls" })}
           style={{ all: "unset", cursor: "pointer", display: "block" }}
@@ -1291,39 +1314,16 @@ export default function SimpleBusinessManager() {
           <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
-          <StaffRosterTile staffCount={staffRoster.length} onOpen={() => setView({ name: "staff-roster", from: { name: "home" } })} />
-        )}
-        {(me.role === "admin" || me.role === "superadmin") && (
           <CallerTile count={callersCount} onOpen={() => setView({ name: "callers-directory" })} />
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
           <MaterialShortagesTile onOpen={() => setView({ name: "material-shortages" })} />
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
-          <CallsNeedingActionTile
-            count={callsNeedingActionCount}
-            onOpen={() => setView({ name: "calls-needing-action", from: { name: "home" } })}
-          />
-        )}
-        {(me.role === "admin" || me.role === "superadmin") && (
           <ResolvedCallsTile
             count={resolvedCallsCount}
             onOpen={() => setView({ name: "resolved-calls", from: { name: "home" } })}
           />
-        )}
-        {(me.role === "admin" || me.role === "superadmin") && (
-          <button
-            onClick={() => setView({ name: "open-todos", from: { name: "home" } })}
-            style={{ all: "unset", cursor: "pointer", display: "block" }}
-            aria-label={`Open tasks — ${openTodosCount}`}
-          >
-            <Card tile>
-              <TileLabel>Open tasks</TileLabel>
-              <div style={TILE_VALUE_ROW_STYLE}>
-                <span style={TILE_NUMBER_STYLE}>{openTodosCount}</span>
-              </div>
-            </Card>
-          </button>
         )}
         <ComplaintsTile
           refreshKey={complaintsRefreshKey}
