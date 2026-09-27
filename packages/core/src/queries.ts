@@ -5561,16 +5561,40 @@ export interface NewProductionJobInput {
   title: string;
   surveyNote?: string | null;
   createdByUserId: string;
+  /**
+   * Auto-assignment for the workflow, not a required field of the job
+   * itself: when set, step 1 (measurement) is seeded already `assigned`
+   * to this person instead of `pending`, so it shows up as their todo
+   * immediately — no separate "open the job, assign step 1" click. See
+   * completeProductionStep for the same auto-continuation on every step
+   * after this one.
+   */
+  assignToUserId?: string | null;
 }
 
-/** Creates the job and seeds all 5 fixed steps (pending, unassigned) in one batch. */
+/** Creates the job and seeds all 5 fixed steps in one batch. Step 1 is pre-assigned when `assignToUserId` is given (see NewProductionJobInput); the rest start pending. */
 export async function createProductionJob(db: D1Database, input: NewProductionJobInput): Promise<ProductionJobRow> {
   const id = crypto.randomUUID();
-  const stepStatements = PRODUCTION_STEPS.map((step) =>
-    db
-      .prepare(`INSERT INTO production_job_steps (id, job_id, step_key, step_order) VALUES (?, ?, ?, ?)`)
-      .bind(crypto.randomUUID(), id, step.key, step.order)
-  );
+  const assignTo = input.assignToUserId?.trim() || null;
+  const stepStatements = PRODUCTION_STEPS.map((step) => {
+    const preAssign = assignTo && step.order === 1;
+    return db
+      .prepare(
+        `INSERT INTO production_job_steps
+         (id, job_id, step_key, step_order, status, assigned_to_user_id, assigned_by_user_id, assigned_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        crypto.randomUUID(),
+        id,
+        step.key,
+        step.order,
+        preAssign ? "assigned" : "pending",
+        preAssign ? assignTo : null,
+        preAssign ? input.createdByUserId : null,
+        preAssign ? new Date().toISOString().replace("T", " ").slice(0, 19) : null
+      );
+  });
   await db.batch([
     db
       .prepare(
@@ -5721,7 +5745,16 @@ export async function assignProductionStep(
   return row;
 }
 
-/** Marks a step done. When it's the last step (glass integration), flips the job to ready_for_dispatch so it surfaces in the warehouse dispatch queue. */
+/**
+ * Marks a step done. When it's the last step (glass integration), flips
+ * the job to ready_for_dispatch so it surfaces in the warehouse dispatch
+ * queue. Otherwise, auto-assigns the NEXT step to the same person who just
+ * completed this one (if that next step is still `pending`) — the step
+ * shows up as their todo immediately rather than sitting unassigned until
+ * someone opens the job and picks an assignee. This is a default, not a
+ * lock-in: the existing Reassign control still hands it to a junior for
+ * routing/assembly/glass integration exactly as before.
+ */
 export async function completeProductionStep(
   db: D1Database,
   id: string,
@@ -5743,6 +5776,19 @@ export async function completeProductionStep(
     await touchSiteActivity(db, job.site_id, { source: "production", refId: id });
     if (row.step_order === PRODUCTION_STEPS.length && job.status === "active") {
       await db.prepare(`UPDATE production_jobs SET status = 'ready_for_dispatch' WHERE id = ?`).bind(job.id).run();
+    } else {
+      const siblings = await listProductionJobSteps(db, job.id);
+      const next = siblings.find((s) => s.step_order === row.step_order + 1);
+      // Continue to whoever actually held the just-finished step, not
+      // whoever clicked "done" — an admin can mark a step done on staff's
+      // behalf (handlePatchProductionStep allows it), and the next todo
+      // should still land on the worker, not the admin. Falls back to the
+      // completer only for the edge case of a step marked done with no
+      // assignee at all (admin can also do this directly from `pending`).
+      const continuesTo = row.assigned_to_user_id ?? completedByUserId;
+      if (next && next.status === "pending") {
+        await assignProductionStep(db, next.id, { assignedToUserId: continuesTo, assignedByUserId: completedByUserId });
+      }
     }
   }
   return row;
