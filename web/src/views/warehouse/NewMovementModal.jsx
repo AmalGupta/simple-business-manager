@@ -52,10 +52,25 @@ export function NewMovementModal({ kind, stores, onClose, onCreated }) {
       .catch(() => setItemSuggestions([]));
   }, [storeId]);
 
-  const selectedJob = useMemo(() => jobs.find((j) => j.id === jobId), [jobs, jobId]);
+  // Dispatch: site drives the job, not the other way round. Pick the site
+  // and the job resolves itself — exactly one ready job at that site links
+  // automatically (no dropdown to touch); more than one still asks; none
+  // leaves the dispatch unlinked (e.g. dispatching hardware on its own).
+  const jobsForSite = useMemo(() => {
+    if (kind !== "dispatch" || !siteId) return [];
+    return jobs.filter((j) => j.site_id === siteId);
+  }, [kind, jobs, siteId]);
+
   useEffect(() => {
-    if (kind === "dispatch" && selectedJob) setSiteId(selectedJob.site_id);
-  }, [kind, selectedJob]);
+    if (kind !== "dispatch") return;
+    if (jobsForSite.length === 1) {
+      setJobId(jobsForSite[0].id);
+    } else if (!jobsForSite.some((j) => j.id === jobId)) {
+      setJobId("");
+    }
+    // jobId is read, not a trigger — resolving it is this effect's job.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, jobsForSite]);
 
   const valid =
     storeId &&
@@ -143,22 +158,6 @@ export function NewMovementModal({ kind, stores, onClose, onCreated }) {
         </div>
       )}
 
-      {needsJob && (
-        <div style={fieldWrap}>
-          <label style={labelStyle}>
-            Production job {kind === "out" ? "(optional)" : ""}
-          </label>
-          <select value={jobId} onChange={(e) => setJobId(e.target.value)} style={{ ...TEXT_INPUT_STYLE, width: "100%" }}>
-            <option value="">{kind === "dispatch" ? "Select a job ready for dispatch…" : "No job link"}</option>
-            {jobs.map((j) => (
-              <option key={j.id} value={j.id}>
-                {j.title} — {j.site_name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
-
       {needsSite && (
         <div style={fieldWrap}>
           <label style={labelStyle}>Site</label>
@@ -167,6 +166,50 @@ export function NewMovementModal({ kind, stores, onClose, onCreated }) {
             {sites.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {/* Dispatch: the job link resolves from the site above — see
+          jobsForSite. "Out" keeps the original free-pick dropdown across
+          every active job (unchanged; only dispatch was asked to automate). */}
+      {kind === "dispatch" && siteId && jobsForSite.length === 1 && (
+        <div style={fieldWrap}>
+          <label style={labelStyle}>Production job</label>
+          <p style={{ fontSize: 13, color: t.edge, margin: 0, padding: "8px 10px", border: `1px solid ${t.frost}`, borderRadius: t.radiusButton, background: t.pane }}>
+            {jobsForSite[0].title}
+          </p>
+        </div>
+      )}
+
+      {kind === "dispatch" && siteId && jobsForSite.length > 1 && (
+        <div style={fieldWrap}>
+          <label style={labelStyle}>Production job</label>
+          <select value={jobId} onChange={(e) => setJobId(e.target.value)} style={{ ...TEXT_INPUT_STYLE, width: "100%" }}>
+            <option value="">Select which job…</option>
+            {jobsForSite.map((j) => (
+              <option key={j.id} value={j.id}>
+                {j.title}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {kind === "dispatch" && siteId && jobsForSite.length === 0 && (
+        <p style={{ fontSize: 12, color: t.edge2, margin: "0 0 10px" }}>No job ready for dispatch at this site — this dispatch won't be linked to one.</p>
+      )}
+
+      {needsJob && kind === "out" && (
+        <div style={fieldWrap}>
+          <label style={labelStyle}>Production job (optional)</label>
+          <select value={jobId} onChange={(e) => setJobId(e.target.value)} style={{ ...TEXT_INPUT_STYLE, width: "100%" }}>
+            <option value="">No job link</option>
+            {jobs.map((j) => (
+              <option key={j.id} value={j.id}>
+                {j.title} — {j.site_name}
               </option>
             ))}
           </select>

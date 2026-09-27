@@ -1443,11 +1443,11 @@ export async function fetchProductionJobs(status) {
   return fetchJSON(`/api/production-jobs${q}`);
 }
 
-export async function postProductionJob({ siteId, title, surveyNote }) {
+export async function postProductionJob({ siteId, title, surveyNote, assignToUserId }) {
   const res = await fetch("/api/production-jobs", {
     method: "POST",
     headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
-    body: JSON.stringify({ site_id: siteId, title, survey_note: surveyNote || null }),
+    body: JSON.stringify({ site_id: siteId, title, survey_note: surveyNote || null, assign_to_user_id: assignToUserId || null }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
