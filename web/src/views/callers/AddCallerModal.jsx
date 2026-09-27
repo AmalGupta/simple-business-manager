@@ -1,21 +1,10 @@
 import { useState } from "react";
 import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
+import { CALLER_TYPE_OPTIONS, isStaffCategory } from "../../lib/callerCategories.js";
 
-const CATEGORY_OPTIONS = [
-  { value: "client", label: "Client" },
-  { value: "dealer", label: "Dealer" },
-  { value: "family", label: "Family" },
-  { value: "relative", label: "Relative" },
-  { value: "spam", label: "Spam" },
-  { value: "staff", label: "Staff" },
-  { value: "tech", label: "Tech" },
-  { value: "transporter", label: "Transporter" },
-  { value: "vendor", label: "Vendor" },
-];
-
-/* "Add contact" — name, phone, category. Choosing Staff creates/links a
-   staff login (parent handles promote + confirm PIN modal). */
+/* "Add contact" — name, phone, category. Choosing Office/Service Staff
+   creates/links a staff login (parent handles promote + confirm PIN modal). */
 export function AddCallerModal({ onClose, onCreate }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -91,13 +80,13 @@ export function AddCallerModal({ onClose, onCreate }) {
           style={TEXT_INPUT_STYLE}
         />
         <select value={category} onChange={(e) => setCategory(e.target.value)} style={TEXT_INPUT_STYLE}>
-          {CATEGORY_OPTIONS.map((opt) => (
+          {CALLER_TYPE_OPTIONS.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>
           ))}
         </select>
-        {category === "staff" && (
+        {isStaffCategory(category) && (
           <p style={{ margin: 0, fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>
             A Staff login and PIN will be created so they can sign in to SBM.
           </p>

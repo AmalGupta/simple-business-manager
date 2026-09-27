@@ -12,18 +12,9 @@ import {
   loadConfirmedSites,
 } from "../../lib/api.js";
 import { siteDisplayName, siteSearchText } from "../sites/sitesGridChrome.jsx";
+import { CALLER_TYPE_OPTIONS, isStaffCategory } from "../../lib/callerCategories.js";
 
-const TYPE_OPTIONS = [
-  { value: "client", label: "Client" },
-  { value: "dealer", label: "Dealer" },
-  { value: "family", label: "Family" },
-  { value: "relative", label: "Relative" },
-  { value: "spam", label: "Spam" },
-  { value: "staff", label: "Staff" },
-  { value: "tech", label: "Tech" },
-  { value: "transporter", label: "Transporter" },
-  { value: "vendor", label: "Vendor" },
-];
+const SPAM_OPTION = { value: "spam", label: "Spam" };
 
 const LABEL = {
   fontFamily: t.label,
@@ -41,8 +32,13 @@ const LABEL = {
 export function EditContactModal({ caller, onClose, onSaved, onRequestPromote }) {
   const [name, setName] = useState(caller.name ?? "");
   const [phone, setPhone] = useState(caller.phone ?? "");
+  /* Spam isn't pickable, but a spam contact must keep it or Save would silently un-spam it. */
+  const typeOptions = useMemo(
+    () => (caller.category === "spam" ? [...CALLER_TYPE_OPTIONS, SPAM_OPTION] : CALLER_TYPE_OPTIONS),
+    [caller.category]
+  );
   const [category, setCategory] = useState(
-    TYPE_OPTIONS.some((o) => o.value === caller.category) ? caller.category : "client"
+    typeOptions.some((o) => o.value === caller.category) ? caller.category : "client"
   );
   const [linkedSites, setLinkedSites] = useState(() => [...(caller.linked_sites ?? [])]);
   const [confirmedSites, setConfirmedSites] = useState(null);
@@ -172,12 +168,12 @@ export function EditContactModal({ caller, onClose, onSaved, onRequestPromote })
         }
       }
 
-      const becameStaff = category === "staff" && caller.category !== "staff";
-      const needsLogin = category === "staff" && !caller.staff_user_name && !caller.staff_user_id;
+      const becameStaff = isStaffCategory(category) && !isStaffCategory(caller.category);
+      const needsLogin = isStaffCategory(category) && !caller.staff_user_name && !caller.staff_user_id;
       await onSaved?.();
       onClose();
       if ((becameStaff || needsLogin) && onRequestPromote) {
-        await onRequestPromote(caller.id);
+        await onRequestPromote(caller.id, category);
       }
     } catch (err) {
       console.error("[sbm] failed to save contact", err);
@@ -221,7 +217,7 @@ export function EditContactModal({ caller, onClose, onSaved, onRequestPromote })
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <span style={LABEL}>Type</span>
         <select value={category} onChange={(e) => setCategory(e.target.value)} style={TEXT_INPUT_STYLE}>
-          {TYPE_OPTIONS.map((opt) => (
+          {typeOptions.map((opt) => (
             <option key={opt.value} value={opt.value}>
               {opt.label}
             </option>

@@ -8,7 +8,7 @@
 // an earlier draft of this file assumed (that mismatch was silently eating
 // every real callback: undefined !== "Completed" fell through to a no-op).
 //
-// Callers Directory (migration 0021) — a 'staff' caller is trusted and goes
+// Callers Directory (migration 0021) — a staff caller (office/service) is trusted and goes
 // straight to extraction, same as before this feature. Anything else
 // ('client' category, or a legacy call with no linked caller) runs the
 // cheap spam-scan first: a spam verdict marks the caller's directory entry
@@ -27,6 +27,7 @@ import {
   getCallByJobId,
   type AppRequest,
   getCallerById,
+  isStaffCategory,
   linkCallToSites,
   markAppRequestFailed,
   markAppRequestSubmitted,
@@ -229,7 +230,7 @@ export async function handleSarvamWebhook(
        uploaded_by_user_id — trusted like a staff caller; skip spam-scan. */
     const trustedInApp = Boolean(call.uploaded_by_user_id);
 
-    if (caller?.category === "staff" || trustedInApp) {
+    if (isStaffCategory(caller?.category) || trustedInApp) {
       // Trusted — straight to extraction, no spam-check. Two independent
       // waitUntils, same as before this feature: a scan failure must never
       // block the extraction that actually produces the dashboard card.

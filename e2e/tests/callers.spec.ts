@@ -51,22 +51,24 @@ test.describe("Contacts directory", () => {
     await expect(page.getByRole("heading", { name: "Contacts", exact: true })).toBeVisible();
 
     const tabs = page.getByRole("tablist", { name: "Contact lists" });
-    await expect(tabs.getByRole("tab", { name: /Saved contacts/i })).toBeVisible();
-    await expect(tabs.getByRole("tab", { name: /Unsaved contacts/i })).toBeVisible();
+    await expect(tabs.getByRole("tab", { name: /^Saved contacts/i })).toBeVisible();
+    await expect(tabs.getByRole("tab", { name: /^Unsaved contacts/i })).toBeVisible();
     await expect(tabs.getByRole("tab", { name: /^Spam/i })).toBeVisible();
 
-    await tabs.getByRole("tab", { name: /Saved contacts/i }).click();
+    await tabs.getByRole("tab", { name: /^Saved contacts/i }).click();
     await expect(page.getByText(unique)).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(phone)).toBeVisible();
 
-    await page.getByLabel(`Type for ${unique}`).selectOption("staff");
+    await page.getByLabel(`Type for ${unique}`).selectOption("office_staff");
+    await page.getByRole("button", { name: /Create login|Confirm link/ }).click();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
 
-    const listed = await page.request.get("/api/callers?category=staff&q=" + encodeURIComponent(unique));
+    const listed = await page.request.get("/api/callers?category=office_staff&q=" + encodeURIComponent(unique));
     expect(listed.status()).toBe(200);
     const body = await listed.json();
-    expect(body.items.some((c: { id: string; category: string }) => c.id === created.id && c.category === "staff")).toBe(
-      true
-    );
+    expect(
+      body.items.some((c: { id: string; category: string }) => c.id === created.id && c.category === "office_staff")
+    ).toBe(true);
 
     await page.request.patch(`/api/callers/${created.id}`, { data: { category: "spam" } });
     await page.request.patch(`/api/callers/${phoneCreated.id}`, { data: { category: "spam" } });
