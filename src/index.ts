@@ -91,6 +91,7 @@ import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handlePostDeskVoiceNote } from "./handlers/desk-voice-note";
 import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
+import { handleGetSiteCalls } from "./handlers/site-calls";
 import {
   handleDeleteAppRequest,
   handleGetAppRequests,
@@ -616,6 +617,14 @@ export default {
       if (!session) return new Response("Unauthorized", { status: 401 });
       if (!(await assertSiteMembership(env, session, timelineMatch[1]))) return new Response("Forbidden", { status: 403 });
       return handleGetSiteTimeline(env, timelineMatch[1], session.user_role !== "staff");
+    }
+
+    const siteCallsMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/calls$/);
+    if (siteCallsMatch && request.method === "GET") {
+      const session = await requireSession(request, env);
+      if (!session) return new Response("Unauthorized", { status: 401 });
+      if (!(await assertSiteMembership(env, session, siteCallsMatch[1]))) return new Response("Forbidden", { status: 403 });
+      return handleGetSiteCalls(env, siteCallsMatch[1]);
     }
 
     // --- Staff field workflow (migration 0016): installations + their

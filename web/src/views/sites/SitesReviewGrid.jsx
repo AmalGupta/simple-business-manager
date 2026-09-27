@@ -3,7 +3,7 @@ import { AgGridReact } from "ag-grid-react";
 import { AllCommunityModule, ModuleRegistry } from "ag-grid-community";
 import "ag-grid-community/styles/ag-grid.css";
 import "ag-grid-community/styles/ag-theme-quartz.css";
-import { Mic, Plus } from "lucide-react";
+import { Headphones, Mic, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtShort } from "../../lib/dates.js";
 import { postSiteContacts, postSiteVoiceNote } from "../../lib/api.js";
@@ -11,6 +11,7 @@ import { Card } from "../../components/Card.jsx";
 import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
 import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
 import { SiteDetailsModal } from "./SiteDetailsModal.jsx";
+import { SiteCallsModal } from "./SiteCallsModal.jsx";
 import {
   SITES_GRID_CSS,
   DateWindowFilter,
@@ -114,12 +115,42 @@ function AssociateButton({ site, onAssociate }) {
   );
 }
 
+/* Plays the call(s) the site name came from — the evidence for the
+   validity decision. Only on rows that have an originating call. */
+function ListenButton({ site, onListen }) {
+  if (!site.discovered_from_call_id) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => onListen(site)}
+      aria-label={`Listen to calls for ${site.name}`}
+      title="Listen to the calls that mentioned this site"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+        width: 24,
+        height: 24,
+        border: `1px solid ${t.accent}`,
+        borderRadius: t.radiusButton,
+        background: t.white,
+        color: t.accent,
+        cursor: "pointer",
+        padding: 0,
+      }}
+    >
+      <Headphones size={14} />
+    </button>
+  );
+}
+
 /* Who the site was first heard from, and who it belongs to, in one cell:
    the discovering caller reads as evidence for the validity decision,
    the linked contacts as the answer to "whose site is this". Two lines
    rather than two columns because the second is usually empty — most
    rows here have never been curated. */
-function CallerCell({ site, canManage, onAssociate }) {
+function CallerCell({ site, canManage, onAssociate, onListen }) {
   const contacts = contactsLabel(site);
   return (
     <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minWidth: 0 }}>
@@ -142,6 +173,7 @@ function CallerCell({ site, canManage, onAssociate }) {
           </span>
         )}
       </span>
+      <ListenButton site={site} onListen={onListen} />
       {canManage && <AssociateButton site={site} onAssociate={onAssociate} />}
     </span>
   );
@@ -361,6 +393,7 @@ export function SitesReviewGrid({
   const [noteNotice, setNoteNotice] = useState("");
   const [contactsSite, setContactsSite] = useState(null);
   const [detailsSite, setDetailsSite] = useState(null);
+  const [callsSite, setCallsSite] = useState(null);
   /* The POST returns the site's full contact list, so hold it here and let
      it win over the fetched row: the names appear the moment the dialog
      closes rather than after the parent's refetch lands. */
@@ -421,6 +454,7 @@ export function SitesReviewGrid({
   }, []);
 
   const openContacts = useCallback((site) => setContactsSite(site), []);
+  const openCalls = useCallback((site) => setCallsSite(site), []);
 
   const openDetails = useCallback(
     (site) =>
@@ -533,6 +567,7 @@ export function SitesReviewGrid({
                   {callerLabel(p.data ?? {})}
                   {p.data?.discovered_from_call_date ? ` · ${fmtShort(p.data.discovered_from_call_date)}` : ""}
                 </span>
+                {p.data?.id && <ListenButton site={p.data} onListen={openCalls} />}
                 {canManage && p.data?.id && (
                   <AssociateButton site={p.data} onAssociate={openContacts} />
                 )}
@@ -574,7 +609,9 @@ export function SitesReviewGrid({
            is still primarily the provenance of the row. */
         valueGetter: (p) => callerLabel(p.data ?? {}),
         cellRenderer: (p) =>
-          p.data?.id ? <CallerCell site={p.data} canManage={canManage} onAssociate={openContacts} /> : null,
+          p.data?.id ? (
+            <CallerCell site={p.data} canManage={canManage} onAssociate={openContacts} onListen={openCalls} />
+          ) : null,
       },
       {
         headerName: "Call date",
@@ -590,7 +627,7 @@ export function SitesReviewGrid({
       decisionCol,
       notesCol,
     ];
-  }, [narrow, onChoose, openNote, openContacts, openDetails, canManage]);
+  }, [narrow, onChoose, openNote, openContacts, openCalls, openDetails, canManage]);
 
   const defaultColDef = useMemo(
     () => ({
@@ -675,6 +712,7 @@ export function SitesReviewGrid({
         </Card>
       </div>
       {noteSite && <VoiceNoteModal onClose={() => setNoteSite(null)} onSave={saveNote} />}
+      {callsSite && <SiteCallsModal site={callsSite} onClose={() => setCallsSite(null)} />}
       {contactsSite && (
         <AssociateContactsModal
           site={contactsSite}
