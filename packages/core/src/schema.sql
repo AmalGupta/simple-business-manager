@@ -9,7 +9,7 @@ CREATE TABLE callers (
   id             TEXT PRIMARY KEY,
   name           TEXT NOT NULL,
   phone          TEXT UNIQUE,
-  category       TEXT NOT NULL DEFAULT 'client',  -- client|dealer|vendor|transporter|tech|staff|family|relative|spam (code-enforced)
+  category       TEXT NOT NULL DEFAULT 'client',  -- client|supplier|transporter|office_staff|service_staff|family|relative|franchisee|sales_associate|brand_associate|builder_project|architect|spam (code-enforced)
   staff_user_id  TEXT REFERENCES users(id),        -- set when this caller IS a staff member's own number
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );

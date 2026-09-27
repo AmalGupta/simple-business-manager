@@ -20,6 +20,7 @@ import { BackLink } from "../../components/BackLink.jsx";
 import { AddCallerModal } from "./AddCallerModal.jsx";
 import { PromoteStaffConfirmModal } from "./PromoteStaffConfirmModal.jsx";
 import { EditContactModal } from "./EditContactModal.jsx";
+import { CALLER_TYPE_OPTIONS, isStaffCategory } from "../../lib/callerCategories.js";
 import "./CallersDirectoryView.css";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
@@ -31,21 +32,10 @@ const BUCKETS = [
   { id: "spam", label: "Spam" },
 ];
 
-const TYPE_OPTIONS = [
-  { value: "client", label: "Client" },
-  { value: "dealer", label: "Dealer" },
-  { value: "family", label: "Family" },
-  { value: "relative", label: "Relative" },
-  { value: "staff", label: "Staff" },
-  { value: "tech", label: "Tech" },
-  { value: "transporter", label: "Transporter" },
-  { value: "vendor", label: "Vendor" },
-];
-
 const CATEGORY_SELECT_STYLE = {
   minHeight: 32,
   width: "100%",
-  maxWidth: 120,
+  maxWidth: 150,
   padding: "0 8px",
   border: `1px solid ${t.frost}`,
   borderRadius: t.radiusButton,
@@ -66,16 +56,16 @@ function TypeCell({ data, bucket, busyId, onChangeCategory }) {
     return <span style={{ fontSize: 13, color: t.edge2 }}>Spam</span>;
   }
   const busy = busyId === data.id;
-  const category = TYPE_OPTIONS.some((o) => o.value === data.category) ? data.category : "client";
+  const category = CALLER_TYPE_OPTIONS.some((o) => o.value === data.category) ? data.category : "client";
   return (
     <select
       value={category}
       disabled={busy}
       aria-label={`Type for ${data.name}`}
-      onChange={(e) => onChangeCategory(data.id, e.target.value)}
+      onChange={(e) => onChangeCategory(data, e.target.value)}
       style={{ ...CATEGORY_SELECT_STYLE, opacity: busy ? 0.6 : 1 }}
     >
-      {TYPE_OPTIONS.map((opt) => (
+      {CALLER_TYPE_OPTIONS.map((opt) => (
         <option key={opt.value} value={opt.value}>
           {opt.label}
         </option>
@@ -204,20 +194,22 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
     load(queryOpts);
   }, [queryOpts, load, applyData]);
 
-  const runPromoteFlow = useCallback(async (callerId) => {
+  /* `category` is the staff type (office/service) Confirm will save. */
+  const runPromoteFlow = useCallback(async (callerId, category) => {
     const result = await postPromoteCallerStaff(callerId);
-    setPromotion(result);
+    setPromotion({ ...result, category });
     return result;
   }, []);
 
   const changeCategory = useCallback(
-    async (id, nextCategory) => {
+    async (row, nextCategory) => {
+      const id = row.id;
       setBusyId(id);
       setError("");
       try {
-        if (nextCategory === "staff") {
+        if (isStaffCategory(nextCategory) && !row.staff_user_id) {
           /* Preview only — persist on Confirm in the modal. */
-          await runPromoteFlow(id);
+          await runPromoteFlow(id, nextCategory);
         } else {
           await patchCaller(id, { category: nextCategory });
           await load(queryOpts, true);
@@ -257,8 +249,8 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
       {
         headerName: "Type",
         colId: "type",
-        width: narrow ? 112 : 130,
-        minWidth: narrow ? 112 : 130,
+        width: narrow ? 130 : 160,
+        minWidth: narrow ? 130 : 160,
         suppressSizeToFit: true,
         cellRenderer: (p) =>
           p.data ? (
@@ -318,7 +310,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
             <button
               type="button"
               disabled={busy}
-              onClick={() => changeCategory(p.data.id, "staff")}
+              onClick={() => runPromoteFlow(p.data.id, p.data.category).catch((err) => setError(err.message))}
               style={{
                 padding: "4px 8px",
                 border: `1px solid ${t.frost}`,
@@ -677,13 +669,14 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
           onClose={() => setShowAddModal(false)}
           onCreate={async (input) => {
             const created = await postCreateCaller(input);
-            if (input.category === "staff") {
-              await runPromoteFlow(created.id);
+            const staff = isStaffCategory(input.category);
+            if (staff) {
+              await runPromoteFlow(created.id, input.category);
               setBucket("staff");
               setPageIndex(0);
             }
             await load(
-              input.category === "staff"
+              staff
                 ? listQueryOpts({
                     bucket: "staff",
                     siteFilter: null,
@@ -695,7 +688,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
               true
             );
             await refreshContactsDirectory({
-              bucket: input.category === "spam" ? "spam" : input.category === "staff" ? "staff" : "unsaved",
+              bucket: staff ? "staff" : "unsaved",
               limit: PAGE_SIZE,
               offset: 0,
             }).catch(() => {});
@@ -709,7 +702,10 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
           promotion={promotion}
           onClose={() => setPromotion(null)}
           onConfirm={async (fields) => {
-            await postConfirmCallerStaffPromotion(promotion.caller_id, fields);
+            await postConfirmCallerStaffPromotion(promotion.caller_id, {
+              ...fields,
+              category: promotion.category,
+            });
             await load(queryOpts, true);
             await refreshContactsDirectory({ bucket: "staff", limit: PAGE_SIZE, offset: 0 }).catch(() => {});
           }}
@@ -724,8 +720,8 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
             await load(queryOpts, true);
             await refreshContactsDirectory(queryOpts).catch(() => {});
           }}
-          onRequestPromote={async (callerId) => {
-            await runPromoteFlow(callerId);
+          onRequestPromote={async (callerId, category) => {
+            await runPromoteFlow(callerId, category);
           }}
         />
       )}
