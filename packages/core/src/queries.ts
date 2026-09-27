@@ -4169,6 +4169,47 @@ export async function listSiteMedia(db: D1Database, siteId: string): Promise<Sit
   return results;
 }
 
+export interface SiteCallRow {
+  id: string;
+  call_date: string | null;
+  caller_name: string | null;
+  caller_phone: string | null;
+  summary: string | null;
+  is_discovering: boolean;
+  has_recording: boolean;
+}
+
+/**
+ * Calls that mention a site — the evidence behind an unconfirmed site on the
+ * review screen. The discovering call leads, then newest first. Spam calls
+ * (deleted_at) are excluded; a site hallucinated only from spam has no
+ * evidence to play. The discovering call is unioned in because older rows
+ * may carry discovered_from_call_id without a matching call_sites link.
+ */
+export async function listSiteCalls(db: D1Database, siteId: string): Promise<SiteCallRow[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT calls.id AS id,
+              substr(COALESCE(calls.recording_date, calls.recorded_at), 1, 10) AS call_date,
+              callers.name AS caller_name,
+              callers.phone AS caller_phone,
+              calls.summary AS summary,
+              (calls.id = sites.discovered_from_call_id) AS is_discovering,
+              (calls.stt_status != 'skipped') AS has_recording
+       FROM sites
+       JOIN calls ON calls.id IN (
+         SELECT call_id FROM call_sites WHERE site_id = sites.id
+         UNION SELECT sites.discovered_from_call_id
+       )
+       LEFT JOIN callers ON callers.id = calls.client_id
+       WHERE sites.id = ? AND calls.deleted_at IS NULL
+       ORDER BY is_discovering DESC, COALESCE(calls.recording_date, calls.recorded_at) DESC`
+    )
+    .bind(siteId)
+    .all<Omit<SiteCallRow, "is_discovering" | "has_recording"> & { is_discovering: number; has_recording: number }>();
+  return (results ?? []).map((r) => ({ ...r, is_discovering: r.is_discovering === 1, has_recording: r.has_recording === 1 }));
+}
+
 // ---------------------------------------------------------------------------
 // Unified site timeline — composed at read time from calls (incl. voice
 // memos), site_media, site_team_members, and site_edits, rather than a
