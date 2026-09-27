@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { Modal } from "../../components/Modal.jsx";
-import { postProductionJob } from "../../lib/api.js";
+import { fetchStaffRoster, postProductionJob } from "../../lib/api.js";
 
 const textareaStyle = {
   ...TEXT_INPUT_STYLE,
@@ -21,20 +21,32 @@ const labelStyle = {
 };
 
 /* Office hands the survey over — creates the job, which seeds all 5 fixed
-   steps (pending) per migrations/0042_production_warehouse.sql. */
+   steps per migrations/0042_production_warehouse.sql. Picking who takes
+   Measurement here assigns it immediately (skips "pending, needs an
+   assign click") — every step after it auto-continues to whoever
+   completed the one before, so this one choice is normally the only
+   manual assignment the whole job needs. */
 export function NewProductionJobModal({ sites, onClose, onCreated }) {
   const [siteId, setSiteId] = useState("");
   const [title, setTitle] = useState("");
   const [surveyNote, setSurveyNote] = useState("");
+  const [assignToUserId, setAssignToUserId] = useState("");
+  const [staffRoster, setStaffRoster] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetchStaffRoster()
+      .then(setStaffRoster)
+      .catch((err) => console.error("[sbm] failed to load staff roster", err));
+  }, []);
 
   const submit = async () => {
     if (!siteId || !title.trim() || saving) return;
     setSaving(true);
     setError("");
     try {
-      const job = await postProductionJob({ siteId, title: title.trim(), surveyNote: surveyNote.trim() });
+      const job = await postProductionJob({ siteId, title: title.trim(), surveyNote: surveyNote.trim(), assignToUserId });
       onCreated(job);
     } catch (err) {
       console.error("[sbm] failed to create production job", err);
@@ -74,6 +86,20 @@ export function NewProductionJobModal({ sites, onClose, onCreated }) {
           placeholder="Measurements, sizes, anything Tanseem needs from the survey"
           style={{ ...textareaStyle, width: "100%" }}
         />
+      </div>
+      <div>
+        <label style={labelStyle}>Assign Measurement to (optional)</label>
+        <select value={assignToUserId} onChange={(e) => setAssignToUserId(e.target.value)} style={{ ...TEXT_INPUT_STYLE, width: "100%" }}>
+          <option value="">Leave unassigned</option>
+          {staffRoster.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <p style={{ fontSize: 11, color: t.edge2, margin: "4px 0 0" }}>
+          Every step after this one goes to whoever completes the step before it, until someone reassigns.
+        </p>
       </div>
       {error ? <span style={{ fontSize: 12, color: t.signal }}>{error}</span> : null}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>

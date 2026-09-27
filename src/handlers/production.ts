@@ -65,10 +65,11 @@ export async function handleCreateProductionJob(request: Request, env: Env): Pro
   const siteId = typeof record.site_id === "string" ? record.site_id.trim() : "";
   const title = typeof record.title === "string" ? record.title.trim() : "";
   const surveyNote = typeof record.survey_note === "string" ? record.survey_note : null;
+  const assignToUserId = typeof record.assign_to_user_id === "string" && record.assign_to_user_id.trim() ? record.assign_to_user_id.trim() : null;
   if (!siteId) return json({ error: "site_id is required" }, 400);
   if (!title) return json({ error: "title is required" }, 400);
 
-  const job = await createProductionJob(env.DB, { siteId, title, surveyNote, createdByUserId: gate.user_id });
+  const job = await createProductionJob(env.DB, { siteId, title, surveyNote, createdByUserId: gate.user_id, assignToUserId });
   return json(job, 201);
 }
 
