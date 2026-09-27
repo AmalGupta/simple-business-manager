@@ -30,7 +30,6 @@ export type CallerCategory =
   | "client"
   | "dealer"
   | "vendor"
-  | "supplier"
   | "transporter"
   | "tech"
   | "spam";

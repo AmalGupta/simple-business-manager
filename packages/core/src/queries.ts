@@ -451,7 +451,6 @@ export async function countCallersByCategory(
     client: 0,
     dealer: 0,
     vendor: 0,
-    supplier: 0,
     transporter: 0,
     tech: 0,
     staff: 0,

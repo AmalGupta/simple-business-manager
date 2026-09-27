@@ -8,7 +8,6 @@ export const CALLER_CATEGORIES: readonly CallerCategory[] = [
   "relative",
   "spam",
   "staff",
-  "supplier",
   "tech",
   "transporter",
   "vendor",
@@ -22,7 +21,6 @@ export const CALLER_CATEGORY_LABELS: Record<CallerCategory, string> = {
   relative: "Relative",
   spam: "Spam",
   staff: "Staff",
-  supplier: "Supplier",
   tech: "Tech",
   transporter: "Transporter",
   vendor: "Vendor",
@@ -30,7 +28,7 @@ export const CALLER_CATEGORY_LABELS: Record<CallerCategory, string> = {
 
 /**
  * Drive ingest skips personal/known-spam numbers. Business roles
- * (client/dealer/staff/vendor/supplier/transporter/tech) always download to R2
+ * (client/dealer/staff/vendor/transporter/tech) always download to R2
  * and submit to Sarvam.
  */
 export function shouldSkipDriveIngest(category: CallerCategory): boolean {
