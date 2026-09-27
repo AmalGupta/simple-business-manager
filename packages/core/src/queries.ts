@@ -1,7 +1,7 @@
 // All D1 access lives here — see docs/SCAFFOLDING.md §1 ("no SQL outside queries.ts").
 
 import { matchStaffByOwner, normalizeOwnerName, type OwnerAliasMatch } from "./assignment";
-import { normalizeCallerPhone } from "./caller-category";
+import { CALLER_CATEGORIES, normalizeCallerPhone, SQL_STAFF_CATEGORIES } from "./caller-category";
 import { SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import { pickExistingSiteId, type SiteMatchCandidate } from "./site-match";
 import type {
@@ -297,6 +297,9 @@ export interface CallerListOpts {
  * Saved / unsaved buckets: named contacts vs phone-only labels (see
  * packages/core/src/caller-name.ts), not caller_sites linkage.
  */
+/** Spam + staff types — each has its own Contacts bookmark, so excluded from Saved/Unsaved. */
+const SQL_NON_DIRECTORY_CATEGORIES = `('spam', 'office_staff', 'service_staff')`;
+
 const CALLER_HAS_LINKED_SITE = `EXISTS (SELECT 1 FROM caller_sites cs WHERE cs.caller_id = callers.id)`;
 
 function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (string | number)[] } {
@@ -305,13 +308,13 @@ function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (strin
   if (opts?.bucket === "spam") {
     where.push(`callers.category = 'spam'`);
   } else if (opts?.bucket === "staff") {
-    where.push(`callers.category = 'staff'`);
+    where.push(`callers.category IN ${SQL_STAFF_CATEGORIES}`);
   } else if (opts?.bucket === "saved") {
     /* Staff contacts live on the Staff bookmark — not mixed into Saved. */
-    where.push(`callers.category NOT IN ('spam', 'staff')`);
+    where.push(`callers.category NOT IN ${SQL_NON_DIRECTORY_CATEGORIES}`);
     where.push(`NOT ${SQL_CALLER_UNSAVED_CONTACT}`);
   } else if (opts?.bucket === "unsaved") {
-    where.push(`callers.category NOT IN ('spam', 'staff')`);
+    where.push(`callers.category NOT IN ${SQL_NON_DIRECTORY_CATEGORIES}`);
     where.push(SQL_CALLER_UNSAVED_CONTACT);
   } else if (opts?.category) {
     where.push(`callers.category = ?`);
@@ -365,9 +368,9 @@ export async function countCallersByBucket(db: D1Database): Promise<CallerBucket
     .prepare(
       `SELECT
          SUM(CASE WHEN category = 'spam' THEN 1 ELSE 0 END) AS spam,
-         SUM(CASE WHEN category = 'staff' THEN 1 ELSE 0 END) AS staff,
-         SUM(CASE WHEN category NOT IN ('spam', 'staff') AND NOT ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS saved,
-         SUM(CASE WHEN category NOT IN ('spam', 'staff') AND ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS unsaved
+         SUM(CASE WHEN category IN ${SQL_STAFF_CATEGORIES} THEN 1 ELSE 0 END) AS staff,
+         SUM(CASE WHEN category NOT IN ${SQL_NON_DIRECTORY_CATEGORIES} AND NOT ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS saved,
+         SUM(CASE WHEN category NOT IN ${SQL_NON_DIRECTORY_CATEGORIES} AND ${SQL_CALLER_UNSAVED_CONTACT} THEN 1 ELSE 0 END) AS unsaved
        FROM callers`
     )
     .first<{ spam: number; staff: number; saved: number; unsaved: number }>();
@@ -447,17 +450,7 @@ export async function countCallersByCategory(
   const { results } = await db
     .prepare(`SELECT category, COUNT(*) AS n FROM callers GROUP BY category`)
     .all<{ category: string; n: number }>();
-  const counts: Record<CallerCategory, number> = {
-    client: 0,
-    dealer: 0,
-    vendor: 0,
-    transporter: 0,
-    tech: 0,
-    staff: 0,
-    family: 0,
-    relative: 0,
-    spam: 0,
-  };
+  const counts = Object.fromEntries(CALLER_CATEGORIES.map((c) => [c, 0])) as Record<CallerCategory, number>;
   for (const row of results ?? []) {
     if (row.category in counts) {
       counts[row.category as CallerCategory] = row.n;
