@@ -65,9 +65,41 @@ export function driveSkipArchiveKind(category: CallerCategory): "archive" | "spa
   return category === "spam" ? "spam" : "archive";
 }
 
-/** Match Drive filename phone keys (strip spaces/dashes). */
+/**
+ * Canonical key for an Indian number: bare 10 digits, with +91 / 91 / 0
+ * prefixes, spaces, dashes and brackets stripped. NULL when the value isn't
+ * one (foreign, short code, empty). The same number used to be stored as
+ * "+919056066211", "09056066211" and "9056066211" on three separate contacts.
+ */
+export function canonicalPhoneKey(raw: string | null | undefined): string | null {
+  const digits = String(raw ?? "").replace(/\D/g, "");
+  if (!digits) return null;
+  let d = digits;
+  if (d.length === 12 && d.startsWith("91")) d = d.slice(2);
+  else if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  return d.length === 10 ? d : null;
+}
+
+/**
+ * SQL twin of canonicalPhoneKey for a phone column, so lookups match rows
+ * stored in any format (older rows predate canonical writes).
+ */
+export function sqlPhoneKey(column: string): string {
+  const d = `replace(replace(replace(replace(replace(replace(ifnull(${column}, ''), ' ', ''), '-', ''), '+', ''), '(', ''), ')', ''), '.', '')`;
+  return `(CASE
+    WHEN ${d} = '' OR ${d} GLOB '*[^0-9]*' THEN NULL
+    WHEN length(${d}) = 10 THEN ${d}
+    WHEN length(${d}) = 11 AND substr(${d}, 1, 1) = '0' THEN substr(${d}, 2)
+    WHEN length(${d}) = 12 AND substr(${d}, 1, 2) = '91' THEN substr(${d}, 3)
+  END)`;
+}
+
+/** What gets stored: the canonical 10 digits for an Indian number, otherwise
+ *  the value with spaces/dashes stripped (foreign numbers, short codes). */
 export function normalizeCallerPhone(raw: string | null | undefined): string | null {
   if (raw == null) return null;
+  const key = canonicalPhoneKey(raw);
+  if (key) return key;
   const phone = String(raw).replace(/[\s-]/g, "").trim();
   return phone || null;
 }

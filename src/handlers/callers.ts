@@ -26,6 +26,7 @@ import {
   isStaffCategory,
   type CallerBucket,
   type CallerCategory,
+  findDuplicateCaller,
 } from "@sbm/core";
 import { requireAdmin } from "./auth";
 import { decryptPin, encryptPin, generateRandomPin, hashPin, normalizePin } from "../lib/auth";
@@ -165,6 +166,22 @@ export async function handleCreateCaller(request: Request, env: Env): Promise<Re
 
   const category = parseCategory(record.category ?? "client");
   if (category === null) return json({ error: "category must be one of " + CALLER_CATEGORIES.join(", ") }, 400);
+
+  /* One row per real person: an existing contact with this number (any
+     format) — or, with no number, this exact name — is returned instead of
+     a duplicate. Callers pick it (409 + existing) rather than retrying. */
+  const duplicate = await findDuplicateCaller(env.DB, { name, phone });
+  if (duplicate) {
+    return json(
+      {
+        error: phone
+          ? `${duplicate.name} already has this number`
+          : `A contact named ${duplicate.name} already exists — add a phone number to create a separate one`,
+        existing: duplicate,
+      },
+      409
+    );
+  }
 
   try {
     const caller = await createCaller(env.DB, {

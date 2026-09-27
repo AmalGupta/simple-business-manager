@@ -1,7 +1,7 @@
 // All D1 access lives here — see docs/SCAFFOLDING.md §1 ("no SQL outside queries.ts").
 
 import { matchStaffByOwner, normalizeOwnerName, type OwnerAliasMatch } from "./assignment";
-import { CALLER_CATEGORIES, normalizeCallerPhone, SQL_STAFF_CATEGORIES } from "./caller-category";
+import { CALLER_CATEGORIES, canonicalPhoneKey, normalizeCallerPhone, sqlPhoneKey, SQL_STAFF_CATEGORIES } from "./caller-category";
 import { SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import { pickExistingSiteId, type SiteMatchCandidate } from "./site-match";
 import type {
@@ -141,18 +141,37 @@ export async function findOrCreateCaller(
   const phone = normalizeCallerPhone(opts.phone);
 
   if (phone) {
-    const byPhone = await db
-      .prepare(`SELECT id, category, name FROM callers WHERE phone = ?`)
-      .bind(phone)
-      .first<FoundOrCreatedCaller>();
+    const byPhone = await findCallerByPhone(db, phone);
     if (byPhone) return byPhone;
   }
 
-  const byName = await db
-    .prepare(`SELECT id, category, name FROM callers WHERE name = ? AND phone IS NULL`)
-    .bind(name)
-    .first<FoundOrCreatedCaller>();
-  if (byName && !phone) return byName;
+  /* Same name, case/space-insensitive. This used to match only phoneless
+     rows, so a recording whose filename carried a saved contact's name
+     (no number) got a second, phoneless contact next to the imported one
+     that has the number — the source of most duplicate contacts. */
+  const realName = /[a-zA-Z\u0900-\u097F]/.test(name) && name.toLowerCase() !== "unknown caller";
+  if (realName) {
+    const { results: sameName } = await db
+      .prepare(
+        `SELECT id, category, name, phone FROM callers
+         WHERE lower(trim(name)) = lower(?) ORDER BY (phone IS NULL) ASC, created_at ASC LIMIT 3`
+      )
+      .bind(name)
+      .all<FoundOrCreatedCaller & { phone: string | null }>();
+    const rows = sameName ?? [];
+    const numbered = rows.filter((r) => r.phone);
+    const phoneless = rows.filter((r) => !r.phone);
+    if (!phone) {
+      // One numbered contact with this name → it's them. Two or more numbered
+      // contacts share the name → different people; fall back to a phoneless row.
+      if (numbered.length === 1) return strip(numbered[0]);
+      if (phoneless.length > 0) return strip(phoneless[0]);
+    } else if (numbered.length === 0 && phoneless.length === 1) {
+      // A phoneless contact under this name just revealed its number.
+      await db.prepare(`UPDATE callers SET phone = ? WHERE id = ?`).bind(phone, phoneless[0].id).run();
+      return strip(phoneless[0]);
+    }
+  }
 
   const id = crypto.randomUUID();
   await db
@@ -160,6 +179,64 @@ export async function findOrCreateCaller(
     .bind(id, name, phone)
     .run();
   return { id, category: "client", name };
+}
+
+function strip(row: FoundOrCreatedCaller & { phone?: string | null }): FoundOrCreatedCaller {
+  return { id: row.id, category: row.category, name: row.name };
+}
+
+/** Contact holding this number in any stored format (+91…, 0…, 10 digits).
+ *  Prefers a staff-linked row, then one with a real name. */
+export async function findCallerByPhone(
+  db: D1Database,
+  rawPhone: string | null | undefined
+): Promise<(FoundOrCreatedCaller & { phone: string | null; staff_user_id: string | null }) | null> {
+  const key = canonicalPhoneKey(rawPhone);
+  const exact = normalizeCallerPhone(rawPhone);
+  if (!key && !exact) return null;
+  const row = await db
+    .prepare(
+      `SELECT id, category, name, phone, staff_user_id FROM callers
+       WHERE ${key ? `${sqlPhoneKey("phone")} = ?` : `phone = ?`}
+       ORDER BY (staff_user_id IS NOT NULL) DESC, (trim(name) GLOB '*[a-zA-Z]*') DESC, created_at ASC
+       LIMIT 1`
+    )
+    .bind(key ?? exact)
+    .first<FoundOrCreatedCaller & { phone: string | null; staff_user_id: string | null }>();
+  return row ?? null;
+}
+
+/**
+ * Keeps a staff login and its contact in step: the contact carrying the
+ * login's number is linked to it (staff type, and the login name when the
+ * contact is only a number). If no contact has the number, one is created.
+ * No-op for a login with no usable number.
+ */
+export async function linkStaffUserContact(db: D1Database, userId: string): Promise<void> {
+  const user = await db
+    .prepare(`SELECT id, name, phone, role FROM users WHERE id = ?`)
+    .bind(userId)
+    .first<{ id: string; name: string; phone: string | null; role: string }>();
+  if (!user || user.role !== "staff" || !user.phone) return;
+  const existing = await findCallerByPhone(db, user.phone);
+  if (!existing) {
+    await db
+      .prepare(`INSERT INTO callers (id, name, phone, category, staff_user_id) VALUES (?, ?, ?, 'service_staff', ?)`)
+      .bind(crypto.randomUUID(), user.name, normalizeCallerPhone(user.phone), user.id)
+      .run();
+    return;
+  }
+  if (existing.staff_user_id && existing.staff_user_id !== user.id) return; // another login owns it
+  await db
+    .prepare(
+      `UPDATE callers
+       SET staff_user_id = ?,
+           category = CASE WHEN category IN ('office_staff', 'service_staff') THEN category ELSE 'service_staff' END,
+           name = CASE WHEN trim(name) GLOB '*[a-zA-Z]*' THEN name ELSE ? END
+       WHERE id = ?`
+    )
+    .bind(user.id, user.name, existing.id)
+    .run();
 }
 
 export async function getCallerById(db: D1Database, id: string): Promise<Caller | null> {
@@ -330,8 +407,10 @@ function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (strin
   }
   const q = opts?.q?.trim();
   if (q) {
-    where.push(`(callers.name LIKE ? COLLATE NOCASE OR callers.phone LIKE ?)`);
-    binds.push(`%${q}%`, `%${q}%`);
+    // A typed "+91 90560 66211" should find the stored 9056066211.
+    const phoneQ = canonicalPhoneKey(q) ?? q.replace(/[\s-]/g, "");
+    where.push(`(callers.name LIKE ? COLLATE NOCASE OR callers.phone LIKE ? OR callers.phone LIKE ?)`);
+    binds.push(`%${q}%`, `%${q}%`, `%${phoneQ}%`);
   }
   return { clause: where.length ? `WHERE ${where.join(" AND ")}` : "", binds };
 }
@@ -457,6 +536,26 @@ export async function countCallersByCategory(
     }
   }
   return counts;
+}
+
+/** A contact the new one would duplicate: same number in any format, or —
+ *  when no number is given — the same name. NULL when it's genuinely new. */
+export async function findDuplicateCaller(
+  db: D1Database,
+  input: { name: string; phone: string | null }
+): Promise<CallerRow | null> {
+  const byPhone = input.phone ? await findCallerByPhone(db, input.phone) : null;
+  const id =
+    byPhone?.id ??
+    (!input.phone
+      ? (
+          await db
+            .prepare(`SELECT id FROM callers WHERE lower(trim(name)) = lower(trim(?)) ORDER BY (phone IS NULL) ASC LIMIT 1`)
+            .bind(input.name)
+            .first<{ id: string }>()
+        )?.id
+      : undefined);
+  return id ? getCallerRow(db, id) : null;
 }
 
 export async function createCaller(
@@ -3247,6 +3346,23 @@ export async function removeSiteContact(db: D1Database, siteId: string, callerId
  * the review screen and every save behind it with it (SBM-27). Ordering
  * survives chunking: a site's contacts are all in the same chunk as its id.
  */
+/** A site can be confirmed from review only once a directory contact with a
+ *  phone number is linked to it (caller_sites). */
+export async function siteHasContactWithPhone(db: D1Database, siteId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM caller_sites JOIN callers ON callers.id = caller_sites.caller_id
+       WHERE caller_sites.site_id = ? AND callers.phone IS NOT NULL AND trim(callers.phone) <> '' LIMIT 1`
+    )
+    .bind(siteId)
+    .first();
+  return row !== null;
+}
+
+export async function getSiteConfirmation(db: D1Database, siteId: string): Promise<{ is_confirmed: string | null } | null> {
+  return (await db.prepare(`SELECT is_confirmed FROM sites WHERE id = ?`).bind(siteId).first<{ is_confirmed: string | null }>()) ?? null;
+}
+
 export async function getSiteContactsBySiteIds(
   db: D1Database,
   siteIds: string[]
