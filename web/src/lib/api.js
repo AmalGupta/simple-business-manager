@@ -1084,3 +1084,51 @@ export async function postDrivePoll() {
   }
   return res.json();
 }
+
+/* Staff roster (migration 0044) — assigned work (call todos + site tasks)
+   planned onto days, admin urgent flag, hand-off, roster grid, audit.
+   `kind` is "todo" | "site_task". `forUserId` lets an admin act on one
+   staff member's share (staff sessions are always scoped to self). */
+async function workFetch(path, init = {}) {
+  const res = await fetch(path, {
+    ...init,
+    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY, ...(init.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `${init.method ?? "GET"} ${path} → ${res.status}`);
+  }
+  return res.json();
+}
+
+function forUserQuery(forUserId) {
+  return forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
+}
+
+export function fetchAssignedWork({ forUserId } = {}) {
+  return workFetch(`/api/work/assigned${forUserQuery(forUserId)}`);
+}
+
+export function patchWork(kind, id, patch, { forUserId } = {}) {
+  return workFetch(`/api/work/${kind}/${id}${forUserQuery(forUserId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export function postWorkHandoff(kind, id, toUserId, { forUserId } = {}) {
+  return workFetch(`/api/work/${kind}/${id}/handoff${forUserQuery(forUserId)}`, {
+    method: "POST",
+    body: JSON.stringify({ to_user_id: toUserId }),
+  });
+}
+
+export function fetchStaffRosterGrid(to) {
+  return workFetch(`/api/work/roster?to=${encodeURIComponent(to)}`);
+}
+
+export function fetchWorkEvents(userId, { beforeSeq, limit = 100 } = {}) {
+  const params = new URLSearchParams({ user_id: userId, limit: String(limit) });
+  if (beforeSeq != null) params.set("before_seq", String(beforeSeq));
+  return workFetch(`/api/work/events?${params}`);
+}

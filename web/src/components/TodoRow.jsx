@@ -1,6 +1,7 @@
 import { Circle, Check, Clock } from "lucide-react";
 import { t } from "../theme.js";
 import { fmtShort, isUrgent } from "../lib/dates.js";
+import { TodoContext } from "./TodoContext.jsx";
 
 /* Sentence-format rendering of a structured todo — same {owner, text,
    due_date} the extraction pipeline already produces via forced tool-use
@@ -41,6 +42,7 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = fal
 
         <span className={`sbm-todo-row__text${done || parked ? " is-muted" : ""}`}>
           {todo.text}
+          <TodoContext text={todo.context} />
         </span>
 
         {!done && todo.due_date ? (
@@ -99,6 +101,7 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = fal
         }}
       >
         {todo.text}
+        <TodoContext text={todo.context} />
       </span>
 
       {!done && todo.due_date && (

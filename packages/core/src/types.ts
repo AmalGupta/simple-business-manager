@@ -235,6 +235,8 @@ export interface Todo {
   closed_by_call_id: string | null; // M1 placeholder — unused in M0
   /** migration 0036 — site assigned from CNA; parent call also linked via call_sites. */
   site_id: string | null;
+  /** migration 0045 — prompt v8 context note; NULL for older extractions. */
+  context?: string | null;
   created_at: string;
 }
 
@@ -291,7 +293,7 @@ export interface CallExtraction {
   key_takeaways: string[];
   call_type: CallType;
   sites: string[];
-  todos: Array<{ text: string; owner: string; due_date?: string; site?: string }>;
+  todos: Array<{ text: string; owner: string; due_date?: string; site?: string; context?: string }>;
   commitments: Array<{ raw_phrase: string; resolved_datetime?: string; promised_to?: string }>;
   unresolved: UnresolvedItem[];
   material_needs: string[];

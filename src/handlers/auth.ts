@@ -37,6 +37,7 @@ import {
   type User,
   type UserCustomization,
   type CustomizationKey,
+  getTodoRouterUserId,
 } from "@sbm/core";
 import {
   clearSessionCookieHeader,
@@ -180,7 +181,10 @@ export async function handleLogoutRedirect(request: Request, env: Env): Promise<
 export async function handleMe(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const rows = await listUserSettings(env.DB, session.user_id);
+  const [rows, routerUserId] = await Promise.all([
+    listUserSettings(env.DB, session.user_id),
+    getTodoRouterUserId(env.DB),
+  ]);
   const customization = resolveCustomization(rows);
   return json({
     id: session.user_id,
@@ -188,6 +192,8 @@ export async function handleMe(request: Request, env: Env): Promise<Response> {
     role: session.user_role,
     phone: session.user_phone,
     customization,
+    // migration 0045 — this user routes every new todo to staff.
+    is_todo_router: routerUserId === session.user_id,
   });
 }
 
