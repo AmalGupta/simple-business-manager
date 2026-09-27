@@ -598,12 +598,12 @@ export async function postPromoteCallerStaff(callerId) {
   return res.json();
 }
 
-/** Confirm editable login name / PIN / alias after promote. */
-export async function postConfirmCallerStaffPromotion(callerId, { login_name, pin, alias }) {
+/** Confirm editable login name / PIN / alias after promote. `category` = office_staff | service_staff. */
+export async function postConfirmCallerStaffPromotion(callerId, { login_name, pin, alias, category }) {
   const res = await fetch(`/api/callers/${callerId}/confirm-staff-promotion`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ login_name, pin, alias }),
+    body: JSON.stringify({ login_name, pin, alias, category }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

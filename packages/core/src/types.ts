@@ -24,14 +24,18 @@ export type EscalationStatus = "open" | "done";
  * classifier; this is the caller's own identity.
  */
 export type CallerCategory =
+  | "client"
+  | "supplier"
+  | "transporter"
+  | "office_staff"
+  | "service_staff"
   | "family"
   | "relative"
-  | "staff"
-  | "client"
-  | "dealer"
-  | "vendor"
-  | "transporter"
-  | "tech"
+  | "franchisee"
+  | "sales_associate"
+  | "brand_associate"
+  | "builder_project"
+  | "architect"
   | "spam";
 
 export interface Caller {

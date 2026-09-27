@@ -23,6 +23,7 @@ import {
   updateUserPhone,
   revokeAllSessionsForUser,
   CALLER_CATEGORIES,
+  isStaffCategory,
   type CallerBucket,
   type CallerCategory,
 } from "@sbm/core";
@@ -69,7 +70,7 @@ function parsePositiveInt(value: string | null, max: number): number | null | un
  *
  * `?category=` filters as before. `?bucket=saved|unsaved|spam|staff` drives the
  * Contacts directory tabs (saved = named contacts, unsaved = phone-only labels,
- * staff = category staff with linked sites).
+ * staff = office/service staff types with linked sites).
  * `?siteId=` narrows saved/staff rows linked to one site via caller_sites.
  * `?linked_sites=1` on Saved/Staff: only contacts with any site link.
  * `?include_linked_sites=1`: hydrate each row's linked_sites (Contacts directory Sites column).
@@ -370,6 +371,14 @@ export async function handleConfirmCallerStaffPromotion(
 
   if (!loginName) return json({ error: "login_name is required" }, 400);
   if (!/^\d{4,6}$/.test(pin)) return json({ error: "pin must be 4-6 digits" }, 400);
+  if (record.category !== undefined && !isStaffCategory(record.category as string)) {
+    return json({ error: "category must be office_staff or service_staff" }, 400);
+  }
+  const staffCategory: CallerCategory = isStaffCategory(record.category as string)
+    ? (record.category as CallerCategory)
+    : isStaffCategory(caller.category)
+      ? caller.category
+      : "service_staff";
 
   const { hash, salt } = await hashPin(env, pin);
   const pinEncrypted = await encryptPin(env, pin);
@@ -391,7 +400,7 @@ export async function handleConfirmCallerStaffPromotion(
           409
         );
       }
-      await updateCaller(env.DB, id, { category: "staff", staff_user_id: nameOwner.id });
+      await updateCaller(env.DB, id, { category: staffCategory, staff_user_id: nameOwner.id });
       user = nameOwner;
       linkedExisting = true;
     } else if (user.name !== loginName) {
@@ -420,7 +429,7 @@ export async function handleConfirmCallerStaffPromotion(
     }
     user = nameOwner;
     linkedExisting = true;
-    await updateCaller(env.DB, id, { category: "staff", staff_user_id: user.id });
+    await updateCaller(env.DB, id, { category: staffCategory, staff_user_id: user.id });
     if (!user.phone && caller.phone) {
       await updateUserPhone(env.DB, user.id, caller.phone);
     }
@@ -447,7 +456,7 @@ export async function handleConfirmCallerStaffPromotion(
           throw err;
         }
       }
-      await updateCaller(env.DB, id, { category: "staff", staff_user_id: user.id });
+      await updateCaller(env.DB, id, { category: staffCategory, staff_user_id: user.id });
       if (!user.phone && caller.phone) {
         await updateUserPhone(env.DB, user.id, caller.phone);
       }
@@ -456,12 +465,12 @@ export async function handleConfirmCallerStaffPromotion(
     } else {
       user = await createUser(env.DB, loginName, hash, salt, "staff", caller.phone, pinEncrypted);
       created = true;
-      await updateCaller(env.DB, id, { category: "staff", staff_user_id: user.id });
+      await updateCaller(env.DB, id, { category: staffCategory, staff_user_id: user.id });
     }
   }
 
-  if (caller.category !== "staff") {
-    await updateCaller(env.DB, id, { category: "staff" });
+  if (caller.category !== staffCategory) {
+    await updateCaller(env.DB, id, { category: staffCategory });
   }
 
   if (alias) {
