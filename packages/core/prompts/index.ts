@@ -2,6 +2,6 @@
 // a prompt change creates vN/; calls.prompt_version records which one produced
 // a given extraction. See docs/BUILD_BRIEF.md "The prompt layer".
 
-import { v7 } from "./v7";
+import { v8 } from "./v8";
 
-export const ACTIVE = v7;
+export const ACTIVE = v8;

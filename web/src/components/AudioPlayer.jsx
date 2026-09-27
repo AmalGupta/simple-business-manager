@@ -3,9 +3,9 @@
    wrapper, no custom scrubber; the browser issues Range requests against
    the streaming endpoint (see src/lib/r2-stream.ts) for seeking.
    ------------------------------------------------------------------ */
-export function AudioPlayer({ src }) {
+export function AudioPlayer({ src, preload }) {
   return (
-    <audio controls src={src} style={{ width: "100%", height: 36, marginTop: 6 }}>
+    <audio controls src={src} preload={preload} style={{ width: "100%", height: 36, marginTop: 6 }}>
       Your browser can't play this audio.
     </audio>
   );

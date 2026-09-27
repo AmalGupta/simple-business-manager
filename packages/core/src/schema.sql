@@ -227,6 +227,15 @@ CREATE TABLE todos (
   -- migration 0036: site assigned from CNA; parent call also gets call_sites.
   site_id           TEXT REFERENCES sites(id),
 
+  -- migration 0044: admin "urgent" flag — staff cannot reschedule, due
+  -- within 24h of urgent_at.
+  urgent_at         TEXT,
+  urgent_by_user_id TEXT REFERENCES users(id),
+
+  -- migration 0045: prompt v8 todos[].context — what was said around this
+  -- task, so the owner can route it without replaying the call.
+  context           TEXT,
+
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 
   -- Assignment lived here as assigned_to_user_id/assigned_by_user_id/
@@ -243,6 +252,8 @@ CREATE TABLE todo_assignees (
   user_id             TEXT NOT NULL REFERENCES users(id),
   assigned_by_user_id TEXT REFERENCES users(id),
   assigned_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  -- migration 0044: the day this assignee plans to do it (staff roster).
+  scheduled_for       TEXT,
   PRIMARY KEY (todo_id, user_id)
 );
 
@@ -387,10 +398,38 @@ CREATE TABLE site_tasks (
   completed_at          TEXT,
   completed_by_user_id  TEXT REFERENCES users(id),
   created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  -- migration 0044: staff roster planned day + admin urgent flag.
+  scheduled_for         TEXT,
+  urgent_at             TEXT,
+  urgent_by_user_id     TEXT REFERENCES users(id),
   UNIQUE(site_id, stage_id)
 );
 CREATE INDEX idx_site_tasks_site ON site_tasks(site_id);
 CREATE INDEX idx_site_tasks_assignee ON site_tasks(assigned_to_user_id, status);
+CREATE INDEX idx_site_tasks_scheduled ON site_tasks(assigned_to_user_id, scheduled_for);
+CREATE INDEX idx_todo_assignees_scheduled ON todo_assignees(user_id, scheduled_for);
+
+-- Staff roster audit — migration 0044. Append-only log of transitions on
+-- assigned work (call todos + site tasks). item_kind is 'todo' | 'site_task'.
+-- subject_user_id is whose work it was (the staff member the audit is filed
+-- under); actor_user_id is who acted (an admin, for urgent/assign).
+--   event: scheduled | completed | reopened | handed_off | received | assigned |
+--          rerouted (migration 0045 bulk move to the router) |
+--          marked_urgent | urgent_cleared
+CREATE TABLE work_events (
+  id              TEXT PRIMARY KEY,
+  item_kind       TEXT NOT NULL,
+  item_id         TEXT NOT NULL,
+  site_id         TEXT REFERENCES sites(id),
+  actor_user_id   TEXT REFERENCES users(id),
+  subject_user_id TEXT REFERENCES users(id),
+  event           TEXT NOT NULL,
+  from_value      TEXT,
+  to_value        TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_work_events_subject ON work_events(subject_user_id, created_at DESC);
+CREATE INDEX idx_work_events_item ON work_events(item_kind, item_id, created_at DESC);
 
 -- Staff field workflow — migration 0016. "Installations" are physical
 -- windows/openings at a site (a site can have many); each accumulates its
@@ -445,6 +484,8 @@ CREATE INDEX idx_material_shortages_status ON material_shortages(status);
 CREATE INDEX idx_material_shortages_site ON material_shortages(site_id);
 
 -- migration 0020: feature toggles (Drive poll enabled, last-poll metadata)
+-- Known keys include 'todo_router_user_id' (migration 0045): while set, every
+-- new todo is assigned to that user (the owner) for routing to staff.
 CREATE TABLE app_settings (
   key         TEXT PRIMARY KEY,
   value       TEXT NOT NULL,

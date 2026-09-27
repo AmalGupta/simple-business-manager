@@ -68,6 +68,7 @@ import {
   type SessionWithUser,
   type CallEntryTypeFilter,
   type CallListFilters,
+  logWorkEvents,
 } from "@sbm/core";
 import { ACTIVE } from "../../packages/core/prompts";
 import { extractCall } from "../../packages/core/prompts/extract";
@@ -538,15 +539,32 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
     }
     const updated = await updateTodo(env.DB, id, patch);
     if (!updated) return json({ error: "not found" }, 404);
+    await logTodoStatusWorkEvent(env, existing, updated, session.user_id, [session.user_id]);
     return json(updated);
   }
 
   if (Array.isArray(record.assigned_to_user_ids)) {
     const userIds = record.assigned_to_user_ids.filter((v): v is string => typeof v === "string");
+    const before = await getTodoRowWithAssignees(env.DB, id);
     await setTodoAssignees(env.DB, id, userIds, session.user_id);
     await logTodoAssignmentToSiteTimeline(env.DB, id, session.user_id);
     const updated = await getTodoRowWithAssignees(env.DB, id);
     if (!updated) return json({ error: "not found" }, 404);
+    const previous = new Set((before?.assignees ?? []).map((a) => a.id));
+    await logWorkEvents(
+      env.DB,
+      userIds
+        .filter((uid) => !previous.has(uid))
+        .map((uid) => ({
+          kind: "todo" as const,
+          itemId: id,
+          siteId: updated.site_id ?? null,
+          actorUserId: session.user_id,
+          subjectUserId: uid,
+          event: "assigned" as const,
+          toValue: uid,
+        }))
+    );
     return json(updated);
   }
 
@@ -557,9 +575,38 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
     }
   }
 
+  const existing = await getTodoById(env.DB, id);
   const updated = await updateTodo(env.DB, id, patch);
   if (!updated) return json({ error: "not found" }, 404);
+  if (existing) {
+    await logTodoStatusWorkEvent(env, existing, updated, session.user_id, updated.assignees.map((a) => a.id));
+  }
   return json(updated);
+}
+
+/** Staff roster audit (migration 0044) — done/reopened transitions made
+ *  through the classic todo PATCH, filed under each assignee. */
+async function logTodoStatusWorkEvent(
+  env: Env,
+  before: { status: string },
+  after: { id: string; status: string; site_id?: string | null },
+  actorUserId: string,
+  subjectUserIds: string[]
+): Promise<void> {
+  if (before.status === after.status) return;
+  const event = after.status === "done" ? "completed" : before.status === "done" ? "reopened" : null;
+  if (!event) return;
+  await logWorkEvents(
+    env.DB,
+    subjectUserIds.map((uid) => ({
+      kind: "todo" as const,
+      itemId: after.id,
+      siteId: after.site_id ?? null,
+      actorUserId,
+      subjectUserId: uid,
+      event,
+    }))
+  );
 }
 
 /** Admin one-shot: match open unassigned todos to staff by owner name. */

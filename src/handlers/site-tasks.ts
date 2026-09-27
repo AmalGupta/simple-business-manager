@@ -13,6 +13,7 @@ import {
   listOpenSiteTasks,
   listSiteTasks,
   listUnassignedSiteTasksForSite,
+  logWorkEvents,
   type SessionWithUser,
 } from "@sbm/core";
 import { requireSession } from "../lib/auth";
@@ -96,7 +97,20 @@ export async function handlePatchSiteTask(request: Request, env: Env, id: string
     if (session.user_role === "staff" && task.assigned_to_user_id !== session.user_id) {
       return json({ error: "forbidden" }, 403);
     }
-    return json(await completeSiteTask(env.DB, id, session.user_id));
+    const done = await completeSiteTask(env.DB, id, session.user_id);
+    if (task.status !== "done") {
+      await logWorkEvents(env.DB, [
+        {
+          kind: "site_task",
+          itemId: id,
+          siteId: task.site_id,
+          actorUserId: session.user_id,
+          subjectUserId: task.assigned_to_user_id ?? session.user_id,
+          event: "completed",
+        },
+      ]);
+    }
+    return json(done);
   }
 
   if (typeof record.assigned_to_user_id === "string" && record.assigned_to_user_id) {
@@ -107,7 +121,26 @@ export async function handlePatchSiteTask(request: Request, env: Env, id: string
       }
     }
     const dueDate = typeof record.due_date === "string" ? record.due_date : record.due_date === null ? null : undefined;
-    return json(await assignSiteTask(env.DB, id, { assignedToUserId: record.assigned_to_user_id, assignedByUserId: session.user_id, dueDate }));
+    const assigned = await assignSiteTask(env.DB, id, {
+      assignedToUserId: record.assigned_to_user_id,
+      assignedByUserId: session.user_id,
+      dueDate,
+    });
+    if (task.assigned_to_user_id !== record.assigned_to_user_id) {
+      await logWorkEvents(env.DB, [
+        {
+          kind: "site_task",
+          itemId: id,
+          siteId: task.site_id,
+          actorUserId: session.user_id,
+          subjectUserId: record.assigned_to_user_id,
+          event: "assigned",
+          fromValue: task.assigned_to_user_id,
+          toValue: record.assigned_to_user_id,
+        },
+      ]);
+    }
+    return json(assigned);
   }
 
   return json({ error: "no recognised fields in patch" }, 400);

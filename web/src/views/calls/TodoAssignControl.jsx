@@ -63,11 +63,21 @@ export function TodoAssignControl({
   const assignedToMe = Boolean(currentUser?.id && assignees.some((a) => a.id === currentUser.id));
   const canClaim = Boolean(currentUser?.id && !assignedToMe);
 
-  const [editing, setEditing] = useState(alwaysEditing);
-  const [checkedIds, setCheckedIds] = useState(() => {
+  /* migration 0045: every new todo lands with the router (the owner). While
+     he's its only holder, "Reassign" is really "route to staff": the
+     checklist starts from the suggestion without him ticked, so saving
+     hands it over rather than adding a co-assignee. */
+  const routerHeld = Boolean(
+    currentUser?.is_todo_router && assignees.length > 0 && assignees.every((a) => a.id === currentUser.id)
+  );
+  const initialChecked = () => {
+    if (routerHeld) return suggested && suggested.id !== currentUser.id ? new Set([suggested.id]) : new Set();
     if (assignees.length > 0) return new Set(assignees.map((a) => a.id));
     return suggested ? new Set([suggested.id]) : new Set();
-  });
+  };
+
+  const [editing, setEditing] = useState(alwaysEditing);
+  const [checkedIds, setCheckedIds] = useState(initialChecked);
   const [saving, setSaving] = useState(false);
   const [claiming, setClaiming] = useState(false);
   const [error, setError] = useState("");
@@ -81,7 +91,7 @@ export function TodoAssignControl({
   // under us (e.g. a refresh after another admin's edit) while not editing.
   useEffect(() => {
     if (editing) return;
-    setCheckedIds(assignees.length > 0 ? new Set(assignees.map((a) => a.id)) : suggested ? new Set([suggested.id]) : new Set());
+    setCheckedIds(initialChecked());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todo.id, assignees.map((a) => a.id).join(",")]);
 
@@ -137,14 +147,17 @@ export function TodoAssignControl({
     }
   };
 
-  const statusLabel =
-    assignees.length > 0
+  const statusLabel = routerHeld
+    ? suggested && suggested.id !== currentUser.id
+      ? `With you · suggested: ${suggested.name}`
+      : "With you — route to staff"
+    : assignees.length > 0
       ? `Assigned to ${assignees.map((a) => a.name).join(", ")}`
       : suggested
         ? `Suggested: ${suggested.name}`
         : "Unassigned";
   const statusWithDue = todo.due_date ? `${statusLabel} · due ${fmtShort(todo.due_date)}` : statusLabel;
-  const assignLabel = assignees.length > 0 ? "Reassign" : "Assign";
+  const assignLabel = routerHeld ? "Route to staff" : assignees.length > 0 ? "Reassign" : "Assign";
 
   if (!editing) {
     if (compact) {
@@ -223,13 +236,13 @@ export function TodoAssignControl({
         <button
           type="button"
           onClick={submit}
-          disabled={saving || assignablePeople.length === 0}
+          disabled={saving || assignablePeople.length === 0 || (routerHeld && checkedIds.size === 0)}
           style={{
             ...(compact ? COMPACT_PRIMARY : { ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12 }),
-            opacity: saving || assignablePeople.length === 0 ? 0.6 : 1,
+            opacity: saving || assignablePeople.length === 0 || (routerHeld && checkedIds.size === 0) ? 0.6 : 1,
           }}
         >
-          {saving ? "Saving…" : "Save"}
+          {saving ? "Saving…" : routerHeld ? "Route" : "Save"}
         </button>
         {!alwaysEditing ? (
           <button

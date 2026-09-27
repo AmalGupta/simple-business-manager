@@ -5,6 +5,8 @@ import { fmtShort, isUrgent } from "../../lib/dates.js";
 import { TodoRow } from "../../components/TodoRow.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
 import { TodoAssigneeMeta, TodoCallExtractionMeta } from "./TodoFacts.jsx";
+import { TodoContext } from "../../components/TodoContext.jsx";
+import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 import "./OpenTodoCard.css";
 
 export const OPEN_TODO_PAGE_SIZE = 20;
@@ -160,6 +162,9 @@ export function OpenTodoCard({
         <>
           <div className="sbm-open-todo-card__top">
             <TodoCallExtractionMeta todos={todos} />
+            {/* Listen before routing — the recording behind these todos.
+                preload="none": a page of cards must not fetch every file. */}
+            {callId ? <AudioPlayer src={`/api/calls/${callId}/recording`} preload="none" /> : null}
           </div>
 
           <div className="sbm-open-todo-card__todos">
@@ -198,7 +203,10 @@ export function OpenTodoCard({
                       embedded
                     />
                   ) : (
-                    <p className="sbm-open-todo-card__text">{td.text}</p>
+                    <p className="sbm-open-todo-card__text">
+                      {td.text}
+                      <TodoContext text={td.context} />
+                    </p>
                   )}
 
                   <div className="sbm-open-todo-card__below-text">
