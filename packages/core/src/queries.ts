@@ -449,6 +449,7 @@ export async function countCallersByCategory(
     .all<{ category: string; n: number }>();
   const counts: Record<CallerCategory, number> = {
     client: 0,
+    dealer: 0,
     vendor: 0,
     supplier: 0,
     transporter: 0,
