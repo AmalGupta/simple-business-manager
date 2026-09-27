@@ -583,7 +583,11 @@ export async function postCreateCaller(input) {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error || `POST /api/callers → ${res.status}`);
+    const err = new Error(body.error || `POST /api/callers → ${res.status}`);
+    // 409: the number (or, with no number, the name) is already a contact.
+    err.status = res.status;
+    err.existing = body.existing ?? null;
+    throw err;
   }
   return res.json();
 }

@@ -76,6 +76,10 @@ export function SiteDetailsModal({
   const [error, setError] = useState("");
 
   const linkedContacts = site?.contacts ?? [];
+  /* Confirming from review needs a mapped contact with a number first —
+     the server refuses the confirm otherwise (handlePatchSite 409). */
+  const confirming = extraPatch?.is_confirmed === "Y" && site?.is_confirmed !== "Y";
+  const needsContact = confirming && !linkedContacts.some((c) => c.phone);
   const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));
 
   const openAssociate = () => {
@@ -205,6 +209,11 @@ export function SiteDetailsModal({
       </div>
 
       {error ? <span style={{ fontSize: 12, color: t.signal }}>{error}</span> : null}
+      {needsContact ? (
+        <p style={{ fontSize: 12, color: t.putty, fontWeight: 600, margin: "8px 0 0" }}>
+          Map a contact with a phone number (Add contact) before confirming this site.
+        </p>
+      ) : null}
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
         <button
@@ -224,7 +233,12 @@ export function SiteDetailsModal({
         >
           Cancel
         </button>
-        <button type="button" onClick={submit} disabled={saving} style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving ? 0.6 : 1 }}>
+        <button
+          type="button"
+          onClick={submit}
+          disabled={saving || needsContact}
+          style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving || needsContact ? 0.6 : 1 }}
+        >
           {saving ? "Saving…" : saveLabel}
         </button>
       </div>

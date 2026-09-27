@@ -69,6 +69,8 @@ import {
   type CallEntryTypeFilter,
   type CallListFilters,
   logWorkEvents,
+  siteHasContactWithPhone,
+  getSiteConfirmation,
 } from "@sbm/core";
 import { ACTIVE } from "../../packages/core/prompts";
 import { extractCall } from "../../packages/core/prompts/extract";
@@ -841,6 +843,16 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
       patch.name = String(value).trim();
     } else {
       patch[key] = value as string | null;
+    }
+  }
+
+  /* Confirming a site from review needs a real contact behind it: at least
+     one linked directory contact with a phone number. Otherwise the review
+     screen was saving free-text names that never became mapped contacts. */
+  if (patch.is_confirmed === "Y" && !(await siteHasContactWithPhone(env.DB, id))) {
+    const current = await getSiteConfirmation(env.DB, id);
+    if (current && current.is_confirmed !== "Y") {
+      return json({ error: "Map a contact with a phone number before confirming this site", code: "contact_required" }, 409);
     }
   }
 
