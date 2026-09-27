@@ -28,8 +28,8 @@ export type CallerCategory =
   | "relative"
   | "staff"
   | "client"
+  | "dealer"
   | "vendor"
-  | "supplier"
   | "transporter"
   | "tech"
   | "spam";

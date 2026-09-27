@@ -4,14 +4,14 @@ import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
 
 const CATEGORY_OPTIONS = [
   { value: "client", label: "Client" },
-  { value: "vendor", label: "Vendor" },
-  { value: "supplier", label: "Supplier" },
-  { value: "transporter", label: "Transporter" },
-  { value: "tech", label: "Tech" },
-  { value: "staff", label: "Staff" },
+  { value: "dealer", label: "Dealer" },
   { value: "family", label: "Family" },
   { value: "relative", label: "Relative" },
   { value: "spam", label: "Spam" },
+  { value: "staff", label: "Staff" },
+  { value: "tech", label: "Tech" },
+  { value: "transporter", label: "Transporter" },
+  { value: "vendor", label: "Vendor" },
 ];
 
 /* "Add contact" — name, phone, category. Choosing Staff creates/links a
