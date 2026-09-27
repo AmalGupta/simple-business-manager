@@ -91,6 +91,13 @@ import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handlePostDeskVoiceNote } from "./handlers/desk-voice-note";
 import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
+import {
+  handleGetAssignedWork,
+  handleGetStaffRoster,
+  handleGetWorkEvents,
+  handlePatchWork,
+  handlePostWorkHandoff,
+} from "./handlers/work";
 import { handleGetSiteCalls } from "./handlers/site-calls";
 import {
   handleDeleteAppRequest,
@@ -382,6 +389,36 @@ export default {
     if (siteOpenTodosMatch && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetSiteOpenTodos(request, env, siteOpenTodosMatch[1]);
+    }
+
+    // --- Staff roster — migration 0044: assigned work planning, urgent
+    // flag, hand-off, admin roster grid and audit. ---
+
+    if (url.pathname === "/api/work/assigned" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetAssignedWork(request, env);
+    }
+
+    if (url.pathname === "/api/work/roster" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetStaffRoster(request, env);
+    }
+
+    if (url.pathname === "/api/work/events" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetWorkEvents(request, env);
+    }
+
+    const workHandoffMatch = url.pathname.match(/^\/api\/work\/([^/]+)\/([^/]+)\/handoff$/);
+    if (workHandoffMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostWorkHandoff(request, env, workHandoffMatch[1], workHandoffMatch[2]);
+    }
+
+    const workItemMatch = url.pathname.match(/^\/api\/work\/([^/]+)\/([^/]+)$/);
+    if (workItemMatch && request.method === "PATCH") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePatchWork(request, env, workItemMatch[1], workItemMatch[2]);
     }
 
     // --- Site-task workflow system — migration 0013. ---

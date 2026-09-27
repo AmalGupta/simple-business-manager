@@ -638,6 +638,15 @@ export async function setAppSetting(db: D1Database, key: string, value: string):
     .run();
 }
 
+/** migration 0045 — while set, every new todo goes to this user (the owner)
+ *  for routing, and name/alias matching no longer puts todos on staff lists. */
+export const TODO_ROUTER_USER_ID_KEY = "todo_router_user_id";
+
+export async function getTodoRouterUserId(db: D1Database): Promise<string | null> {
+  const value = await getAppSetting(db, TODO_ROUTER_USER_ID_KEY);
+  return value && value.trim() ? value.trim() : null;
+}
+
 export async function listUserSettings(
   db: D1Database,
   userId: string
@@ -1139,6 +1148,7 @@ export async function saveExtraction(
     return null;
   };
 
+  const routerUserId = await getTodoRouterUserId(db);
   for (const todo of extraction.todos) {
     const matched = matchStaffByOwner(todo.owner, staff, aliasRows);
     /* Desk/site memos: owner "self" → claim for the recorder so My call tasks
@@ -1148,16 +1158,17 @@ export async function saveExtraction(
       !matched && assignedByUserId && normalizeOwnerName(todo.owner ?? "") === "self"
         ? assignedByUserId
         : null;
-    const assigneeId = matched?.id ?? selfAssigneeId;
+    // Router set (migration 0045): the owner routes every todo himself.
+    const assigneeId = routerUserId ?? matched?.id ?? selfAssigneeId;
     const todoId = crypto.randomUUID();
     const todoSiteId = await resolveTodoSiteId(todo.site, todo.text);
     statements.push(
       db
         .prepare(
-          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id)
-           VALUES (?, ?, ?, ?, ?, 'llm', ?)`
+          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id, context)
+           VALUES (?, ?, ?, ?, ?, 'llm', ?, ?)`
         )
-        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null, todoSiteId)
+        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null, todoSiteId, todo.context || null)
     );
     if (assigneeId) {
       statements.push(
@@ -1192,6 +1203,8 @@ export async function saveExtraction(
  * owner matches a staff name. Returns how many rows were updated.
  */
 export async function autoAssignOpenTodosByOwner(db: D1Database): Promise<number> {
+  // Owner routes by hand while a router is set (migration 0045).
+  if (await getTodoRouterUserId(db)) return 0;
   const [staff, aliasRows] = await Promise.all([listStaffRoster(db), listOwnerAliasMatches(db)]);
   if (staff.length === 0 && aliasRows.length === 0) return 0;
   const { results } = await db
@@ -1282,6 +1295,8 @@ export interface TodoRow {
   site_id: string | null;
   /** Joined site name when site_id is set. */
   site_name: string | null;
+  /** migration 0045 — prompt v8 context note. */
+  context: string | null;
   /** Row create time (extraction / manual). */
   created_at: string | null;
   /** migration 0025 — a todo can be assigned to more than one staff member. */
@@ -1393,6 +1408,7 @@ interface RawTodoRow {
   customer_waiting: 0 | 1;
   site_id: string | null;
   site_name: string | null;
+  context?: string | null;
   created_at: string | null;
 }
 
@@ -1464,7 +1480,7 @@ const TODO_SELECT = `
   SELECT todos.id, todos.call_id, todos.owner, todos.text, todos.due_date, todos.status,
          todos.completed_at, todos.closed_by_call_id, todos.customer_waiting,
          todos.created_at AS created_at,
-         todos.site_id AS site_id, sites.name AS site_name
+         todos.site_id AS site_id, sites.name AS site_name, todos.context AS context
   FROM todos
   LEFT JOIN sites ON sites.id = todos.site_id
 `;
@@ -1494,6 +1510,7 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     closed_by_call_id: t.closed_by_call_id,
     site_id: t.site_id ?? null,
     site_name: t.site_name ?? null,
+    context: t.context ?? null,
     created_at: t.created_at ?? null,
     assignees: [], // filled in by hydrateTodoAssignees — see hydrateCallRows/getCallWithTodos
   };
@@ -1532,22 +1549,32 @@ export async function isTodoAssignee(db: D1Database, todoId: string, userId: str
   return row != null;
 }
 
-/** Replaces the full assignee set for one todo (not incremental add/remove
- *  — matches a multi-select "Save" UI action). Empty array clears assignment. */
+/** Replaces the full assignee set for one todo (matches a multi-select
+ *  "Save" UI action). Empty array clears assignment. Assignees kept across
+ *  the save keep their row — and so their roster scheduled_for (migration
+ *  0044) — rather than being deleted and re-inserted. */
 export async function setTodoAssignees(
   db: D1Database,
   todoId: string,
   userIds: string[],
   assignedByUserId: string | null
 ): Promise<void> {
+  const keep = [...new Set(userIds)];
+  const removeStmt = keep.length
+    ? db
+        .prepare(`DELETE FROM todo_assignees WHERE todo_id = ? AND user_id NOT IN (${keep.map(() => "?").join(", ")})`)
+        .bind(todoId, ...keep)
+    : db.prepare(`DELETE FROM todo_assignees WHERE todo_id = ?`).bind(todoId);
   await db.batch([
-    db.prepare(`DELETE FROM todo_assignees WHERE todo_id = ?`).bind(todoId),
-    ...userIds.map((uid) =>
+    removeStmt,
+    // A new assignee on an urgent todo lands on today, same as setWorkUrgent.
+    ...keep.map((uid) =>
       db
         .prepare(
-          `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at) VALUES (?, ?, ?, datetime('now'))`
+          `INSERT OR IGNORE INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at, scheduled_for)
+           VALUES (?, ?, ?, datetime('now'), (SELECT CASE WHEN urgent_at IS NOT NULL THEN ? END FROM todos WHERE id = ?))`
         )
-        .bind(todoId, uid, assignedByUserId)
+        .bind(todoId, uid, assignedByUserId, todayKeyKolkata(), todoId)
     ),
   ]);
 }
@@ -2974,7 +3001,9 @@ export async function createSiteVoiceNoteTask(
   db: D1Database,
   input: { callId: string; siteId: string; siteName: string | null; uploaderName: string | null; uploadedByUserId: string }
 ): Promise<{ todoId: string; assigneeUserIds: string[] } | null> {
-  const assigneeUserIds = await listSiteAssigneeUserIds(db, input.siteId);
+  // Router set (migration 0045): the voice-note task goes to the owner to route.
+  const routerUserId = await getTodoRouterUserId(db);
+  const assigneeUserIds = routerUserId ? [routerUserId] : await listSiteAssigneeUserIds(db, input.siteId);
   if (assigneeUserIds.length === 0) return null;
 
   const todoId = crypto.randomUUID();
@@ -4425,6 +4454,10 @@ export interface SiteTaskRow {
   due_date: string | null;
   completed_at: string | null;
   completed_by_name: string | null;
+  /** migration 0044 — assignee's planned day (staff roster). */
+  scheduled_for: string | null;
+  /** migration 0044 — admin urgent flag; due within 24h of this. */
+  urgent_at: string | null;
 }
 
 const SITE_TASK_ROW_SELECT = `
@@ -4440,7 +4473,9 @@ const SITE_TASK_ROW_SELECT = `
          site_tasks.assigned_at AS assigned_at,
          site_tasks.due_date AS due_date,
          site_tasks.completed_at AS completed_at,
-         completer.name AS completed_by_name
+         completer.name AS completed_by_name,
+         site_tasks.scheduled_for AS scheduled_for,
+         site_tasks.urgent_at AS urgent_at
   FROM site_tasks
   JOIN sites ON sites.id = site_tasks.site_id
   JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
@@ -4522,16 +4557,23 @@ export async function assignSiteTask(
   // cannot do — it treats a bound NULL (an explicit clear) as "keep the old
   // value" too, so a clear would silently never apply.
   const touchesDueDate = input.dueDate !== undefined;
-  const dueDateClause = touchesDueDate ? `, due_date = ?` : "";
+  const dueDateClause = touchesDueDate ? `, due_date = ?5` : "";
   const stmt = db.prepare(
     `UPDATE site_tasks
-     SET status = 'assigned', assigned_to_user_id = ?, assigned_by_user_id = ?,
-         assigned_at = datetime('now') ${dueDateClause}
-     WHERE id = ?`
+     SET status = 'assigned', assigned_to_user_id = ?1, assigned_by_user_id = ?2,
+         assigned_at = datetime('now'),
+         -- roster (migration 0044): a new holder starts unplanned, or on
+         -- today if the task is urgent; the same holder keeps their plan.
+         scheduled_for = CASE
+           WHEN assigned_to_user_id IS ?1 THEN scheduled_for
+           WHEN urgent_at IS NOT NULL THEN ?3
+           ELSE NULL
+         END ${dueDateClause}
+     WHERE id = ?4`
   );
-  const bound = touchesDueDate
-    ? stmt.bind(input.assignedToUserId, input.assignedByUserId, input.dueDate, id)
-    : stmt.bind(input.assignedToUserId, input.assignedByUserId, id);
+  const binds: unknown[] = [input.assignedToUserId, input.assignedByUserId, todayKeyKolkata(), id];
+  if (touchesDueDate) binds.push(input.dueDate);
+  const bound = stmt.bind(...binds);
   await bound.run();
   const row = await getSiteTaskById(db, id);
   if (row) await touchSiteActivity(db, row.site_id, { source: "task", refId: id });
@@ -4790,6 +4832,8 @@ export interface DashboardSummary {
    * Empty on staff-scoped summaries.
    */
   staff_with_open_todos: StaffWithOpenTodosRow[];
+  /** Staff-scoped summaries only (migration 0044) — open urgent work for that person. */
+  urgent_work_count?: number;
 }
 
 export interface StaffWithOpenTodosRow {
@@ -4803,15 +4847,15 @@ export interface StaffWithOpenTodosRow {
  * UNION of three indexed paths — avoids users × open-todos Cartesian JOIN.
  */
 export async function listStaffWithOpenCallTodos(db: D1Database): Promise<StaffWithOpenTodosRow[]> {
-  const { results } = await db
-    .prepare(
-      `WITH matched AS (
-         SELECT todo_assignees.user_id AS user_id, todos.id AS todo_id
+  /* Router set (migration 0045): explicit assignment only — the name/alias
+     branches below would re-surface every todo a staff name was spoken on. */
+  const routed = (await getTodoRouterUserId(db)) !== null;
+  const assignedSql = `SELECT todo_assignees.user_id AS user_id, todos.id AS todo_id
          FROM todo_assignees
          JOIN todos ON todos.id = todo_assignees.todo_id AND todos.status = 'open'
          JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL
-         JOIN users ON users.id = todo_assignees.user_id AND users.role = 'staff'
-
+         JOIN users ON users.id = todo_assignees.user_id AND users.role = 'staff'`;
+  const nameMatchSql = `
          UNION
 
          SELECT users.id AS user_id, todos.id AS todo_id
@@ -4840,7 +4884,12 @@ export async function listStaffWithOpenCallTodos(db: D1Database): Promise<StaffW
          JOIN users ON users.id = callers.staff_user_id AND users.role = 'staff'
          JOIN todos ON todos.status = 'open'
                     AND lower(trim(todos.owner)) = lower(trim(caller_aliases.alias))
-         JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL
+         JOIN calls ON calls.id = todos.call_id AND calls.deleted_at IS NULL`;
+  const { results } = await db
+    .prepare(
+      `WITH matched AS (
+         ${assignedSql}
+         ${routed ? "" : nameMatchSql}
        )
        SELECT users.id AS id,
               users.name AS name,
@@ -4871,6 +4920,8 @@ export interface AssignedTodoRow {
   created_at: string | null;
   site_id: string | null;
   site_name: string | null;
+  /** migration 0045 — prompt v8 context note. */
+  context: string | null;
   assignees: TodoAssignee[];
   /** Present on Blocked bookmark rows — call-level unresolved that put the card here. */
   unresolved?: UnresolvedRow[];
@@ -4978,6 +5029,15 @@ async function resolveMyOpenTodoMatch(
   let identifiedClause = "";
   if (includeIdentified) {
     identifiedClause = ` OR lower(trim(todos.owner)) = 'self'`;
+  }
+  /* Router set (migration 0045): only explicit assignment puts a todo on a
+     list — a staff name spoken in the call no longer does. Binds stay in
+     the name/alias binds are dropped with their clauses. */
+  const routed = (await getTodoRouterUserId(db)) !== null;
+  if (routed) {
+    binds.length = 1;
+    ownerClauses.length = 0;
+    identifiedClause = "";
   }
   const ownerMatchSql = ownerClauses.length > 0 ? ` OR (${ownerClauses.join(" OR ")})` : "";
 
@@ -5118,6 +5178,7 @@ export async function listOpenTodosByAssigneeBucket(
               todos.owner AS owner,
               todos.text AS text,
               todos.due_date AS due_date,
+              todos.context AS context,
               todos.status AS status,
               ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
               calls.recorded_at AS recorded_at,
@@ -5170,6 +5231,7 @@ export async function listOpenTodosByAssigneeBucket(
       created_at: r.created_at ?? null,
       site_id: r.site_id ?? null,
       site_name: r.site_name ?? null,
+      context: r.context ?? null,
       assignees: map.get(r.id) ?? [],
       unresolved: parseUnresolvedArray(unresolved_json),
     };
@@ -5211,6 +5273,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
               todos.owner AS owner,
               todos.text AS text,
               todos.due_date AS due_date,
+              todos.context AS context,
               todos.status AS status,
               COALESCE(callers.name, 'Unknown caller') AS client_name,
               calls.recorded_at AS recorded_at,
@@ -5244,6 +5307,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
       created_at: r.created_at ?? null,
       site_id: r.site_id ?? null,
       site_name: r.site_name ?? null,
+      context: r.context ?? null,
       assignees: map.get(r.id) ?? [],
       unresolved: parseUnresolvedArray(unresolved_json),
     };
@@ -5354,6 +5418,7 @@ export async function listMyOpenTodos(
               todos.owner AS owner,
               todos.text AS text,
               todos.due_date AS due_date,
+              todos.context AS context,
               todos.status AS status,
               COALESCE(
                 callers.name,
@@ -5442,6 +5507,7 @@ export async function listMyOpenTodos(
       created_at: r.created_at ?? null,
       site_id: r.site_id ?? null,
       site_name: r.site_name ?? null,
+      context: r.context ?? null,
       assignees: map.get(r.id) ?? [],
       unresolved: parseUnresolvedArray(unresolved_json),
     };
@@ -5463,10 +5529,11 @@ export async function getDashboardSummary(
   viewerUserId?: string | null
 ): Promise<DashboardSummary> {
   if (forUserId) {
-    const [sites, open_site_tasks, my_open_todos_count] = await Promise.all([
+    const [sites, open_site_tasks, my_open_todos_count, urgent_work_count] = await Promise.all([
       listSites(db, forUserId),
       listOpenSiteTasks(db, forUserId),
       countMyOpenTodos(db, forUserId),
+      countUrgentWork(db, forUserId),
     ]);
     return {
       open_today: 0,
@@ -5487,6 +5554,7 @@ export async function getDashboardSummary(
       calls_needing_action_count: 0,
       resolved_calls_count: 0,
       staff_with_open_todos: [],
+      urgent_work_count,
     };
   }
 
@@ -5560,4 +5628,489 @@ export async function getDashboardSummary(
     resolved_calls_count: resolvedCallsCount,
     staff_with_open_todos,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Staff roster — migration 0044. "Assigned work" is the union of a staff
+// member's open call todos (todo_assignees) and open site tasks
+// (site_tasks.assigned_to_user_id). Each carries a per-assignee planned day
+// (scheduled_for), an admin urgent flag, and every transition is appended to
+// work_events for the admin's staff-by-staff audit.
+// ---------------------------------------------------------------------------
+
+export type WorkItemKind = "todo" | "site_task";
+
+export function isWorkItemKind(v: unknown): v is WorkItemKind {
+  return v === "todo" || v === "site_task";
+}
+
+export interface WorkItem {
+  kind: WorkItemKind;
+  id: string;
+  title: string;
+  site_id: string | null;
+  site_name: string | null;
+  /** Call todos only — opens the call. */
+  call_id: string | null;
+  client_name: string | null;
+  /** Site tasks only — workflow category. */
+  category: string | null;
+  due_date: string | null;
+  scheduled_for: string | null;
+  urgent_at: string | null;
+  /** Call todos only — prompt v8 context note (migration 0045). */
+  context: string | null;
+  assignee_user_id: string;
+  assignee_name: string | null;
+}
+
+export type WorkEventType =
+  | "scheduled"
+  | "completed"
+  | "reopened"
+  | "handed_off"
+  | "received"
+  | "assigned"
+  | "marked_urgent"
+  | "urgent_cleared"
+  /** migration 0045 — bulk move of all open work to the router (the owner). */
+  | "rerouted";
+
+export interface WorkEventInput {
+  kind: WorkItemKind;
+  itemId: string;
+  siteId: string | null;
+  actorUserId: string | null;
+  subjectUserId: string | null;
+  event: WorkEventType;
+  fromValue?: string | null;
+  toValue?: string | null;
+}
+
+function workEventStmt(db: D1Database, e: WorkEventInput): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO work_events (id, item_kind, item_id, site_id, actor_user_id, subject_user_id, event, from_value, to_value)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
+    .bind(
+      crypto.randomUUID(),
+      e.kind,
+      e.itemId,
+      e.siteId,
+      e.actorUserId,
+      e.subjectUserId,
+      e.event,
+      e.fromValue ?? null,
+      e.toValue ?? null
+    );
+}
+
+export async function logWorkEvents(db: D1Database, events: WorkEventInput[]): Promise<void> {
+  if (events.length === 0) return;
+  await db.batch(events.map((e) => workEventStmt(db, e)));
+}
+
+/** Today's date in IST (the business's only timezone) as yyyy-mm-dd. */
+export function istTodayIso(): string {
+  return todayKeyKolkata();
+}
+
+/** Open urgent work for one staff member — the red count on their Assigned work tile. */
+export async function countUrgentWork(db: D1Database, userId: string): Promise<number> {
+  const row = await db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM todo_assignees JOIN todos ON todos.id = todo_assignees.todo_id
+          WHERE todo_assignees.user_id = ?1 AND todos.status = 'open' AND todos.urgent_at IS NOT NULL)
+       + (SELECT COUNT(*) FROM site_tasks
+          WHERE assigned_to_user_id = ?1 AND status = 'assigned' AND urgent_at IS NOT NULL) AS n`
+    )
+    .bind(userId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/** Minimal header for one work item — permission checks + audit context. */
+export interface WorkItemRef {
+  kind: WorkItemKind;
+  id: string;
+  site_id: string | null;
+  status: string;
+  urgent_at: string | null;
+  /** Current assignee ids (one for a site task, any number for a todo). */
+  assignee_ids: string[];
+}
+
+export async function getWorkItemRef(db: D1Database, kind: WorkItemKind, id: string): Promise<WorkItemRef | null> {
+  if (kind === "todo") {
+    const row = await db
+      .prepare(`SELECT id, site_id, status, urgent_at FROM todos WHERE id = ?`)
+      .bind(id)
+      .first<{ id: string; site_id: string | null; status: string; urgent_at: string | null }>();
+    if (!row) return null;
+    const { results } = await db
+      .prepare(`SELECT user_id FROM todo_assignees WHERE todo_id = ?`)
+      .bind(id)
+      .all<{ user_id: string }>();
+    return { kind, ...row, assignee_ids: (results ?? []).map((r) => r.user_id) };
+  }
+  const row = await db
+    .prepare(`SELECT id, site_id, status, urgent_at, assigned_to_user_id FROM site_tasks WHERE id = ?`)
+    .bind(id)
+    .first<{ id: string; site_id: string; status: string; urgent_at: string | null; assigned_to_user_id: string | null }>();
+  if (!row) return null;
+  return {
+    kind,
+    id: row.id,
+    site_id: row.site_id,
+    status: row.status,
+    urgent_at: row.urgent_at,
+    assignee_ids: row.assigned_to_user_id ? [row.assigned_to_user_id] : [],
+  };
+}
+
+/**
+ * The staff "Assigned work" list. Todos come through listMyOpenTodos so the
+ * same name/alias lazy-claim runs (a claimed todo is then schedulable, since
+ * scheduled_for lives on the todo_assignees row the claim creates).
+ */
+export async function listAssignedWork(db: D1Database, userId: string): Promise<WorkItem[]> {
+  const [todos, tasks, planRows, user] = await Promise.all([
+    listMyOpenTodos(db, userId),
+    listOpenSiteTasks(db, userId),
+    db
+      .prepare(
+        `SELECT todo_assignees.todo_id AS todo_id, todo_assignees.scheduled_for AS scheduled_for, todos.urgent_at AS urgent_at
+         FROM todo_assignees JOIN todos ON todos.id = todo_assignees.todo_id
+         WHERE todo_assignees.user_id = ? AND todos.status = 'open'`
+      )
+      .bind(userId)
+      .all<{ todo_id: string; scheduled_for: string | null; urgent_at: string | null }>(),
+    getUserById(db, userId),
+  ]);
+  const plan = new Map((planRows.results ?? []).map((r) => [r.todo_id, r]));
+  const items: WorkItem[] = [];
+  for (const td of todos) {
+    if (td.status !== "open") continue;
+    const p = plan.get(td.id);
+    items.push({
+      kind: "todo",
+      id: td.id,
+      title: td.text,
+      site_id: td.site_id,
+      site_name: td.site_name,
+      call_id: td.call_id,
+      client_name: td.client_name,
+      category: null,
+      due_date: td.due_date,
+      scheduled_for: p?.scheduled_for ?? null,
+      urgent_at: p?.urgent_at ?? null,
+      context: td.context ?? null,
+      assignee_user_id: userId,
+      assignee_name: user?.name ?? null,
+    });
+  }
+  for (const tk of tasks) {
+    items.push({
+      kind: "site_task",
+      id: tk.id,
+      title: tk.stage_label,
+      site_id: tk.site_id,
+      site_name: tk.site_name,
+      call_id: null,
+      client_name: null,
+      category: tk.category,
+      due_date: tk.due_date,
+      scheduled_for: tk.scheduled_for,
+      urgent_at: tk.urgent_at,
+      context: null,
+      assignee_user_id: userId,
+      assignee_name: tk.assignee_name,
+    });
+  }
+  return items;
+}
+
+/** Sets one assignee's planned day. Returns the previous value (for the audit). */
+export async function setWorkScheduledFor(
+  db: D1Database,
+  kind: WorkItemKind,
+  id: string,
+  userId: string,
+  date: string | null
+): Promise<{ previous: string | null }> {
+  if (kind === "todo") {
+    const prev = await db
+      .prepare(`SELECT scheduled_for FROM todo_assignees WHERE todo_id = ? AND user_id = ?`)
+      .bind(id, userId)
+      .first<{ scheduled_for: string | null }>();
+    await db
+      .prepare(`UPDATE todo_assignees SET scheduled_for = ? WHERE todo_id = ? AND user_id = ?`)
+      .bind(date, id, userId)
+      .run();
+    return { previous: prev?.scheduled_for ?? null };
+  }
+  const prev = await db
+    .prepare(`SELECT scheduled_for FROM site_tasks WHERE id = ? AND assigned_to_user_id = ?`)
+    .bind(id, userId)
+    .first<{ scheduled_for: string | null }>();
+  await db
+    .prepare(`UPDATE site_tasks SET scheduled_for = ? WHERE id = ? AND assigned_to_user_id = ?`)
+    .bind(date, id, userId)
+    .run();
+  return { previous: prev?.scheduled_for ?? null };
+}
+
+/**
+ * Admin urgent flag. Marking pins every current assignee's planned day to
+ * today (IST) — the item is due within 24h and staff can no longer move it.
+ * Clearing leaves the planned day where it is.
+ */
+export async function setWorkUrgent(
+  db: D1Database,
+  ref: WorkItemRef,
+  urgent: boolean,
+  actorUserId: string
+): Promise<void> {
+  const table = ref.kind === "todo" ? "todos" : "site_tasks";
+  const today = istTodayIso();
+  const stmts: D1PreparedStatement[] = [
+    urgent
+      ? db
+          .prepare(`UPDATE ${table} SET urgent_at = datetime('now'), urgent_by_user_id = ? WHERE id = ?`)
+          .bind(actorUserId, ref.id)
+      : db.prepare(`UPDATE ${table} SET urgent_at = NULL, urgent_by_user_id = NULL WHERE id = ?`).bind(ref.id),
+  ];
+  if (urgent) {
+    stmts.push(
+      ref.kind === "todo"
+        ? db.prepare(`UPDATE todo_assignees SET scheduled_for = ? WHERE todo_id = ?`).bind(today, ref.id)
+        : db.prepare(`UPDATE site_tasks SET scheduled_for = ? WHERE id = ?`).bind(today, ref.id)
+    );
+  }
+  const subjects = ref.assignee_ids.length ? ref.assignee_ids : [null];
+  for (const subject of subjects) {
+    stmts.push(
+      workEventStmt(db, {
+        kind: ref.kind,
+        itemId: ref.id,
+        siteId: ref.site_id,
+        actorUserId,
+        subjectUserId: subject,
+        event: urgent ? "marked_urgent" : "urgent_cleared",
+      })
+    );
+  }
+  await db.batch(stmts);
+}
+
+/**
+ * Passes one assignee's share of the work to another staff member. For a
+ * todo, only `fromUserId`'s row is swapped (co-assignees keep theirs); for a
+ * site task, the single assignee changes. The receiver starts unplanned
+ * unless the item is urgent, in which case it lands on today.
+ */
+export async function handOffWork(
+  db: D1Database,
+  ref: WorkItemRef,
+  fromUserId: string,
+  toUserId: string,
+  actorUserId: string
+): Promise<void> {
+  const planned = ref.urgent_at ? istTodayIso() : null;
+  const stmts: D1PreparedStatement[] =
+    ref.kind === "todo"
+      ? [
+          db.prepare(`DELETE FROM todo_assignees WHERE todo_id = ? AND user_id = ?`).bind(ref.id, fromUserId),
+          db
+            .prepare(
+              `INSERT OR IGNORE INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at, scheduled_for)
+               VALUES (?, ?, ?, datetime('now'), ?)`
+            )
+            .bind(ref.id, toUserId, actorUserId, planned),
+        ]
+      : [
+          db
+            .prepare(
+              `UPDATE site_tasks SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now'),
+                                     scheduled_for = ?
+               WHERE id = ?`
+            )
+            .bind(toUserId, actorUserId, planned, ref.id),
+        ];
+  stmts.push(
+    workEventStmt(db, {
+      kind: ref.kind,
+      itemId: ref.id,
+      siteId: ref.site_id,
+      actorUserId,
+      subjectUserId: fromUserId,
+      event: "handed_off",
+      toValue: toUserId,
+    }),
+    workEventStmt(db, {
+      kind: ref.kind,
+      itemId: ref.id,
+      siteId: ref.site_id,
+      actorUserId,
+      subjectUserId: toUserId,
+      event: "received",
+      fromValue: fromUserId,
+    })
+  );
+  await db.batch(stmts);
+  if (ref.site_id) await touchSiteActivity(db, ref.site_id, { source: "task", refId: ref.id });
+}
+
+export interface RosterWorkItem {
+  kind: WorkItemKind;
+  id: string;
+  title: string;
+  site_name: string | null;
+  call_id: string | null;
+  due_date: string | null;
+  scheduled_for: string | null;
+  urgent_at: string | null;
+  context: string | null;
+  user_id: string;
+}
+
+export interface StaffRosterGrid {
+  staff: { id: string; name: string }[];
+  /** Planned on or before `to` (earlier = overdue plan), plus every urgent item. */
+  items: RosterWorkItem[];
+  /** Open work per staff member with no planned day yet. */
+  unscheduled_counts: Record<string, number>;
+}
+
+/**
+ * Admin roster grid: staff × days. Reads only claimed assignments
+ * (todo_assignees), not the name/alias matches listMyOpenTodos claims lazily
+ * — those enter the grid the first time that staff member opens Assigned work.
+ */
+export async function getStaffRosterGrid(db: D1Database, to: string): Promise<StaffRosterGrid> {
+  const [staffRes, todoRes, taskRes, unTodoRes, unTaskRes] = await Promise.all([
+    db
+      .prepare(`SELECT id, name FROM users WHERE role = 'staff' AND disabled_at IS NULL ORDER BY name ASC`)
+      .all<{ id: string; name: string }>(),
+    db
+      .prepare(
+        `SELECT 'todo' AS kind, todos.id AS id, todos.text AS title, sites.name AS site_name,
+                todos.call_id AS call_id, todos.due_date AS due_date,
+                todo_assignees.scheduled_for AS scheduled_for, todos.urgent_at AS urgent_at,
+                todos.context AS context, todo_assignees.user_id AS user_id
+         FROM todo_assignees
+         JOIN todos ON todos.id = todo_assignees.todo_id
+         JOIN users ON users.id = todo_assignees.user_id AND users.role = 'staff'
+         LEFT JOIN sites ON sites.id = todos.site_id
+         WHERE todos.status = 'open'
+           AND (todo_assignees.scheduled_for <= ? OR todos.urgent_at IS NOT NULL)`
+      )
+      .bind(to)
+      .all<RosterWorkItem>(),
+    db
+      .prepare(
+        `SELECT 'site_task' AS kind, site_tasks.id AS id, workflow_stages.label AS title, sites.name AS site_name,
+                NULL AS call_id, site_tasks.due_date AS due_date,
+                site_tasks.scheduled_for AS scheduled_for, site_tasks.urgent_at AS urgent_at,
+                NULL AS context, site_tasks.assigned_to_user_id AS user_id
+         FROM site_tasks
+         JOIN sites ON sites.id = site_tasks.site_id
+         JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+         JOIN users ON users.id = site_tasks.assigned_to_user_id AND users.role = 'staff'
+         WHERE site_tasks.status = 'assigned'
+           AND (site_tasks.scheduled_for <= ? OR site_tasks.urgent_at IS NOT NULL)`
+      )
+      .bind(to)
+      .all<RosterWorkItem>(),
+    db
+      .prepare(
+        `SELECT todo_assignees.user_id AS user_id, COUNT(*) AS n
+         FROM todo_assignees JOIN todos ON todos.id = todo_assignees.todo_id
+         WHERE todos.status = 'open' AND todo_assignees.scheduled_for IS NULL AND todos.urgent_at IS NULL
+         GROUP BY todo_assignees.user_id`
+      )
+      .all<{ user_id: string; n: number }>(),
+    db
+      .prepare(
+        `SELECT assigned_to_user_id AS user_id, COUNT(*) AS n
+         FROM site_tasks
+         WHERE status = 'assigned' AND scheduled_for IS NULL AND urgent_at IS NULL
+         GROUP BY assigned_to_user_id`
+      )
+      .all<{ user_id: string; n: number }>(),
+  ]);
+  const unscheduled: Record<string, number> = {};
+  for (const r of [...(unTodoRes.results ?? []), ...(unTaskRes.results ?? [])]) {
+    if (!r.user_id) continue;
+    unscheduled[r.user_id] = (unscheduled[r.user_id] ?? 0) + r.n;
+  }
+  return {
+    staff: staffRes.results ?? [],
+    items: [...(todoRes.results ?? []), ...(taskRes.results ?? [])],
+    unscheduled_counts: unscheduled,
+  };
+}
+
+export interface WorkEventRow {
+  /** rowid — insertion order, the paging cursor. */
+  seq: number;
+  id: string;
+  item_kind: WorkItemKind;
+  item_id: string;
+  item_title: string | null;
+  site_name: string | null;
+  actor_name: string | null;
+  subject_user_id: string | null;
+  event: WorkEventType;
+  from_value: string | null;
+  to_value: string | null;
+  /** Resolved names when from/to hold a user id (handed_off / received / assigned). */
+  from_user_name: string | null;
+  to_user_name: string | null;
+  created_at: string;
+}
+
+/** One staff member's audit trail, newest first. Paged by rowid (`seq`)
+ *  rather than created_at, which is second-resolution — a hand-off writes
+ *  several rows in the same second. */
+export async function listWorkEventsForUser(
+  db: D1Database,
+  userId: string,
+  opts: { limit?: number; beforeSeq?: number | null } = {}
+): Promise<WorkEventRow[]> {
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  const beforeClause = opts.beforeSeq != null ? `AND work_events.rowid < ?` : "";
+  const binds: unknown[] = [userId];
+  if (opts.beforeSeq != null) binds.push(opts.beforeSeq);
+  binds.push(limit);
+  const { results } = await db
+    .prepare(
+      `SELECT work_events.rowid AS seq, work_events.id AS id, work_events.item_kind AS item_kind, work_events.item_id AS item_id,
+              COALESCE(todos.text, workflow_stages.label) AS item_title,
+              sites.name AS site_name,
+              actor.name AS actor_name,
+              work_events.subject_user_id AS subject_user_id,
+              work_events.event AS event,
+              work_events.from_value AS from_value,
+              work_events.to_value AS to_value,
+              from_user.name AS from_user_name,
+              to_user.name AS to_user_name,
+              work_events.created_at AS created_at
+       FROM work_events
+       LEFT JOIN todos ON work_events.item_kind = 'todo' AND todos.id = work_events.item_id
+       LEFT JOIN site_tasks ON work_events.item_kind = 'site_task' AND site_tasks.id = work_events.item_id
+       LEFT JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+       LEFT JOIN sites ON sites.id = work_events.site_id
+       LEFT JOIN users AS actor ON actor.id = work_events.actor_user_id
+       LEFT JOIN users AS from_user ON from_user.id = work_events.from_value
+       LEFT JOIN users AS to_user ON to_user.id = work_events.to_value
+       WHERE work_events.subject_user_id = ? ${beforeClause}
+       ORDER BY work_events.rowid DESC
+       LIMIT ?`
+    )
+    .bind(...binds)
+    .all<WorkEventRow>();
+  return results ?? [];
 }

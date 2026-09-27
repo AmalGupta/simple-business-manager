@@ -32,7 +32,9 @@ export async function extractCall(input: ExtractInput): Promise<CallExtraction> 
     headers: anthropicRequestHeaders(input.apiKey),
     body: JSON.stringify({
       model: input.model,
-      max_tokens: 2000,
+      // v8 adds a context note per todo; a dense dispatch call can run past
+      // 2000 output tokens and truncate the tool input mid-JSON.
+      max_tokens: 4000,
       system: cachedSystemPrompt(ACTIVE.system, input.model),
       tools: [ACTIVE.tool],
       tool_choice: { type: "tool", name: "record_call" },
@@ -153,6 +155,7 @@ function normalizeExtraction(input: unknown, entries: DiarizedEntry[] = []): Cal
         owner: t.owner as string,
         due_date: typeof t.due_date === "string" ? t.due_date : undefined,
         ...(site ? { site } : {}),
+        ...(typeof t.context === "string" && t.context.trim() ? { context: t.context.trim() } : {}),
       };
     });
 

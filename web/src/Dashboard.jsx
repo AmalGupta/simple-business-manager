@@ -15,14 +15,15 @@ import { WorkflowCategorySiteList } from "./views/home/WorkflowCategorySiteList.
 import { SitesAttentionTile } from "./views/home/SitesAttentionTile.jsx";
 import { EscalationsTile } from "./views/home/EscalationsTile.jsx";
 import { StaffHomePanel } from "./views/home/StaffHomePanel.jsx";
+import { AssignedWorkView } from "./views/work/AssignedWorkView.jsx";
+import { StaffRosterView } from "./views/work/StaffRosterView.jsx";
+import { StaffRosterTile } from "./views/work/StaffRosterTile.jsx";
+import { StaffAuditView } from "./views/work/StaffAuditView.jsx";
 import { HomeDashboardTabs } from "./views/home/HomeDashboardTabs.jsx";
-import { PendingWorkView } from "./views/home/PendingWorkView.jsx";
-import { MyScheduleView } from "./views/home/MyScheduleView.jsx";
 import { StreakWall } from "./views/calls/StreakWall.jsx";
 import { CallsPageView } from "./views/calls/CallsPageView.jsx";
 import { CallDetail } from "./views/calls/CallDetail.jsx";
 import { OpenTodosView } from "./views/calls/OpenTodosView.jsx";
-import { MyOpenTodosView } from "./views/calls/MyOpenTodosView.jsx";
 import { StaffDirectoryView } from "./views/staff/StaffDirectoryView.jsx";
 import { CallerTile } from "./views/callers/CallerTile.jsx";
 import { CallersDirectoryView } from "./views/callers/CallersDirectoryView.jsx";
@@ -100,6 +101,7 @@ export default function SimpleBusinessManager() {
   const [myOpenTodos, setMyOpenTodos] = useState([]);
   /** Home tile count — from summary (read-only); list loads on My call tasks. */
   const [myOpenTodosCount, setMyOpenTodosCount] = useState(0);
+  const [urgentWorkCount, setUrgentWorkCount] = useState(0);
   /** Admin home bookmark tabs — staff with ≥1 open call todo. */
   const [staffWithOpenTodos, setStaffWithOpenTodos] = useState([]);
   /** Selected admin-home tab: "admin" or a staff user id. */
@@ -181,6 +183,7 @@ export default function SimpleBusinessManager() {
     setOpenSiteTasks([]);
     setMyOpenTodos([]);
     setMyOpenTodosCount(0);
+    setUrgentWorkCount(0);
     setStaffWithOpenTodos([]);
     setHomeTab("admin");
     setStaffPanel(null);
@@ -202,6 +205,7 @@ export default function SimpleBusinessManager() {
       setEscalations(summary.escalations ?? []);
       setStaffRoster(summary.staff_roster ?? []);
       setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
+      setUrgentWorkCount(summary.urgent_work_count ?? 0);
     };
 
     if (me.role === "staff") {
@@ -394,6 +398,7 @@ export default function SimpleBusinessManager() {
                 myOpenTodosCount:
                   summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0,
                 sites: summary.sites ?? [],
+                urgentWorkCount: summary.urgent_work_count ?? 0,
               });
             })
             .catch((err) => console.error("[sbm] failed to refresh staff panel after todo mutate", err));
@@ -471,6 +476,7 @@ export default function SimpleBusinessManager() {
           myOpenTodosCount:
             staffSum.my_open_todos_count ?? staffSum.my_open_todos?.length ?? 0,
           sites: staffSum.sites ?? [],
+          urgentWorkCount: staffSum.urgent_work_count ?? 0,
         });
       }
     } catch (err) {
@@ -512,6 +518,32 @@ export default function SimpleBusinessManager() {
     }
   }, []);
 
+  /* After a change on Assigned work (done / pass on / urgent), refresh the
+     tile counts for whoever's work it was — the staff member's own home, or
+     the admin's staff bookmark panel. */
+  const refreshWorkCounts = useCallback((forUserId) => {
+    fetchDashboardSummary(forUserId ? { forUserId } : {})
+      .then((summary) => {
+        if (forUserId) {
+          setStaffPanel((prev) =>
+            prev?.userId === forUserId
+              ? {
+                  ...prev,
+                  openSiteTasks: summary.open_site_tasks ?? [],
+                  myOpenTodosCount: summary.my_open_todos_count ?? 0,
+                  urgentWorkCount: summary.urgent_work_count ?? 0,
+                }
+              : prev
+          );
+          return;
+        }
+        setOpenSiteTasks(summary.open_site_tasks ?? []);
+        setMyOpenTodosCount(summary.my_open_todos_count ?? 0);
+        setUrgentWorkCount(summary.urgent_work_count ?? 0);
+      })
+      .catch((err) => console.error("[sbm] failed to refresh work counts", err));
+  }, []);
+
   /* Load staff-scoped summary when admin selects a staff home bookmark. */
   useEffect(() => {
     if (!me || me.role === "staff") return;
@@ -534,6 +566,7 @@ export default function SimpleBusinessManager() {
           myOpenTodosCount:
             summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0,
           sites: summary.sites ?? [],
+          urgentWorkCount: summary.urgent_work_count ?? 0,
         }));
       })
       .catch((err) => {
@@ -547,42 +580,6 @@ export default function SimpleBusinessManager() {
       cancelled = true;
     };
   }, [me, homeTab]);
-
-  /* Full personal-queue list (with claim/backfill) only when opening My call
-     tasks or My schedule — not on every home tile load. */
-  useEffect(() => {
-    if (!me) return;
-    if (view.name !== "my-open-todos" && view.name !== "my-schedule") return;
-    const forUserId = view.forUserId || null;
-    let cancelled = false;
-    fetchMyOpenTodos(forUserId ? { forUserId } : {})
-      .then((todos) => {
-        if (cancelled) return;
-        if (forUserId) {
-          /* Seed or merge even if staffPanel summary has not landed yet —
-             otherwise a fast list response was dropped (prev null) and the
-             later summary left myOpenTodos stuck at []. */
-          setStaffPanel((prev) =>
-            prev?.userId === forUserId
-              ? { ...prev, myOpenTodos: todos, myOpenTodosCount: todos.length }
-              : {
-                  userId: forUserId,
-                  openSiteTasks: [],
-                  myOpenTodos: todos,
-                  myOpenTodosCount: todos.length,
-                  sites: [],
-                }
-          );
-        } else {
-          setMyOpenTodos(todos);
-          setMyOpenTodosCount(todos.length);
-        }
-      })
-      .catch((err) => console.error("[sbm] failed to load my open todos", err));
-    return () => {
-      cancelled = true;
-    };
-  }, [me, view.name, view.forUserId]);
 
   /* If the selected staff no longer has open todos, fall back to Admin. */
   useEffect(() => {
@@ -1042,70 +1039,52 @@ export default function SimpleBusinessManager() {
 
         <StaffHomePanel
           openSiteTasks={openSiteTasks}
-          myOpenTodos={myOpenTodos}
           myOpenTodosCount={myOpenTodosCount}
+          urgentWorkCount={urgentWorkCount}
           sites={allSites}
           complaintsRefreshKey={complaintsRefreshKey}
-          onOpenPendingWork={() => setView({ name: "pending-work", from: { name: "staff-home" } })}
-          onOpenSchedule={() => setView({ name: "my-schedule", from: { name: "staff-home" } })}
+          onOpenAssignedWork={() => setView({ name: "assigned-work", from: { name: "staff-home" } })}
           onOpenSiteVisit={() => setView({ name: "site-visit-sites", from: { name: "staff-home" } })}
           onOpenComplaints={() => setView({ name: "complaints-home", from: { name: "staff-home" } })}
-          onOpenMyOpenTodos={() => setView({ name: "my-open-todos", from: { name: "staff-home" } })}
-          onOpenSitesDirectory={() => setView({ name: "sites-directory", from: { name: "staff-home" } })}
         />
       </>
     );
 
-  if (view.name === "pending-work") {
+  if (view.name === "assigned-work") {
     const scopeId = view.forUserId || null;
-    const tasks =
-      scopeId && staffPanel?.userId === scopeId ? staffPanel.openSiteTasks : openSiteTasks;
     return shellInStaffBookmark(
-      <PendingWorkView
-        tasks={tasks}
+      <AssignedWorkView
+        forUserId={scopeId}
+        selfId={me.id}
+        canAdmin={me.role !== "staff"}
         onBack={() => setView(view.from ?? homeView)}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
+        onOpenCall={(id) => setView({ name: "call", id, from: view })}
+        onChanged={() => refreshWorkCounts(scopeId)}
       />
     );
   }
 
-  if (view.name === "my-schedule") {
-    const scopeId = view.forUserId || null;
-    const todos =
-      scopeId && staffPanel?.userId === scopeId ? staffPanel.myOpenTodos : myOpenTodos;
-    const tasks =
-      scopeId && staffPanel?.userId === scopeId ? staffPanel.openSiteTasks : openSiteTasks;
-    return shellInStaffBookmark(
-      <MyScheduleView
-        todos={todos}
-        siteTasks={tasks}
+  if (view.name === "staff-roster")
+    return shell(
+      <StaffRosterView
         onBack={() => setView(view.from ?? homeView)}
-        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-schedule", forUserId: scopeId } })}
+        onOpenStaff={(staff) => setView({ name: "staff-audit", staff, from: view })}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
+        onOpenCall={(id) => setView({ name: "call", id, from: view })}
       />
     );
-  }
 
-  if (view.name === "my-open-todos") {
-    const scopeId = view.forUserId || null;
-    const todos =
-      scopeId && staffPanel?.userId === scopeId ? staffPanel.myOpenTodos : myOpenTodos;
-    const manage = me.role !== "staff";
-    return shellInStaffBookmark(
-      <MyOpenTodosView
-        todos={todos}
+  if (view.name === "staff-audit")
+    return shell(
+      <StaffAuditView
+        staff={view.staff}
         onBack={() => setView(view.from ?? homeView)}
-        onOpenCall={(id) => setView({ name: "call", id, from: { name: "my-open-todos", forUserId: scopeId } })}
-        onToggle={onToggle}
-        busyIds={busyIds}
-        canManage={manage}
-        staffRoster={staffRoster}
-        currentUser={me}
-        onAssign={manage ? onAssignTodo : undefined}
-        onTodoSiteAssigned={manage ? onTodoSiteAssigned : undefined}
+        onOpenAssignedWork={() =>
+          setView({ name: "assigned-work", forUserId: view.staff.id, from: view })
+        }
       />
     );
-  }
 
   // --- Staff field workflow (migration 0016): site visit -> category ->
   // installation checklist, and the site-level complaint form. ---
@@ -1252,28 +1231,19 @@ export default function SimpleBusinessManager() {
         ) : staffPanel?.userId === homeTab ? (
           <StaffHomePanel
             openSiteTasks={staffPanel.openSiteTasks}
-            myOpenTodos={staffPanel.myOpenTodos}
             myOpenTodosCount={staffPanel.myOpenTodosCount}
+            urgentWorkCount={staffPanel.urgentWorkCount}
             sites={staffPanel.sites}
             complaintsRefreshKey={complaintsRefreshKey}
             forUserId={homeTab}
-            onOpenPendingWork={() =>
-              setView({ name: "pending-work", forUserId: homeTab, from: { name: "home" } })
-            }
-            onOpenSchedule={() =>
-              setView({ name: "my-schedule", forUserId: homeTab, from: { name: "home" } })
+            onOpenAssignedWork={() =>
+              setView({ name: "assigned-work", forUserId: homeTab, from: { name: "home" } })
             }
             onOpenSiteVisit={() =>
               setView({ name: "site-visit-sites", forUserId: homeTab, from: { name: "home" } })
             }
             onOpenComplaints={() =>
               setView({ name: "complaints-home", forUserId: homeTab, from: { name: "home" } })
-            }
-            onOpenMyOpenTodos={() =>
-              setView({ name: "my-open-todos", forUserId: homeTab, from: { name: "home" } })
-            }
-            onOpenSitesDirectory={() =>
-              setView({ name: "sites-directory", forUserId: homeTab, from: { name: "home" } })
             }
           />
         ) : (
@@ -1319,6 +1289,9 @@ export default function SimpleBusinessManager() {
         />
         {(me.role === "admin" || me.role === "superadmin") && (
           <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <StaffRosterTile staffCount={staffRoster.length} onOpen={() => setView({ name: "staff-roster", from: { name: "home" } })} />
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
           <CallerTile count={callersCount} onOpen={() => setView({ name: "callers-directory" })} />

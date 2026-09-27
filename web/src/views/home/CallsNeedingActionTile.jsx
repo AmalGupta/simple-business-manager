@@ -5,8 +5,7 @@ import { Card } from "../../components/Card.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
 
 /* Admin home — every call with an AI-generated todo list not yet resolved.
-   Opens the Calls Needing Action carousel. Same tile pattern as
-   PendingWorkTile.jsx. */
+   Opens the Calls Needing Action carousel. */
 export function CallsNeedingActionTile({ count, onOpen }) {
   return (
     <button
