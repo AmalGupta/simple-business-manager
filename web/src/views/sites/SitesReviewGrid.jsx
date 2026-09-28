@@ -209,9 +209,13 @@ const DECISION_LOOK = {
   null: { caption: "Undecided", track: t.white, border: t.frost, knob: t.frost, captionColor: t.edge2 },
 };
 
-function ValidSwitch({ site, decision, onChoose }) {
+/* Marking a site Valid needs a mapped contact with a number (the server
+   refuses the confirm otherwise). Without one, the switch opens the
+   contacts picker instead of flipping. */
+function ValidSwitch({ site, decision, onChoose, onNeedContact }) {
   const look = DECISION_LOOK[decision ?? "null"];
   const on = decision === "Y";
+  const canConfirm = site.is_confirmed === "Y" || (site.contacts ?? []).some((c) => c.phone);
   return (
     <span style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", minWidth: 0 }}>
       <button
@@ -219,7 +223,14 @@ function ValidSwitch({ site, decision, onChoose }) {
         role="switch"
         aria-checked={on}
         aria-label={`${site.name} is valid`}
-        onClick={() => onChoose(site.id, on ? "N" : "Y")}
+        title={!on && !canConfirm ? "Map a contact with a phone number first" : undefined}
+        onClick={() => {
+          if (!on && !canConfirm) {
+            onNeedContact?.(site);
+            return;
+          }
+          onChoose(site.id, on ? "N" : "Y");
+        }}
         style={{
           flexShrink: 0,
           display: "flex",
@@ -502,7 +513,9 @@ export function SitesReviewGrid({
          header brings everything still needing a judgement to the top. */
       valueGetter: (p) => p.data?.decision ?? "",
       cellRenderer: (p) =>
-        p.data?.id ? <ValidSwitch site={p.data} decision={p.data.decision} onChoose={onChoose} /> : null,
+        p.data?.id ? (
+          <ValidSwitch site={p.data} decision={p.data.decision} onChoose={onChoose} onNeedContact={openContacts} />
+        ) : null,
     };
 
     const notesCol = {
@@ -731,7 +744,7 @@ export function SitesReviewGrid({
              here and nowhere else: this is the screen where a name the
              extraction misheard gets corrected. */
           title={detailsSite.name}
-          intro="Correct the name if the call got it wrong. Saving marks this site valid and adds it to the confirmed sites list. Add contact opens the contacts picker."
+          intro="Correct the name if the call got it wrong. Map a contact with a phone number (Add contact), then saving marks this site valid and adds it to the confirmed sites list."
           saveLabel="Save site"
           extraPatch={{ is_confirmed: "Y" }}
           editableName

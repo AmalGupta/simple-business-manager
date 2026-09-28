@@ -21,7 +21,9 @@ ModuleRegistry.registerModules([AllCommunityModule]);
    "Most likely matches" (name + phone + tick). When the identified
    contact isn't in the directory — or only exists as a digits-only
    Cube ACR name — "Add a new contact" creates or renames the directory
-   row, then ticks it for association. The full directory sits below.
+   row, then ticks it for association. A phone number is required, and a
+   number already in the directory maps that contact instead of creating a
+   duplicate (POST /api/callers 409 + existing). The full directory sits below.
 
    Clients only. The directory is a ~3.3k–4k-row phone-contacts import
    whose other categories are staff, family and spam; none of those is a
@@ -283,7 +285,13 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
       setCreateError("Use a person's name, not a phone number.");
       return;
     }
+    /* A site contact must be a mappable person: no number, no contact.
+       Name-only rows are exactly what duplicated the directory. */
     const phone = newPhone.trim() || null;
+    if (!phone) {
+      setCreateError("Add their phone number — a site contact needs one.");
+      return;
+    }
     setCreating(true);
     setCreateError("");
     try {
@@ -293,7 +301,13 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
            than fighting UNIQUE(phone) with a second insert. */
         saved = await patchCaller(offer.existingCallerId, { name, phone });
       } else {
-        saved = await postCreateCaller({ name, phone, category: "client" });
+        try {
+          saved = await postCreateCaller({ name, phone, category: "client" });
+        } catch (err) {
+          // Number already in the directory → map that contact, don't duplicate.
+          if (err.status !== 409 || !err.existing) throw err;
+          saved = err.existing;
+        }
       }
       setMatchCandidates((current) => {
         const list = current ?? [];
@@ -514,7 +528,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
                     <input
                       value={newPhone}
                       onChange={(e) => setNewPhone(e.target.value)}
-                      placeholder="Phone (optional)"
+                      placeholder="Phone number"
                       aria-label="New contact phone"
                       style={{ ...TEXT_INPUT_STYLE, flex: 1, minWidth: 140 }}
                     />

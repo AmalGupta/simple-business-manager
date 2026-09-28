@@ -38,6 +38,8 @@ import {
   type UserCustomization,
   type CustomizationKey,
   getTodoRouterUserId,
+  linkStaffUserContact,
+  normalizeCallerPhone,
 } from "@sbm/core";
 import {
   clearSessionCookieHeader,
@@ -260,8 +262,9 @@ export async function handleUpdateMyPhone(request: Request, env: Env): Promise<R
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
   const phone = typeof record.phone === "string" && record.phone.trim() ? record.phone.trim() : null;
 
-  await updateUserPhone(env.DB, session.user_id, phone);
-  return json({ phone });
+  await updateUserPhone(env.DB, session.user_id, normalizeCallerPhone(phone));
+  await linkStaffUserContact(env.DB, session.user_id);
+  return json({ phone: normalizeCallerPhone(phone) });
 }
 
 /** Self-service PIN reset — session-gated, requires the current PIN (not the admin key). */
@@ -315,7 +318,8 @@ export async function handleAdminCreateUser(request: Request, env: Env): Promise
 
   const { hash, salt } = await hashPin(env, pin);
   const pinEncrypted = await encryptPin(env, pin);
-  const user = await createUser(env.DB, name, hash, salt, role, phone, pinEncrypted);
+  const user = await createUser(env.DB, name, hash, salt, role, normalizeCallerPhone(phone), pinEncrypted);
+  await linkStaffUserContact(env.DB, user.id);
   return json({ id: user.id, name: user.name, role: user.role }, 201);
 }
 
@@ -387,7 +391,9 @@ export async function handleCreateStaff(request: Request, env: Env): Promise<Res
   const pin = generateRandomPin();
   const { hash, salt } = await hashPin(env, pin);
   const pinEncrypted = await encryptPin(env, pin);
-  const user = await createUser(env.DB, name, hash, salt, "staff", phone, pinEncrypted);
+  const user = await createUser(env.DB, name, hash, salt, "staff", normalizeCallerPhone(phone), pinEncrypted);
+  // The login and the contact carrying its number are one person.
+  await linkStaffUserContact(env.DB, user.id);
   return json({ id: user.id, name: user.name, phone: user.phone, role: user.role, pin }, 201);
 }
 
@@ -408,8 +414,9 @@ export async function handleUpdateStaffPhone(request: Request, env: Env, id: str
   const user = await getUserById(env.DB, id);
   if (!user) return json({ error: "not found" }, 404);
 
-  await updateUserPhone(env.DB, id, phone);
-  return json({ id, phone });
+  await updateUserPhone(env.DB, id, normalizeCallerPhone(phone));
+  await linkStaffUserContact(env.DB, id);
+  return json({ id, phone: normalizeCallerPhone(phone) });
 }
 
 /** POST /api/staff/:id/reset-pin — new PIN, existing sessions revoked (same lost/compromised-device reasoning as handleAdminRevokeSessions). */
