@@ -85,7 +85,7 @@ function PassOnPicker({ roster, selfId, busy, onPick, onCancel }) {
   );
 }
 
-function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, onSchedule, onDone, onHandOff, onUrgent, onOpenSite, onOpenCall }) {
+function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, onSchedule, onDone, onHandOff, onOpenSite, onOpenCall }) {
   const [passing, setPassing] = useState(false);
   const urgent = Boolean(item.urgent_at);
   const deadline = urgent ? urgentDeadline(item.urgent_at) : null;
@@ -177,20 +177,6 @@ function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, onSchedul
         >
           <ArrowRightLeft size={14} /> Pass on
         </button>
-        {canAdmin && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => onUrgent(item, !urgent)}
-            style={{
-              ...SMALL_SECONDARY_BUTTON_STYLE,
-              gridColumn: "1 / -1",
-              minHeight: 44,
-            }}
-          >
-            {urgent ? "Clear urgent" : "Mark urgent"}
-          </button>
-        )}
       </div>
 
       {passing && (
@@ -225,8 +211,8 @@ function Section({ label, items, ...rowProps }) {
 
 /* Staff "Assigned work" — every open call todo and site task assigned to
    one staff member. Plan each onto a day, mark done, or pass it on.
-   Urgent items (admin-flagged) can't be moved. Admin viewing a staff
-   bookmark (`forUserId`) can also mark/clear urgent. */
+   Urgent items (flagged by an admin while routing the call) can't be moved
+   by staff. */
 export function AssignedWorkView({ forUserId = null, selfId, canAdmin = false, onBack, onOpenSite, onOpenCall, onChanged }) {
   const [items, setItems] = useState(null);
   const [error, setError] = useState(null);
@@ -301,11 +287,6 @@ export function AssignedWorkView({ forUserId = null, selfId, canAdmin = false, o
       withBusy(item, async () => {
         await postWorkHandoff(item.kind, item.id, toUserId, { forUserId });
         removeItem(item);
-      }),
-    onUrgent: (item, urgent) =>
-      withBusy(item, async () => {
-        await patchWork(item.kind, item.id, { urgent });
-        await load();
       }),
   };
 
