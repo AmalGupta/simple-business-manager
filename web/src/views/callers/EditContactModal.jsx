@@ -29,7 +29,7 @@ const LABEL = {
  * Edit one Contacts directory row: name, phone, type, linked confirmed sites,
  * and aliases (multiple).
  */
-export function EditContactModal({ caller, onClose, onSaved, onRequestPromote }) {
+export function EditContactModal({ caller, onClose, onSaved, onRequestPromote, onRequestNumberOrMerge }) {
   const [name, setName] = useState(caller.name ?? "");
   const [phone, setPhone] = useState(caller.phone ?? "");
   /* Spam isn't pickable, but a spam contact must keep it or Save would silently un-spam it. */
@@ -212,7 +212,21 @@ export function EditContactModal({ caller, onClose, onSaved, onRequestPromote })
           placeholder="Phone"
           style={TEXT_INPUT_STYLE}
         />
+        {(caller.extra_phones ?? []).length > 0 && (
+          <span style={{ fontSize: 12, color: t.edge2 }}>
+            Also: {caller.extra_phones.join(", ")} (from a merge)
+          </span>
+        )}
       </label>
+      {onRequestNumberOrMerge && (
+        <button
+          type="button"
+          onClick={() => onRequestNumberOrMerge(caller)}
+          style={{ all: "unset", cursor: "pointer", fontSize: 12, fontWeight: 600, color: t.accent }}
+        >
+          {caller.phone ? "Add another number or merge…" : "Add number or merge…"}
+        </button>
+      )}
 
       <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         <span style={LABEL}>Type</span>

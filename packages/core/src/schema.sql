@@ -149,6 +149,29 @@ CREATE INDEX idx_site_activity_summary_at ON site_activity_summary (last_activit
 -- "Associated sites" on a caller — migration 0022. Mirrors call_sites
 -- exactly. Schema only for now; nothing populates it yet, linking logic is
 -- a later feature.
+-- migration 0048: ADDITIONAL numbers a contact picked up by being merged;
+-- callers.phone stays the main number. A number lives in exactly one place
+-- across callers.phone and caller_phones (findCallerByPhone checks both).
+CREATE TABLE caller_phones (
+  phone      TEXT PRIMARY KEY,
+  caller_id  TEXT NOT NULL REFERENCES callers(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_caller_phones_caller ON caller_phones(caller_id);
+
+-- migration 0048: one row per contact merge, with a JSON snapshot of the
+-- contact folded in (row, numbers, aliases, site links, call ids).
+CREATE TABLE caller_merges (
+  id                TEXT PRIMARY KEY,
+  survivor_id       TEXT NOT NULL REFERENCES callers(id),
+  merged_caller_id  TEXT NOT NULL,
+  merged_snapshot   TEXT NOT NULL,
+  calls_moved       INTEGER NOT NULL,
+  merged_by_user_id TEXT REFERENCES users(id),
+  created_at        TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_caller_merges_survivor ON caller_merges(survivor_id, created_at DESC);
+
 CREATE TABLE caller_sites (
   caller_id   TEXT NOT NULL REFERENCES callers(id),
   site_id     TEXT NOT NULL REFERENCES sites(id),

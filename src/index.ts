@@ -85,6 +85,9 @@ import {
   handleDeleteCallerAlias,
   handlePromoteCallerStaff,
   handleConfirmCallerStaffPromotion,
+  handleAssociateCallerPhone,
+  handleMergeCallers,
+  handleListSameNameCallers,
 } from "./handlers/callers";
 import { handleGetSiteContactProposals, handlePostSiteContactMappings } from "./handlers/maintenance";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
@@ -548,6 +551,18 @@ export default {
     }
     if (url.pathname === "/api/callers" && request.method === "POST") {
       return handleCreateCaller(request, env);
+    }
+    // Contact merge + multiple numbers (migration 0048). Before the
+    // /api/callers/:id matcher below so "merge" / "same-name" aren't read as ids.
+    if (url.pathname === "/api/callers/same-name" && request.method === "GET") {
+      return handleListSameNameCallers(request, env);
+    }
+    if (url.pathname === "/api/callers/merge" && request.method === "POST") {
+      return handleMergeCallers(request, env);
+    }
+    const callerPhoneMatch = url.pathname.match(/^\/api\/callers\/([^/]+)\/phone$/);
+    if (callerPhoneMatch && request.method === "POST") {
+      return handleAssociateCallerPhone(request, env, callerPhoneMatch[1]);
     }
     const callerPromoteMatch = url.pathname.match(/^\/api\/callers\/([^/]+)\/promote-staff$/);
     if (callerPromoteMatch && request.method === "POST") {
