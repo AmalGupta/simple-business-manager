@@ -21,6 +21,7 @@ import { StaffRosterTile } from "./views/work/StaffRosterTile.jsx";
 import { StaffAuditView } from "./views/work/StaffAuditView.jsx";
 import { TaskAuditTile } from "./views/work/TaskAuditTile.jsx";
 import { TaskAuditView } from "./views/work/TaskAuditView.jsx";
+import { TaskTimelineCard } from "./views/work/TaskTimelineCard.jsx";
 import { HomeDashboardTabs } from "./views/home/HomeDashboardTabs.jsx";
 import { StreakWall } from "./views/calls/StreakWall.jsx";
 import { CallsPageView } from "./views/calls/CallsPageView.jsx";
@@ -799,6 +800,15 @@ export default function SimpleBusinessManager() {
     return shell(
       <CallDetail
         call={openCall}
+        aside={
+          view.task ? (
+            <TaskTimelineCard
+              kind={view.task.kind}
+              id={view.task.id}
+              onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
+            />
+          ) : null
+        }
         onBack={() => setView(view.from ?? homeView)}
         onToggle={onToggle}
         busyIds={busyIds}
@@ -1077,7 +1087,36 @@ export default function SimpleBusinessManager() {
       />
     );
 
-  if (view.name === "task-audit") return shell(<TaskAuditView onBack={() => setView(view.from ?? homeView)} />);
+  if (view.name === "task-audit")
+    return shell(
+      <TaskAuditView
+        initialTab={view.tab ?? "date"}
+        initialQ={view.q ?? ""}
+        onStateChange={({ tab, q }) =>
+          setView((v) => (v.name === "task-audit" && (v.tab !== tab || v.q !== q) ? { ...v, tab, q } : v))
+        }
+        onBack={() => setView(view.from ?? homeView)}
+        onOpenTask={(e) =>
+          /* A call todo opens its call (or desk conversation) with the task's
+             timeline above it; a site task opens the timeline on its own. */
+          e.item_kind === "todo" && e.call_id
+            ? setView({ name: "call", id: e.call_id, task: { kind: "todo", id: e.item_id }, from: view })
+            : setView({ name: "task-timeline", kind: e.item_kind, id: e.item_id, from: view })
+        }
+      />
+    );
+
+  if (view.name === "task-timeline")
+    return shell(
+      <div>
+        <BackLink onClick={() => setView(view.from ?? homeView)}>Back</BackLink>
+        <TaskTimelineCard
+          kind={view.kind}
+          id={view.id}
+          onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
+        />
+      </div>
+    );
 
   if (view.name === "staff-audit")
     return shell(

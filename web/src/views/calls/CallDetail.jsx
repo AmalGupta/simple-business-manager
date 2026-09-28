@@ -30,6 +30,8 @@ export function CallDetail({
   staffRoster = [],
   currentUser = null,
   onAssign,
+  /** Rendered under Back, above the call — e.g. the Task audit timeline. */
+  aside = null,
 }) {
   const openTodos = call.todos.filter((td) => td.status !== "done");
   const doneTodos = call.todos.filter((td) => td.status === "done");
@@ -45,6 +47,7 @@ export function CallDetail({
   return (
     <div>
       <BackLink onClick={onBack}>Back</BackLink>
+      {aside}
 
       <div className="sbm-call-grid">
         <div>

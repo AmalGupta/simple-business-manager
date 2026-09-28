@@ -22,6 +22,7 @@ import {
   listAssignedWork,
   listWorkEventsForUser,
   listTaskAudit,
+  getTaskTimeline,
   logWorkEvents,
   setWorkScheduledFor,
   setWorkUrgent,
@@ -198,6 +199,20 @@ export async function handleGetTaskAudit(request: Request, env: Env): Promise<Re
     await listTaskAudit(env.DB, {
       limit: Number.isFinite(limit) ? limit : 100,
       beforeSeq: params.get("before_seq") ? Number(params.get("before_seq")) : null,
+      q: params.get("q"),
     })
   );
+}
+
+/** GET /api/work/audit/task?kind=todo|site_task&id= — one task's full timeline (admin). */
+export async function handleGetTaskTimeline(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  if (session.user_role === "staff") return json({ error: "forbidden" }, 403);
+  const params = new URL(request.url).searchParams;
+  const kind = params.get("kind");
+  const id = params.get("id")?.trim() ?? "";
+  if (!isWorkItemKind(kind) || !id) return json({ error: "kind and id required" }, 400);
+  const timeline = await getTaskTimeline(env.DB, kind, id);
+  return timeline ? json(timeline) : json({ error: "not found" }, 404);
 }
