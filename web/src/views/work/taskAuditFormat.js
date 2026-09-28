@@ -27,6 +27,8 @@ export function describeTransition(e) {
       return "Marked urgent";
     case "urgent_cleared":
       return "Urgent cleared";
+    case "location_changed":
+      return `Moved: ${e.from_value === "factory" ? "Factory" : "Office"} → ${e.to_value === "factory" ? "Factory" : "Office"}`;
     case "due_changed":
       return `Change due date: ${dateOrNone(e.from_value)} → ${dateOrNone(e.to_value)}`;
     case "scheduled":

@@ -19,6 +19,20 @@ export const WORKFLOW_CATEGORY_LABEL = Object.fromEntries(WORKFLOW_CATEGORIES.ma
 /** Mirrors packages/core/src/types.ts — categories hidden from staff UI/API. */
 export const STAFF_HIDDEN_WORKFLOW_CATEGORIES = ["admin_intake"];
 
+/* SBM-67 — Assigned work splits each site's work into Office and Factory
+   tabs. Mirrors packages/core/src/work-location.ts: a stored override wins,
+   otherwise factory-floor workflow stages default to Factory and everything
+   else (including every call todo) to Office. */
+export const WORK_LOCATIONS = [
+  { key: "office", label: "Office" },
+  { key: "factory", label: "Factory" },
+];
+const FACTORY_WORKFLOW_CATEGORIES = ["procurement", "production", "quality_control"];
+export function effectiveWorkLocation(stored, category) {
+  if (stored === "office" || stored === "factory") return stored;
+  return category && FACTORY_WORKFLOW_CATEGORIES.includes(category) ? "factory" : "office";
+}
+
 /* ------------------------------------------------------------------
    The staff site-visit installation checklist — migration 0016. One row
    per category; `allowVideo: false` on "location" is the one row that

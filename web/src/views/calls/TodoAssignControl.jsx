@@ -4,6 +4,7 @@ import { fmtShort } from "../../lib/dates.js";
 import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { suggestAssignee } from "../../lib/assignment.js";
 import { patchWork } from "../../lib/api.js";
+import { WORK_LOCATIONS, effectiveWorkLocation } from "../../lib/constants.js";
 
 const COMPACT_PRIMARY = {
   ...PRIMARY_BUTTON_STYLE,
@@ -38,7 +39,9 @@ const COMPACT_SECONDARY = {
    stable toolbar so 3-up carousel columns stay usable.
 
    Urgent is set here and only here — admins flag it while routing; the
-   staff roster / Assigned work pages only display it. */
+   staff roster / Assigned work pages only display it. Same for Office /
+   Factory (SBM-67): it picks which tab the todo lands under on the staff
+   member's Assigned work. */
 export function TodoAssignControl({
   todo,
   staffRoster,
@@ -85,6 +88,10 @@ export function TodoAssignControl({
   const urgent = localUrgent ?? Boolean(todo.urgent_at);
   const [urgentChecked, setUrgentChecked] = useState(urgent);
 
+  const [localLocation, setLocalLocation] = useState(null);
+  const location = localLocation ?? effectiveWorkLocation(todo.work_location, null);
+  const [locationChoice, setLocationChoice] = useState(location);
+
   const [editing, setEditing] = useState(alwaysEditing);
   const [checkedIds, setCheckedIds] = useState(initialChecked);
   const [saving, setSaving] = useState(false);
@@ -103,6 +110,14 @@ export function TodoAssignControl({
   useEffect(() => {
     if (!editing) setUrgentChecked(urgent);
   }, [editing, urgent]);
+
+  useEffect(() => {
+    setLocalLocation(null);
+  }, [todo.id, todo.work_location]);
+
+  useEffect(() => {
+    if (!editing) setLocationChoice(location);
+  }, [editing, location]);
 
   // Keep the checklist in sync if the todo's assignees change out from
   // under us (e.g. a refresh after another admin's edit) while not editing.
@@ -141,6 +156,10 @@ export function TodoAssignControl({
       if (canMarkUrgent && urgentChecked !== urgent) {
         await patchWork("todo", todo.id, { urgent: urgentChecked });
         setLocalUrgent(urgentChecked);
+      }
+      if (canMarkUrgent && locationChoice !== location) {
+        await patchWork("todo", todo.id, { work_location: locationChoice });
+        setLocalLocation(locationChoice);
       }
       if (!alwaysEditing) setEditing(false);
     } catch (err) {
@@ -184,6 +203,13 @@ export function TodoAssignControl({
       Urgent
     </span>
   ) : null;
+  /* Office is the default, so only the exception gets a tag. */
+  const locationTag =
+    location === "factory" ? (
+      <span style={{ fontSize: 11, fontWeight: 700, color: t.edge2, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+        Factory
+      </span>
+    ) : null;
   const assignLabel = routerHeld ? "Route to staff" : assignees.length > 0 ? "Reassign" : "Assign";
 
   if (!editing) {
@@ -194,6 +220,7 @@ export function TodoAssignControl({
           {!hideStatus ? <span className="cna-todo-toolbar__status">{statusWithDue}</span> : null}
           <div className="cna-todo-toolbar__actions">
             {urgentTag}
+            {locationTag}
             {canClaim ? (
               <button
                 type="button"
@@ -219,6 +246,7 @@ export function TodoAssignControl({
         {!hideStatus ? <span style={{ fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>{statusWithDue}</span> : null}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
           {urgentTag}
+          {locationTag}
           {canClaim ? (
             <button
               type="button"
@@ -274,6 +302,21 @@ export function TodoAssignControl({
           <input type="checkbox" checked={urgentChecked} onChange={(e) => setUrgentChecked(e.target.checked)} />
           Urgent — due within 24 hours
         </label>
+      ) : null}
+      {canMarkUrgent ? (
+        <div role="radiogroup" aria-label="Where the work happens" style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13, color: t.edge }}>
+          {WORK_LOCATIONS.map((loc) => (
+            <label key={loc.key} style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: locationChoice === loc.key ? 700 : 500 }}>
+              <input
+                type="radio"
+                name={`work-location-${todo.id}`}
+                checked={locationChoice === loc.key}
+                onChange={() => setLocationChoice(loc.key)}
+              />
+              {loc.label}
+            </label>
+          ))}
+        </div>
       ) : null}
       {error ? <span style={{ fontSize: 12, color: t.signal }}>{error}</span> : null}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
