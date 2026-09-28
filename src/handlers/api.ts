@@ -596,11 +596,22 @@ async function logTodoStatusWorkEvent(
   subjectUserIds: string[]
 ): Promise<void> {
   if (before.status === after.status) return;
-  const event = after.status === "done" ? "completed" : before.status === "done" ? "reopened" : null;
+  const event =
+    after.status === "done"
+      ? "completed"
+      : before.status === "done"
+        ? "reopened"
+        : after.status === "snoozed"
+          ? "parked"
+          : before.status === "snoozed"
+            ? "unparked"
+            : null;
   if (!event) return;
+  // An unassigned todo still gets one row, so the Task Audit shows it.
+  const subjects: (string | null)[] = subjectUserIds.length ? subjectUserIds : [null];
   await logWorkEvents(
     env.DB,
-    subjectUserIds.map((uid) => ({
+    subjects.map((uid) => ({
       kind: "todo" as const,
       itemId: after.id,
       siteId: after.site_id ?? null,

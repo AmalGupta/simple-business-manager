@@ -1165,3 +1165,10 @@ export function postMergeCallers(ids, keepName) {
 export function fetchSameNameCallers() {
   return callerMergeFetch(`/api/callers/same-name`, { method: "GET" });
 }
+
+/** Admin Task Audit — { items: [...], today_count }. Paged by `seq`. */
+export function fetchTaskAudit({ beforeSeq, limit = 100 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (beforeSeq != null) params.set("before_seq", String(beforeSeq));
+  return workFetch(`/api/work/audit?${params}`);
+}

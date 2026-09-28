@@ -126,6 +126,20 @@ export async function handlePatchSiteTask(request: Request, env: Env, id: string
       assignedByUserId: session.user_id,
       dueDate,
     });
+    if (dueDate !== undefined && (task.due_date ?? null) !== (dueDate || null)) {
+      await logWorkEvents(env.DB, [
+        {
+          kind: "site_task",
+          itemId: id,
+          siteId: task.site_id,
+          actorUserId: session.user_id,
+          subjectUserId: record.assigned_to_user_id,
+          event: "due_changed",
+          fromValue: task.due_date ?? null,
+          toValue: dueDate || null,
+        },
+      ]);
+    }
     if (task.assigned_to_user_id !== record.assigned_to_user_id) {
       await logWorkEvents(env.DB, [
         {
