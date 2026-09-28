@@ -1136,3 +1136,32 @@ export function fetchWorkEvents(userId, { beforeSeq, limit = 100 } = {}) {
   if (beforeSeq != null) params.set("before_seq", String(beforeSeq));
   return workFetch(`/api/work/events?${params}`);
 }
+
+/* Contact merge + multiple numbers (migration 0048). Errors carry `status`
+   and, on 409, `existing` (the contact that already has the number). */
+async function callerMergeFetch(path, init) {
+  const res = await fetch(path, { headers: { "content-type": "application/json" }, ...init });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    const err = new Error(body.error || `${init?.method ?? "GET"} ${path} → ${res.status}`);
+    err.status = res.status;
+    err.existing = body.existing ?? null;
+    throw err;
+  }
+  return res.json();
+}
+
+/** Give a phoneless contact a number → { status: "set" | "merged_unsaved", caller, merged_name? }. */
+export function postAssociateCallerPhone(callerId, phone) {
+  return callerMergeFetch(`/api/callers/${callerId}/phone`, { method: "POST", body: JSON.stringify({ phone }) });
+}
+
+/** Merge two contacts; `keepName` is one of their two names. Returns the merged contact. */
+export function postMergeCallers(ids, keepName) {
+  return callerMergeFetch(`/api/callers/merge`, { method: "POST", body: JSON.stringify({ ids, keep_name: keepName }) });
+}
+
+/** [{ name, contacts: [...CallerRow, calls] }] — named contacts sharing a name on different numbers. */
+export function fetchSameNameCallers() {
+  return callerMergeFetch(`/api/callers/same-name`, { method: "GET" });
+}

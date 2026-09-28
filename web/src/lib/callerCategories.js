@@ -18,3 +18,9 @@ export const CALLER_TYPE_OPTIONS = [
 export function isStaffCategory(category) {
   return category === "office_staff" || category === "service_staff";
 }
+
+/** Display label for any stored category (spam included). */
+export function callerCategoryLabel(category) {
+  if (category === "spam") return "Spam";
+  return CALLER_TYPE_OPTIONS.find((o) => o.value === category)?.label ?? category ?? "";
+}
