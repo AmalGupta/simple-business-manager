@@ -20,6 +20,10 @@ import { BackLink } from "../../components/BackLink.jsx";
 import { AddCallerModal } from "./AddCallerModal.jsx";
 import { PromoteStaffConfirmModal } from "./PromoteStaffConfirmModal.jsx";
 import { EditContactModal } from "./EditContactModal.jsx";
+import { AssociateNumberModal } from "./AssociateNumberModal.jsx";
+import { MergeContactsModal } from "./MergeContactsModal.jsx";
+import { SameNameContactsModal } from "./SameNameContactsModal.jsx";
+import { contactPhones } from "./contactPhones.js";
 import { CALLER_TYPE_OPTIONS, isStaffCategory } from "../../lib/callerCategories.js";
 import "./CallersDirectoryView.css";
 
@@ -147,6 +151,13 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
   const [bucketCounts, setBucketCounts] = useState(EMPTY_BUCKET_COUNTS);
   const [showAddModal, setShowAddModal] = useState(false);
   const [editCaller, setEditCaller] = useState(null);
+  /* migration 0048: phoneless contact → Add number; merge two contacts;
+     "same name, different numbers" review. */
+  const [numberCaller, setNumberCaller] = useState(null);
+  const [mergePair, setMergePair] = useState(null);
+  const [sameNameOpen, setSameNameOpen] = useState(false);
+  const [sameNameRefresh, setSameNameRefresh] = useState(0);
+  const [notice, setNotice] = useState("");
   const [promotion, setPromotion] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState("");
@@ -278,7 +289,42 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
         width: narrow ? 110 : 130,
         minWidth: narrow ? 110 : 130,
         suppressSizeToFit: true,
-        valueGetter: (p) => p.data?.phone || "—",
+        /* A merged contact shows each number on its own line. A named
+           contact with no number gets "Add number" (number or merge). */
+        cellRenderer: (p) => {
+          if (!p.data) return null;
+          const phones = contactPhones(p.data);
+          if (phones.length === 1) return phones[0];
+          if (phones.length > 1) {
+            return (
+              <span style={{ display: "flex", flexDirection: "column", lineHeight: "18px", paddingTop: 15 }}>
+                {phones.map((ph) => (
+                  <span key={ph}>{ph}</span>
+                ))}
+              </span>
+            );
+          }
+          if (bucket !== "saved" && bucket !== "staff") return "—";
+          return (
+            <button
+              type="button"
+              onClick={() => setNumberCaller(p.data)}
+              style={{
+                padding: "4px 8px",
+                border: `1px solid ${t.frost}`,
+                borderRadius: t.radiusButton,
+                background: t.white,
+                color: t.accent,
+                fontSize: 11,
+                fontWeight: 600,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Add number
+            </button>
+          );
+        },
       },
     ];
 
@@ -442,6 +488,20 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
             <Plus size={14} /> Add contact
           </button>
         </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", margin: "-0.25rem 0 0.75rem" }}>
+          <button
+            type="button"
+            onClick={() => setSameNameOpen(true)}
+            style={{ all: "unset", cursor: "pointer", fontSize: 12, fontWeight: 600, color: t.accent }}
+          >
+            Same name, different numbers →
+          </button>
+        </div>
+        {notice && (
+          <p style={{ fontSize: 13, color: t.edge, margin: "0 0 0.75rem" }} role="status">
+            {notice}
+          </p>
+        )}
       </div>
 
       <div
@@ -603,6 +663,7 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
                   getRowId={getRowId}
                   onGridReady={onGridReady}
                   rowHeight={48}
+                  getRowHeight={(p) => 48 + 18 * Math.max(0, contactPhones(p.data).length - 1)}
                   animateRows={false}
                   suppressCellFocus
                   suppressHorizontalScroll={narrow ? false : !horizontalScrolls}
@@ -712,6 +773,48 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
         />
       )}
 
+      {numberCaller && (
+        <AssociateNumberModal
+          caller={numberCaller}
+          onClose={() => setNumberCaller(null)}
+          onSaved={async (result) => {
+            setNotice(
+              result.status === "merged_unsaved"
+                ? `Number saved to ${result.caller.name}; the unsaved contact ${result.merged_name} was merged in.`
+                : `Number saved to ${result.caller.name}.`
+            );
+            setNumberCaller(null);
+            await load(queryOpts, true);
+            await refreshContactsDirectory({ bucket: "unsaved", limit: PAGE_SIZE, offset: 0 }).catch(() => {});
+          }}
+          onMerge={(other) => {
+            setMergePair([numberCaller, other]);
+            setNumberCaller(null);
+          }}
+        />
+      )}
+
+      {mergePair && (
+        <MergeContactsModal
+          contacts={mergePair}
+          onClose={() => setMergePair(null)}
+          onMerged={async (merged) => {
+            setNotice(`Merged into ${merged.name}.`);
+            setMergePair(null);
+            setSameNameRefresh((n) => n + 1);
+            await load(queryOpts, true);
+          }}
+        />
+      )}
+
+      {sameNameOpen && !mergePair && (
+        <SameNameContactsModal
+          refreshKey={sameNameRefresh}
+          onClose={() => setSameNameOpen(false)}
+          onMerge={(pair) => setMergePair(pair)}
+        />
+      )}
+
       {editCaller && (
         <EditContactModal
           caller={editCaller}
@@ -722,6 +825,10 @@ export function CallersDirectoryView({ onBack, innerScrolls = false, horizontalS
           }}
           onRequestPromote={async (callerId, category) => {
             await runPromoteFlow(callerId, category);
+          }}
+          onRequestNumberOrMerge={(c) => {
+            setEditCaller(null);
+            setNumberCaller(c);
           }}
         />
       )}

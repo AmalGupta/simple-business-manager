@@ -27,6 +27,12 @@ import {
   type CallerBucket,
   type CallerCategory,
   findDuplicateCaller,
+  findCallerByPhone,
+  mergeCallers,
+  pickMergeSurvivor,
+  associateCallerPhone,
+  listSameNameCallerGroups,
+  CallerMergeError,
 } from "@sbm/core";
 import { requireAdmin } from "./auth";
 import { decryptPin, encryptPin, generateRandomPin, hashPin, normalizePin } from "../lib/auth";
@@ -236,6 +242,15 @@ export async function handleUpdateCaller(request: Request, env: Env, id: string)
       typeof record.staff_user_id === "string" && record.staff_user_id.trim()
         ? record.staff_user_id.trim()
         : null;
+  }
+
+  // The number may already be another contact's (main or additional) —
+  // answer with that contact so the UI can offer a merge.
+  if (patch.phone) {
+    const holder = await findCallerByPhone(env.DB, patch.phone);
+    if (holder && holder.id !== id) {
+      return json({ error: `${holder.name} already has this number`, existing: holder }, 409);
+    }
   }
 
   try {
@@ -566,4 +581,70 @@ export async function handleDeleteCallerAlias(
   const deleted = await deleteCallerAlias(env.DB, id, aliasId);
   if (!deleted) return json({ error: "not found" }, 404);
   return json({ ok: true });
+}
+
+async function readJson(request: Request): Promise<Record<string, unknown> | Response> {
+  try {
+    const body = await request.json();
+    return typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+}
+
+function mergeErrorResponse(err: unknown): Response {
+  if (err instanceof CallerMergeError) return json({ error: err.message }, err.status);
+  return json({ error: `merge failed: ${String(err)}` }, 500);
+}
+
+/**
+ * POST /api/callers/:id/phone { phone } — give a phoneless contact a number
+ * (migration 0048). A number held by an unsaved (number-only) contact merges
+ * that contact in; a number held by a named contact returns 409 + existing so
+ * the UI can offer "merge with X" instead.
+ */
+export async function handleAssociateCallerPhone(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const record = await readJson(request);
+  if (record instanceof Response) return record;
+  const phone = typeof record.phone === "string" ? record.phone.trim() : "";
+  try {
+    const result = await associateCallerPhone(env.DB, { callerId: id, phone, actorUserId: gate.user_id });
+    if (result.status === "conflict") {
+      return json({ error: `${result.existing.name} already has this number`, existing: result.existing }, 409);
+    }
+    return json(result);
+  } catch (err) {
+    return mergeErrorResponse(err);
+  }
+}
+
+/**
+ * POST /api/callers/merge { ids: [a, b], keep_name: string } — merge two
+ * contacts. The server picks which row survives (staff-linked / staff type /
+ * more calls) so the login link is never lost; the admin picks the name.
+ */
+export async function handleMergeCallers(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const record = await readJson(request);
+  if (record instanceof Response) return record;
+  const ids = Array.isArray(record.ids) ? record.ids.filter((v): v is string => typeof v === "string") : [];
+  const keepName = typeof record.keep_name === "string" ? record.keep_name : "";
+  if (ids.length !== 2) return json({ error: "ids must be two contact ids" }, 400);
+  try {
+    const { survivorId, mergedId } = await pickMergeSurvivor(env.DB, ids[0], ids[1]);
+    const caller = await mergeCallers(env.DB, { survivorId, mergedId, keepName, actorUserId: gate.user_id });
+    return json(caller);
+  } catch (err) {
+    return mergeErrorResponse(err);
+  }
+}
+
+/** GET /api/callers/same-name — named contacts sharing a name on different numbers. */
+export async function handleListSameNameCallers(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  return json(await listSameNameCallerGroups(env.DB));
 }
