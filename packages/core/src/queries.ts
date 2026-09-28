@@ -6494,7 +6494,39 @@ export async function listSameNameCallerGroups(db: D1Database): Promise<SameName
 export interface TaskAuditRow extends WorkEventRow {
   actor_role: string | null;
   subject_name: string | null;
+  /** Call todos: the call it came from, and what kind of recording that is. */
+  call_id: string | null;
+  call_kind: "call" | "desk" | "site_memo" | null;
+  client_name: string | null;
 }
+
+const TASK_AUDIT_SELECT = `
+  SELECT work_events.rowid AS seq, work_events.id AS id, work_events.item_kind AS item_kind, work_events.item_id AS item_id,
+         COALESCE(todos.text, workflow_stages.label) AS item_title,
+         sites.name AS site_name,
+         actor.name AS actor_name, actor.role AS actor_role,
+         work_events.subject_user_id AS subject_user_id, subject.name AS subject_name,
+         work_events.event AS event, work_events.from_value AS from_value, work_events.to_value AS to_value,
+         from_user.name AS from_user_name, to_user.name AS to_user_name,
+         work_events.created_at AS created_at,
+         todos.call_id AS call_id,
+         CASE WHEN calls.id IS NULL THEN NULL
+              WHEN calls.recorded_for_site_id IS NOT NULL THEN 'site_memo'
+              WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'desk'
+              ELSE 'call' END AS call_kind,
+         callers.name AS client_name
+  FROM work_events
+  LEFT JOIN todos ON work_events.item_kind = 'todo' AND todos.id = work_events.item_id
+  LEFT JOIN calls ON calls.id = todos.call_id
+  LEFT JOIN callers ON callers.id = calls.client_id
+  LEFT JOIN site_tasks ON work_events.item_kind = 'site_task' AND site_tasks.id = work_events.item_id
+  LEFT JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+  LEFT JOIN sites ON sites.id = work_events.site_id
+  LEFT JOIN users AS actor ON actor.id = work_events.actor_user_id
+  LEFT JOIN users AS subject ON subject.id = work_events.subject_user_id
+  LEFT JOIN users AS from_user ON from_user.id = work_events.from_value
+  LEFT JOIN users AS to_user ON to_user.id = work_events.to_value
+`;
 
 /**
  * Business-wide task audit (admin "Task Audit" tile): every transition on
@@ -6504,45 +6536,95 @@ export interface TaskAuditRow extends WorkEventRow {
  */
 export async function listTaskAudit(
   db: D1Database,
-  opts: { limit?: number; beforeSeq?: number | null } = {}
+  opts: { limit?: number; beforeSeq?: number | null; q?: string | null } = {}
 ): Promise<{ items: TaskAuditRow[]; today_count: number }> {
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
-  const beforeClause = opts.beforeSeq != null ? `AND work_events.rowid < ?` : "";
+  const where: string[] = [`work_events.event <> 'received'`];
   const binds: unknown[] = [];
-  if (opts.beforeSeq != null) binds.push(opts.beforeSeq);
+  if (opts.beforeSeq != null) {
+    where.push(`work_events.rowid < ?`);
+    binds.push(opts.beforeSeq);
+  }
+  // Keyword over the task text, site, caller, and every person on the row.
+  const q = opts.q?.trim();
+  if (q) {
+    const cols = [
+      "todos.text", "workflow_stages.label", "sites.name", "callers.name",
+      "actor.name", "subject.name", "to_user.name", "from_user.name",
+    ];
+    where.push(`(${cols.map((c) => `${c} LIKE ?`).join(" OR ")})`);
+    binds.push(...cols.map(() => `%${q}%`));
+  }
   binds.push(limit);
+  const sql = `${TASK_AUDIT_SELECT} WHERE ${where.join(" AND ")} ORDER BY work_events.rowid DESC LIMIT ?`;
   // IST day boundary, as a UTC datetime('now')-style string.
   const todayStartUtc = new Date(Date.parse(`${todayKeyKolkata()}T00:00:00+05:30`)).toISOString().replace("T", " ").slice(0, 19);
   const [list, today] = await Promise.all([
-    db
-      .prepare(
-        `SELECT work_events.rowid AS seq, work_events.id AS id, work_events.item_kind AS item_kind, work_events.item_id AS item_id,
-                COALESCE(todos.text, workflow_stages.label) AS item_title,
-                sites.name AS site_name,
-                actor.name AS actor_name, actor.role AS actor_role,
-                work_events.subject_user_id AS subject_user_id, subject.name AS subject_name,
-                work_events.event AS event, work_events.from_value AS from_value, work_events.to_value AS to_value,
-                from_user.name AS from_user_name, to_user.name AS to_user_name,
-                work_events.created_at AS created_at
-         FROM work_events
-         LEFT JOIN todos ON work_events.item_kind = 'todo' AND todos.id = work_events.item_id
-         LEFT JOIN site_tasks ON work_events.item_kind = 'site_task' AND site_tasks.id = work_events.item_id
-         LEFT JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
-         LEFT JOIN sites ON sites.id = work_events.site_id
-         LEFT JOIN users AS actor ON actor.id = work_events.actor_user_id
-         LEFT JOIN users AS subject ON subject.id = work_events.subject_user_id
-         LEFT JOIN users AS from_user ON from_user.id = work_events.from_value
-         LEFT JOIN users AS to_user ON to_user.id = work_events.to_value
-         WHERE work_events.event <> 'received' ${beforeClause}
-         ORDER BY work_events.rowid DESC
-         LIMIT ?`
-      )
-      .bind(...binds)
-      .all<TaskAuditRow>(),
+    db.prepare(sql).bind(...binds).all<TaskAuditRow>(),
     db
       .prepare(`SELECT COUNT(*) AS n FROM work_events WHERE event <> 'received' AND created_at >= ?`)
       .bind(todayStartUtc)
       .first<{ n: number }>(),
   ]);
   return { items: list.results ?? [], today_count: today?.n ?? 0 };
+}
+
+export interface TaskTimeline {
+  kind: WorkItemKind;
+  id: string;
+  title: string | null;
+  status: string | null;
+  site_name: string | null;
+  call_id: string | null;
+  urgent: boolean;
+  assignees: string[];
+  events: TaskAuditRow[];
+}
+
+/** Every transition on one task, oldest first, with the task's current state. */
+export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: string): Promise<TaskTimeline | null> {
+  const head =
+    kind === "todo"
+      ? await db
+          .prepare(
+            `SELECT todos.text AS title, todos.status AS status, sites.name AS site_name, todos.call_id AS call_id,
+                    todos.urgent_at IS NOT NULL AS urgent,
+                    (SELECT group_concat(users.name, ', ') FROM todo_assignees JOIN users ON users.id = todo_assignees.user_id
+                     WHERE todo_assignees.todo_id = todos.id) AS assignees
+             FROM todos LEFT JOIN sites ON sites.id = todos.site_id WHERE todos.id = ?`
+          )
+          .bind(id)
+          .first<{ title: string; status: string; site_name: string | null; call_id: string; urgent: number; assignees: string | null }>()
+      : await db
+          .prepare(
+            `SELECT workflow_stages.label AS title, site_tasks.status AS status, sites.name AS site_name, NULL AS call_id,
+                    site_tasks.urgent_at IS NOT NULL AS urgent, users.name AS assignees
+             FROM site_tasks
+             JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+             JOIN sites ON sites.id = site_tasks.site_id
+             LEFT JOIN users ON users.id = site_tasks.assigned_to_user_id
+             WHERE site_tasks.id = ?`
+          )
+          .bind(id)
+          .first<{ title: string; status: string; site_name: string | null; call_id: string | null; urgent: number; assignees: string | null }>();
+  const { results } = await db
+    .prepare(
+      `${TASK_AUDIT_SELECT}
+       WHERE work_events.item_kind = ? AND work_events.item_id = ? AND work_events.event <> 'received'
+       ORDER BY work_events.rowid ASC`
+    )
+    .bind(kind, id)
+    .all<TaskAuditRow>();
+  if (!head && (results ?? []).length === 0) return null;
+  return {
+    kind,
+    id,
+    title: head?.title ?? null,
+    status: head?.status ?? null,
+    site_name: head?.site_name ?? null,
+    call_id: head?.call_id ?? null,
+    urgent: Boolean(head?.urgent),
+    assignees: head?.assignees ? head.assignees.split(", ") : [],
+    events: results ?? [],
+  };
 }
