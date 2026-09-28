@@ -3,7 +3,7 @@
 // teammate, the admin roster grid, and the staff-by-staff audit trail.
 //
 //   GET   /api/work/assigned[?for_user_id=]     staff: own; admin: one staff member
-//   PATCH /api/work/:kind/:id[?for_user_id=]    { scheduled_for } | { status: "done" } | { urgent }
+//   PATCH /api/work/:kind/:id[?for_user_id=]    { scheduled_for } | { status: "done" } | { urgent } | { work_location }
 //   POST  /api/work/:kind/:id/handoff[?for_user_id=]   { to_user_id }
 //   GET   /api/work/roster?to=yyyy-mm-dd         admin
 //   GET   /api/work/events?user_id=&before_seq=  admin
@@ -19,11 +19,13 @@ import {
   handOffWork,
   istTodayIso,
   isWorkItemKind,
+  isWorkLocation,
   listAssignedWork,
   listWorkEventsForUser,
   listTaskAudit,
   getTaskTimeline,
   logWorkEvents,
+  setWorkLocation,
   setWorkScheduledFor,
   setWorkUrgent,
   updateTodo,
@@ -85,6 +87,14 @@ export async function handlePatchWork(request: Request, env: Env, kindRaw: strin
     if (!isAdmin) return json({ error: "forbidden" }, 403);
     await setWorkUrgent(env.DB, ref, record.urgent === true, session.user_id);
     return json({ ok: true, urgent: record.urgent === true });
+  }
+
+  // Admin-only (SBM-67): Office / Factory tab, set while routing.
+  if ("work_location" in record) {
+    if (!isAdmin) return json({ error: "forbidden" }, 403);
+    if (!isWorkLocation(record.work_location)) return json({ error: "work_location must be office or factory" }, 400);
+    await setWorkLocation(env.DB, ref, record.work_location, session.user_id);
+    return json({ ok: true, work_location: record.work_location });
   }
 
   const subject = await resolveForUserId(request, env, session);

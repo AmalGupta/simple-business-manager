@@ -2,16 +2,21 @@ import { useState, useEffect } from "react";
 import { t } from "../../theme.js";
 import { fmtShort, isTaskDueDateUrgent } from "../../lib/dates.js";
 import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
-import { fetchStaffRoster } from "../../lib/api.js";
+import { fetchStaffRoster, patchWork } from "../../lib/api.js";
+import { WORK_LOCATIONS, effectiveWorkLocation } from "../../lib/constants.js";
 
 /* One stage row inside WorkTimelinePopup — status/assignee/timestamps, plus
    an inline assign-or-reassign control. Kept as its own component so each
-   row manages its own "editing" state independently. */
+   row manages its own "editing" state independently. Office / Factory
+   (SBM-67) picks the tab it lands under on the assignee's Assigned work;
+   it defaults from the stage's workflow category. */
 export function StageAssignRow({ task, onAssign }) {
   const [editing, setEditing] = useState(false);
   const [staff, setStaff] = useState(null);
   const [staffId, setStaffId] = useState(task.assigned_to_user_id ?? "");
   const [dueDate, setDueDate] = useState(task.due_date ?? "");
+  const [savedLocation, setSavedLocation] = useState(() => effectiveWorkLocation(task.work_location, task.category));
+  const [location, setLocation] = useState(savedLocation);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -37,6 +42,10 @@ export function StageAssignRow({ task, onAssign }) {
     setError("");
     try {
       await onAssign(task.id, { assigned_to_user_id: staffId, due_date: dueDate || null });
+      if (location !== savedLocation) {
+        await patchWork("site_task", task.id, { work_location: location });
+        setSavedLocation(location);
+      }
       setEditing(false);
     } catch (err) {
       console.error("[sbm] failed to assign stage", err);
@@ -101,6 +110,19 @@ export function StageAssignRow({ task, onAssign }) {
             Due date (optional)
             <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} style={TEXT_INPUT_STYLE} />
           </label>
+          <div role="radiogroup" aria-label="Where the work happens" style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13, color: t.edge }}>
+            {WORK_LOCATIONS.map((loc) => (
+              <label key={loc.key} style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: location === loc.key ? 700 : 500 }}>
+                <input
+                  type="radio"
+                  name={`work-location-${task.id}`}
+                  checked={location === loc.key}
+                  onChange={() => setLocation(loc.key)}
+                />
+                {loc.label}
+              </label>
+            ))}
+          </div>
           {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
           <button
             onClick={submit}
