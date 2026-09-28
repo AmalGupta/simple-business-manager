@@ -1,15 +1,10 @@
-import { normalizeCallerPhone } from "./caller-category";
+import { canonicalPhoneKey, normalizeCallerPhone } from "./caller-category";
 import { SITE_CLIENT_SEPARATOR } from "./queries";
 import { addSiteContacts, listCallers, listConfirmedSites } from "./queries";
 
 /** Bare 10-digit Indian mobile — matches scripts/import_contacts.py. */
 export function normalizeIndianMobile(raw: string | null | undefined): string | null {
-  const digits = String(raw ?? "").replace(/\D/g, "");
-  if (!digits) return null;
-  let d = digits;
-  if (d.length === 12 && d.startsWith("91")) d = d.slice(2);
-  else if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
-  return d.length === 10 ? d : null;
+  return canonicalPhoneKey(raw);
 }
 
 export function normalizeContactName(value: string | null | undefined): string {
