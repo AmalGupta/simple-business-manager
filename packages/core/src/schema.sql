@@ -259,6 +259,10 @@ CREATE TABLE todos (
   -- task, so the owner can route it without replaying the call.
   context           TEXT,
 
+  -- migration 0049 (SBM-67): admin override, 'office' | 'factory'. NULL =
+  -- default (see packages/core/src/work-location.ts).
+  work_location     TEXT,
+
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 
   -- Assignment lived here as assigned_to_user_id/assigned_by_user_id/
@@ -425,6 +429,9 @@ CREATE TABLE site_tasks (
   scheduled_for         TEXT,
   urgent_at             TEXT,
   urgent_by_user_id     TEXT REFERENCES users(id),
+  -- migration 0049 (SBM-67): admin override, 'office' | 'factory'. NULL =
+  -- default by workflow category (packages/core/src/work-location.ts).
+  work_location         TEXT,
   UNIQUE(site_id, stage_id)
 );
 CREATE INDEX idx_site_tasks_site ON site_tasks(site_id);
@@ -438,7 +445,8 @@ CREATE INDEX idx_todo_assignees_scheduled ON todo_assignees(user_id, scheduled_f
 -- under); actor_user_id is who acted (an admin, for urgent/assign).
 --   event: scheduled | completed | reopened | handed_off | received | assigned |
 --          rerouted (migration 0045 bulk move to the router) |
---          marked_urgent | urgent_cleared
+--          marked_urgent | urgent_cleared |
+--          location_changed (migration 0049, SBM-67 — Office ↔ Factory)
 CREATE TABLE work_events (
   id              TEXT PRIMARY KEY,
   item_kind       TEXT NOT NULL,

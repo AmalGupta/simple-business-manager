@@ -1069,6 +1069,13 @@ export default function SimpleBusinessManager() {
         forUserId={scopeId}
         selfId={me.id}
         canAdmin={me.role !== "staff"}
+        siteKey={view.siteKey ?? null}
+        location={view.location ?? null}
+        onSelectSite={(siteKey) => setView({ ...view, siteKey, location: null })}
+        onSelectLocation={(location) => setView({ ...view, location })}
+        onAddSite={() =>
+          setView({ name: "add-site", from: view, afterCreate: { name: "site" }, forUserId: scopeId })
+        }
         onBack={() => setView(view.from ?? homeView)}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
         onOpenCall={(id) => setView({ name: "call", id, from: view })}
