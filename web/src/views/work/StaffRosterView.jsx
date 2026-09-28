@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { AlertTriangle } from "lucide-react";
 import { t } from "../../theme.js";
 import { addDaysIso, fmtShort, todayIso } from "../../lib/dates.js";
-import { fetchStaffRosterGrid, patchWork } from "../../lib/api.js";
+import { fetchStaffRosterGrid } from "../../lib/api.js";
 import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
@@ -78,7 +78,7 @@ function CellList({ items, selectedKey, onSelect }) {
   );
 }
 
-function SelectedItemPanel({ item, staffName, busy, onUrgent, onOpenSite, onOpenCall, onClose }) {
+function SelectedItemPanel({ item, staffName, onOpenSite, onOpenCall, onClose }) {
   const urgent = Boolean(item.urgent_at);
   return (
     <Card style={{ marginBottom: "1rem", ...(urgent ? { borderColor: t.signal } : {}) }}>
@@ -104,14 +104,6 @@ function SelectedItemPanel({ item, staffName, busy, onUrgent, onOpenSite, onOpen
         </div>
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onUrgent(item, !urgent)}
-          style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44 }}
-        >
-          {urgent ? "Clear urgent" : "Mark urgent"}
-        </button>
         {item.site_name && (
           <button type="button" onClick={() => onOpenSite(item.site_name)} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44 }}>
             Open site
@@ -129,7 +121,8 @@ function SelectedItemPanel({ item, staffName, busy, onUrgent, onOpenSite, onOpen
 
 /* Admin staff roster — staff × days, each cell the numbered list of work
    that person has planned for that day. Tap a name for their audit trail;
-   tap an item to mark/clear urgent. Covers a week back and 15 days ahead;
+   tap an item for its details (urgent is set while routing the call, not
+   here). Covers a week back and 15 days ahead;
    work planned before that window but not done collects in "Slipped".
    Unplanned work is a count per person. */
 export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall }) {
@@ -138,7 +131,6 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
-  const [busy, setBusy] = useState(false);
 
   const days = useMemo(
     () => Array.from({ length: DAYS_BACK + 1 + DAYS_AHEAD }, (_, i) => addDaysIso(from, i)),
@@ -192,7 +184,7 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
   const showSlipped = [...cells.values()].some((r) => r.slipped.length > 0);
 
   /* Open on today, past days reachable by scrolling left. Only on first
-     paint — a reload after marking urgent must not yank the scroll back. */
+     paint — a reload must not yank the scroll back. */
   useLayoutEffect(() => {
     if (!data || scrolledOnce.current) return;
     const scroller = scrollerRef.current;
@@ -202,19 +194,6 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
     scrolledOnce.current = true;
   }, [data]);
   const staffName = (id) => data?.staff.find((s) => s.id === id)?.name ?? "";
-
-  const onUrgent = async (item, urgent) => {
-    setBusy(true);
-    try {
-      await patchWork(item.kind, item.id, { urgent });
-      setSelected(null);
-      await load();
-    } catch (err) {
-      window.alert(err.message || "Update failed");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <div>
@@ -229,8 +208,6 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
         <SelectedItemPanel
           item={selected}
           staffName={staffName(selected.user_id)}
-          busy={busy}
-          onUrgent={onUrgent}
           onOpenSite={onOpenSite}
           onOpenCall={onOpenCall}
           onClose={() => setSelected(null)}

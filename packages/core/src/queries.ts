@@ -1423,6 +1423,8 @@ export interface TodoRow {
   site_name: string | null;
   /** migration 0045 — prompt v8 context note. */
   context: string | null;
+  /** migration 0044 — admin urgent flag, set while routing. */
+  urgent_at: string | null;
   /** Row create time (extraction / manual). */
   created_at: string | null;
   /** migration 0025 — a todo can be assigned to more than one staff member. */
@@ -1535,6 +1537,7 @@ interface RawTodoRow {
   site_id: string | null;
   site_name: string | null;
   context?: string | null;
+  urgent_at?: string | null;
   created_at: string | null;
 }
 
@@ -1606,7 +1609,8 @@ const TODO_SELECT = `
   SELECT todos.id, todos.call_id, todos.owner, todos.text, todos.due_date, todos.status,
          todos.completed_at, todos.closed_by_call_id, todos.customer_waiting,
          todos.created_at AS created_at,
-         todos.site_id AS site_id, sites.name AS site_name, todos.context AS context
+         todos.site_id AS site_id, sites.name AS site_name, todos.context AS context,
+         todos.urgent_at AS urgent_at
   FROM todos
   LEFT JOIN sites ON sites.id = todos.site_id
 `;
@@ -1637,6 +1641,7 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     site_id: t.site_id ?? null,
     site_name: t.site_name ?? null,
     context: t.context ?? null,
+    urgent_at: t.urgent_at ?? null,
     created_at: t.created_at ?? null,
     assignees: [], // filled in by hydrateTodoAssignees — see hydrateCallRows/getCallWithTodos
   };
@@ -5065,6 +5070,8 @@ export interface AssignedTodoRow {
   site_name: string | null;
   /** migration 0045 — prompt v8 context note. */
   context: string | null;
+  /** migration 0044 — admin urgent flag, set while routing. */
+  urgent_at?: string | null;
   assignees: TodoAssignee[];
   /** Present on Blocked bookmark rows — call-level unresolved that put the card here. */
   unresolved?: UnresolvedRow[];
@@ -5322,6 +5329,7 @@ export async function listOpenTodosByAssigneeBucket(
               todos.text AS text,
               todos.due_date AS due_date,
               todos.context AS context,
+              todos.urgent_at AS urgent_at,
               todos.status AS status,
               ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
               calls.recorded_at AS recorded_at,
@@ -5417,6 +5425,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
               todos.text AS text,
               todos.due_date AS due_date,
               todos.context AS context,
+              todos.urgent_at AS urgent_at,
               todos.status AS status,
               COALESCE(callers.name, 'Unknown caller') AS client_name,
               calls.recorded_at AS recorded_at,
@@ -5562,6 +5571,7 @@ export async function listMyOpenTodos(
               todos.text AS text,
               todos.due_date AS due_date,
               todos.context AS context,
+              todos.urgent_at AS urgent_at,
               todos.status AS status,
               COALESCE(
                 callers.name,
