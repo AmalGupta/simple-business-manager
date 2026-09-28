@@ -30,6 +30,8 @@ function describe(e) {
       return "Marked urgent";
     case "urgent_cleared":
       return "Urgent cleared";
+    case "location_changed":
+      return `Moved to ${e.to_value === "factory" ? "Factory" : "Office"}`;
     case "due_changed":
       return `Due date ${e.from_value ? fmtShort(e.from_value) : "none"} → ${e.to_value ? fmtShort(e.to_value) : "none"}`;
     case "parked":

@@ -4,6 +4,7 @@ import { matchStaffByOwner, normalizeOwnerName, type OwnerAliasMatch } from "./a
 import { CALLER_CATEGORIES, canonicalPhoneKey, isStaffCategory, normalizeCallerPhone, sqlPhoneKey, SQL_STAFF_CATEGORIES } from "./caller-category";
 import { isUnsavedPhoneContact, SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import { pickExistingSiteId, type SiteMatchCandidate } from "./site-match";
+import { effectiveWorkLocation, type WorkLocation } from "./work-location";
 import type {
   AppRequest,
   Call,
@@ -1425,6 +1426,8 @@ export interface TodoRow {
   context: string | null;
   /** migration 0044 — admin urgent flag, set while routing. */
   urgent_at: string | null;
+  /** migration 0049 (SBM-67) — admin override, NULL = default (office). */
+  work_location: string | null;
   /** Row create time (extraction / manual). */
   created_at: string | null;
   /** migration 0025 — a todo can be assigned to more than one staff member. */
@@ -1538,6 +1541,7 @@ interface RawTodoRow {
   site_name: string | null;
   context?: string | null;
   urgent_at?: string | null;
+  work_location?: string | null;
   created_at: string | null;
 }
 
@@ -1610,7 +1614,7 @@ const TODO_SELECT = `
          todos.completed_at, todos.closed_by_call_id, todos.customer_waiting,
          todos.created_at AS created_at,
          todos.site_id AS site_id, sites.name AS site_name, todos.context AS context,
-         todos.urgent_at AS urgent_at
+         todos.urgent_at AS urgent_at, todos.work_location AS work_location
   FROM todos
   LEFT JOIN sites ON sites.id = todos.site_id
 `;
@@ -1642,6 +1646,7 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     site_name: t.site_name ?? null,
     context: t.context ?? null,
     urgent_at: t.urgent_at ?? null,
+    work_location: t.work_location ?? null,
     created_at: t.created_at ?? null,
     assignees: [], // filled in by hydrateTodoAssignees — see hydrateCallRows/getCallWithTodos
   };
@@ -4606,6 +4611,8 @@ export interface SiteTaskRow {
   scheduled_for: string | null;
   /** migration 0044 — admin urgent flag; due within 24h of this. */
   urgent_at: string | null;
+  /** migration 0049 (SBM-67) — admin override, NULL = default by category. */
+  work_location: string | null;
 }
 
 const SITE_TASK_ROW_SELECT = `
@@ -4623,7 +4630,8 @@ const SITE_TASK_ROW_SELECT = `
          site_tasks.completed_at AS completed_at,
          completer.name AS completed_by_name,
          site_tasks.scheduled_for AS scheduled_for,
-         site_tasks.urgent_at AS urgent_at
+         site_tasks.urgent_at AS urgent_at,
+         site_tasks.work_location AS work_location
   FROM site_tasks
   JOIN sites ON sites.id = site_tasks.site_id
   JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
@@ -5072,6 +5080,8 @@ export interface AssignedTodoRow {
   context: string | null;
   /** migration 0044 — admin urgent flag, set while routing. */
   urgent_at?: string | null;
+  /** migration 0049 (SBM-67) — admin override, NULL = default (office). */
+  work_location?: string | null;
   assignees: TodoAssignee[];
   /** Present on Blocked bookmark rows — call-level unresolved that put the card here. */
   unresolved?: UnresolvedRow[];
@@ -5330,6 +5340,7 @@ export async function listOpenTodosByAssigneeBucket(
               todos.due_date AS due_date,
               todos.context AS context,
               todos.urgent_at AS urgent_at,
+              todos.work_location AS work_location,
               todos.status AS status,
               ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
               calls.recorded_at AS recorded_at,
@@ -5426,6 +5437,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
               todos.due_date AS due_date,
               todos.context AS context,
               todos.urgent_at AS urgent_at,
+              todos.work_location AS work_location,
               todos.status AS status,
               COALESCE(callers.name, 'Unknown caller') AS client_name,
               calls.recorded_at AS recorded_at,
@@ -5572,6 +5584,7 @@ export async function listMyOpenTodos(
               todos.due_date AS due_date,
               todos.context AS context,
               todos.urgent_at AS urgent_at,
+              todos.work_location AS work_location,
               todos.status AS status,
               COALESCE(
                 callers.name,
@@ -5815,6 +5828,10 @@ export interface WorkItem {
   context: string | null;
   assignee_user_id: string;
   assignee_name: string | null;
+  /** SBM-67 — Office / Factory tab. Always resolved (override or default). */
+  work_location: WorkLocation;
+  /** SBM-67 — sites.poc_contact_number, shown on the site tile. */
+  site_contact_number: string | null;
 }
 
 export type WorkEventType =
@@ -5832,7 +5849,9 @@ export type WorkEventType =
   | "due_changed"
   /** Call todo parked (status snoozed) / taken back out of parked. */
   | "parked"
-  | "unparked";
+  | "unparked"
+  /** SBM-67 — Office ↔ Factory changed by an admin; from/to hold the locations. */
+  | "location_changed";
 
 export interface WorkEventInput {
   kind: WorkItemKind;
@@ -5967,6 +5986,8 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
       context: td.context ?? null,
       assignee_user_id: userId,
       assignee_name: user?.name ?? null,
+      work_location: effectiveWorkLocation(td.work_location, null),
+      site_contact_number: null,
     });
   }
   for (const tk of tasks) {
@@ -5985,9 +6006,76 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
       context: null,
       assignee_user_id: userId,
       assignee_name: tk.assignee_name,
+      work_location: effectiveWorkLocation(tk.work_location, tk.category),
+      site_contact_number: null,
     });
   }
+
+  /* SBM-67: the site tiles show each site's contact number. */
+  const siteIds = [...new Set(items.map((i) => i.site_id).filter((id): id is string => Boolean(id)))];
+  if (siteIds.length > 0) {
+    const phones = await queryAllByIdChunks<{ id: string; poc_contact_number: string | null }>(db, siteIds, (ph) =>
+      `SELECT id, poc_contact_number FROM sites WHERE id IN (${ph})`
+    );
+    const phoneById = new Map(phones.map((r) => [r.id, r.poc_contact_number]));
+    for (const item of items) {
+      if (item.site_id) item.site_contact_number = phoneById.get(item.site_id) ?? null;
+    }
+  }
   return items;
+}
+
+/**
+ * SBM-67 — admin sets where a piece of work happens (Office / Factory tab).
+ * One event per current assignee, same as setWorkUrgent, so it shows on
+ * each staff member's audit.
+ */
+export async function setWorkLocation(
+  db: D1Database,
+  ref: WorkItemRef,
+  location: WorkLocation,
+  actorUserId: string
+): Promise<{ previous: WorkLocation }> {
+  const table = ref.kind === "todo" ? "todos" : "site_tasks";
+  const row =
+    ref.kind === "todo"
+      ? await db
+          .prepare(`SELECT work_location, NULL AS category FROM todos WHERE id = ?`)
+          .bind(ref.id)
+          .first<{ work_location: string | null; category: string | null }>()
+      : await db
+          .prepare(
+            `SELECT site_tasks.work_location AS work_location, workflow_stages.category AS category
+             FROM site_tasks JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+             WHERE site_tasks.id = ?`
+          )
+          .bind(ref.id)
+          .first<{ work_location: string | null; category: string | null }>();
+  const previous = effectiveWorkLocation(row?.work_location, row?.category);
+  if (previous === location && row?.work_location === location) return { previous };
+
+  const stmts: D1PreparedStatement[] = [
+    db.prepare(`UPDATE ${table} SET work_location = ? WHERE id = ?`).bind(location, ref.id),
+  ];
+  if (previous !== location) {
+    const subjects = ref.assignee_ids.length ? ref.assignee_ids : [null];
+    for (const subject of subjects) {
+      stmts.push(
+        workEventStmt(db, {
+          kind: ref.kind,
+          itemId: ref.id,
+          siteId: ref.site_id,
+          actorUserId,
+          subjectUserId: subject,
+          event: "location_changed",
+          fromValue: previous,
+          toValue: location,
+        })
+      );
+    }
+  }
+  await db.batch(stmts);
+  return { previous };
 }
 
 /** Sets one assignee's planned day. Returns the previous value (for the audit). */
