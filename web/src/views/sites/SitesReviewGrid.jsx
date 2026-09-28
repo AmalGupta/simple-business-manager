@@ -247,8 +247,29 @@ function ValidSwitch({ site, decision, onChoose, onNeedContact }) {
       >
         <span style={{ width: 16, height: 16, borderRadius: "50%", background: look.knob }} />
       </button>
-      <span style={{ fontSize: 11, fontWeight: 600, color: look.captionColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {look.caption}
+      <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, color: look.captionColor, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {look.caption}
+        </span>
+        {/* SBM-67: the switch only reaches Valid (and that needs a mapped
+            contact), so Not valid is its own action — no contact needed.
+            Choosing N again on a Not valid row puts it back to Undecided
+            (setChoice in SitesReviewView toggles a repeated value to null). */}
+        <button
+          type="button"
+          onClick={() => onChoose(site.id, "N")}
+          aria-label={decision === "N" ? `Undo not valid for ${site.name}` : `Mark ${site.name} not valid`}
+          style={{
+            all: "unset",
+            cursor: "pointer",
+            fontSize: 11,
+            fontWeight: 600,
+            color: decision === "N" ? t.edge2 : t.putty,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {decision === "N" ? "Undo" : "Mark not valid"}
+        </button>
       </span>
     </span>
   );
@@ -505,7 +526,7 @@ export function SitesReviewGrid({
     const decisionCol = {
       headerName: "Is Valid",
       colId: "decision",
-      width: narrow ? 128 : 132,
+      width: narrow ? 140 : 150,
       suppressSizeToFit: true,
       sortable: true,
       cellClass: "sbm-scol-decision",
