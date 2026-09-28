@@ -99,6 +99,7 @@ import {
   handleGetStaffRoster,
   handleGetWorkEvents,
   handleGetTaskAudit,
+  handleGetTaskTimeline,
   handlePatchWork,
   handlePostWorkHandoff,
 } from "./handlers/work";
@@ -406,6 +407,11 @@ export default {
     if (url.pathname === "/api/work/roster" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetStaffRoster(request, env);
+    }
+
+    if (url.pathname === "/api/work/audit/task" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleGetTaskTimeline(request, env);
     }
 
     if (url.pathname === "/api/work/audit" && request.method === "GET") {
