@@ -3,6 +3,7 @@ import { t } from "../../theme.js";
 import { fmtShort } from "../../lib/dates.js";
 import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { suggestAssignee } from "../../lib/assignment.js";
+import { patchWork } from "../../lib/api.js";
 
 const COMPACT_PRIMARY = {
   ...PRIMARY_BUTTON_STYLE,
@@ -34,7 +35,10 @@ const COMPACT_SECONDARY = {
    user into the existing assignee set.
 
    `compact` (CNA cards): one primary action + secondary siblings in a wrap-
-   stable toolbar so 3-up carousel columns stay usable. */
+   stable toolbar so 3-up carousel columns stay usable.
+
+   Urgent is set here and only here — admins flag it while routing; the
+   staff roster / Assigned work pages only display it. */
 export function TodoAssignControl({
   todo,
   staffRoster,
@@ -76,6 +80,11 @@ export function TodoAssignControl({
     return suggested ? new Set([suggested.id]) : new Set();
   };
 
+  const canMarkUrgent = currentUser?.role === "admin" || currentUser?.role === "superadmin";
+  const [localUrgent, setLocalUrgent] = useState(null);
+  const urgent = localUrgent ?? Boolean(todo.urgent_at);
+  const [urgentChecked, setUrgentChecked] = useState(urgent);
+
   const [editing, setEditing] = useState(alwaysEditing);
   const [checkedIds, setCheckedIds] = useState(initialChecked);
   const [saving, setSaving] = useState(false);
@@ -86,6 +95,14 @@ export function TodoAssignControl({
   useEffect(() => {
     setLocalAssignees(null);
   }, [todo.id, serverAssignees.map((a) => a.id).join(",")]);
+
+  useEffect(() => {
+    setLocalUrgent(null);
+  }, [todo.id, todo.urgent_at]);
+
+  useEffect(() => {
+    if (!editing) setUrgentChecked(urgent);
+  }, [editing, urgent]);
 
   // Keep the checklist in sync if the todo's assignees change out from
   // under us (e.g. a refresh after another admin's edit) while not editing.
@@ -120,6 +137,11 @@ export function TodoAssignControl({
       const ids = [...checkedIds];
       await onAssign(todo.id, ids);
       setLocalAssignees(resolveAssignees(ids));
+      /* After assigning — marking urgent pins the new assignees' plan to today. */
+      if (canMarkUrgent && urgentChecked !== urgent) {
+        await patchWork("todo", todo.id, { urgent: urgentChecked });
+        setLocalUrgent(urgentChecked);
+      }
       if (!alwaysEditing) setEditing(false);
     } catch (err) {
       console.error("[sbm] failed to assign todo", err);
@@ -157,6 +179,11 @@ export function TodoAssignControl({
         ? `Suggested: ${suggested.name}`
         : "Unassigned";
   const statusWithDue = todo.due_date ? `${statusLabel} · due ${fmtShort(todo.due_date)}` : statusLabel;
+  const urgentTag = urgent ? (
+    <span style={{ fontSize: 11, fontWeight: 700, color: t.signal, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+      Urgent
+    </span>
+  ) : null;
   const assignLabel = routerHeld ? "Route to staff" : assignees.length > 0 ? "Reassign" : "Assign";
 
   if (!editing) {
@@ -166,6 +193,7 @@ export function TodoAssignControl({
         <div className="cna-todo-toolbar">
           {!hideStatus ? <span className="cna-todo-toolbar__status">{statusWithDue}</span> : null}
           <div className="cna-todo-toolbar__actions">
+            {urgentTag}
             {canClaim ? (
               <button
                 type="button"
@@ -190,6 +218,7 @@ export function TodoAssignControl({
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4, minWidth: 0, width: "100%" }}>
         {!hideStatus ? <span style={{ fontSize: 12, color: t.edge2, lineHeight: 1.4 }}>{statusWithDue}</span> : null}
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+          {urgentTag}
           {canClaim ? (
             <button
               type="button"
@@ -231,6 +260,21 @@ export function TodoAssignControl({
           ))}
         </div>
       )}
+      {canMarkUrgent ? (
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 13,
+            fontWeight: urgentChecked ? 700 : 500,
+            color: urgentChecked ? t.signal : t.edge,
+          }}
+        >
+          <input type="checkbox" checked={urgentChecked} onChange={(e) => setUrgentChecked(e.target.checked)} />
+          Urgent — due within 24 hours
+        </label>
+      ) : null}
       {error ? <span style={{ fontSize: 12, color: t.signal }}>{error}</span> : null}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
         <button
