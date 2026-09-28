@@ -30,6 +30,12 @@ function describe(e) {
       return "Marked urgent";
     case "urgent_cleared":
       return "Urgent cleared";
+    case "due_changed":
+      return `Due date ${e.from_value ? fmtShort(e.from_value) : "none"} → ${e.to_value ? fmtShort(e.to_value) : "none"}`;
+    case "parked":
+      return "Parked";
+    case "unparked":
+      return "Taken out of parked";
     case "rerouted":
       return `Moved to ${e.to_user_name ?? "the owner"} for routing`;
     default:

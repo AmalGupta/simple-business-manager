@@ -19,6 +19,8 @@ import { AssignedWorkView } from "./views/work/AssignedWorkView.jsx";
 import { StaffRosterView } from "./views/work/StaffRosterView.jsx";
 import { StaffRosterTile } from "./views/work/StaffRosterTile.jsx";
 import { StaffAuditView } from "./views/work/StaffAuditView.jsx";
+import { TaskAuditTile } from "./views/work/TaskAuditTile.jsx";
+import { TaskAuditView } from "./views/work/TaskAuditView.jsx";
 import { HomeDashboardTabs } from "./views/home/HomeDashboardTabs.jsx";
 import { StreakWall } from "./views/calls/StreakWall.jsx";
 import { CallsPageView } from "./views/calls/CallsPageView.jsx";
@@ -1075,6 +1077,8 @@ export default function SimpleBusinessManager() {
       />
     );
 
+  if (view.name === "task-audit") return shell(<TaskAuditView onBack={() => setView(view.from ?? homeView)} />);
+
   if (view.name === "staff-audit")
     return shell(
       <StaffAuditView
@@ -1285,6 +1289,12 @@ export default function SimpleBusinessManager() {
               </div>
             </Card>
           </button>
+        )}
+        {(me.role === "admin" || me.role === "superadmin") && (
+          <TaskAuditTile
+            refreshKey={todoRefreshKey}
+            onOpen={() => setView({ name: "task-audit", from: { name: "home" } })}
+          />
         )}
         <button
           onClick={() => setView({ name: "calls" })}
