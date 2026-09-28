@@ -1167,8 +1167,14 @@ export function fetchSameNameCallers() {
 }
 
 /** Admin Task Audit — { items: [...], today_count }. Paged by `seq`. */
-export function fetchTaskAudit({ beforeSeq, limit = 100 } = {}) {
+export function fetchTaskAudit({ beforeSeq, limit = 100, q } = {}) {
   const params = new URLSearchParams({ limit: String(limit) });
   if (beforeSeq != null) params.set("before_seq", String(beforeSeq));
+  if (q && q.trim()) params.set("q", q.trim());
   return workFetch(`/api/work/audit?${params}`);
+}
+
+/** One task's full timeline: { title, status, site_name, call_id, urgent, assignees, events }. */
+export function fetchTaskTimeline(kind, id) {
+  return workFetch(`/api/work/audit/task?${new URLSearchParams({ kind, id })}`);
 }
