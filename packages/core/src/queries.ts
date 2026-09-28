@@ -1,8 +1,8 @@
 // All D1 access lives here — see docs/SCAFFOLDING.md §1 ("no SQL outside queries.ts").
 
 import { matchStaffByOwner, normalizeOwnerName, type OwnerAliasMatch } from "./assignment";
-import { CALLER_CATEGORIES, canonicalPhoneKey, normalizeCallerPhone, sqlPhoneKey, SQL_STAFF_CATEGORIES } from "./caller-category";
-import { SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
+import { CALLER_CATEGORIES, canonicalPhoneKey, isStaffCategory, normalizeCallerPhone, sqlPhoneKey, SQL_STAFF_CATEGORIES } from "./caller-category";
+import { isUnsavedPhoneContact, SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import { pickExistingSiteId, type SiteMatchCandidate } from "./site-match";
 import type {
   AppRequest,
@@ -203,7 +203,17 @@ export async function findCallerByPhone(
     )
     .bind(key ?? exact)
     .first<FoundOrCreatedCaller & { phone: string | null; staff_user_id: string | null }>();
-  return row ?? null;
+  if (row) return row;
+  // An additional number a merged contact carries (migration 0048).
+  const extra = await db
+    .prepare(
+      `SELECT callers.id, callers.category, callers.name, callers.phone, callers.staff_user_id
+       FROM caller_phones JOIN callers ON callers.id = caller_phones.caller_id
+       WHERE caller_phones.phone = ? LIMIT 1`
+    )
+    .bind(key ?? exact)
+    .first<FoundOrCreatedCaller & { phone: string | null; staff_user_id: string | null }>();
+  return extra ?? null;
 }
 
 /**
@@ -248,6 +258,8 @@ export interface CallerRow {
   id: string;
   name: string;
   phone: string | null;
+  /** Additional numbers picked up by merging (migration 0048); main number is `phone`. */
+  extra_phones?: string[];
   category: CallerCategory;
   staff_user_id: string | null;
   staff_user_name: string | null;
@@ -409,8 +421,9 @@ function callerFilterSql(opts?: CallerListOpts): { clause: string; binds: (strin
   if (q) {
     // A typed "+91 90560 66211" should find the stored 9056066211.
     const phoneQ = canonicalPhoneKey(q) ?? q.replace(/[\s-]/g, "");
-    where.push(`(callers.name LIKE ? COLLATE NOCASE OR callers.phone LIKE ? OR callers.phone LIKE ?)`);
-    binds.push(`%${q}%`, `%${q}%`, `%${phoneQ}%`);
+    where.push(`(callers.name LIKE ? COLLATE NOCASE OR callers.phone LIKE ? OR callers.phone LIKE ?
+                 OR EXISTS (SELECT 1 FROM caller_phones cp WHERE cp.caller_id = callers.id AND cp.phone LIKE ?))`);
+    binds.push(`%${q}%`, `%${q}%`, `%${phoneQ}%`, `%${phoneQ}%`);
   }
   return { clause: where.length ? `WHERE ${where.join(" AND ")}` : "", binds };
 }
@@ -467,6 +480,24 @@ export async function countCallersByBucket(db: D1Database): Promise<CallerBucket
  * `limit` to page (the site-contacts picker does).
  */
 /** Aliases for a page of callers — batched for the Contacts directory grid. */
+/** Additional numbers per contact (migration 0048), oldest first. */
+export async function getExtraPhonesByCallerIds(db: D1Database, callerIds: string[]): Promise<Map<string, string[]>> {
+  const map = new Map<string, string[]>();
+  if (callerIds.length === 0) return map;
+  const rows = await queryAllByIdChunks<{ caller_id: string; phone: string }>(
+    db,
+    callerIds,
+    (placeholders) =>
+      `SELECT caller_id, phone FROM caller_phones WHERE caller_id IN (${placeholders}) ORDER BY created_at ASC`
+  );
+  for (const row of rows ?? []) {
+    const list = map.get(row.caller_id) ?? [];
+    list.push(row.phone);
+    map.set(row.caller_id, list);
+  }
+  return map;
+}
+
 export async function getAliasesByCallerIds(
   db: D1Database,
   callerIds: string[]
@@ -504,12 +535,14 @@ export async function listCallers(db: D1Database, opts?: CallerListOpts): Promis
      Associate contacts / Add people load thousands of clients and never show
      those columns — skipping avoids ~N/100 extra D1 round-trips. */
   const ids = rows.map((r) => r.id);
-  const [sitesByCaller, aliasesByCaller] = await Promise.all([
+  const [sitesByCaller, aliasesByCaller, phonesByCaller] = await Promise.all([
     opts?.includeLinkedSites ? getLinkedSitesByCallerIds(db, ids) : Promise.resolve(null),
     opts?.includeAliases ? getAliasesByCallerIds(db, ids) : Promise.resolve(null),
+    getExtraPhonesByCallerIds(db, ids),
   ]);
   return rows.map((row) => ({
     ...row,
+    extra_phones: phonesByCaller.get(row.id) ?? [],
     linked_sites: sitesByCaller?.get(row.id) ?? [],
     aliases: aliasesByCaller?.get(row.id) ?? [],
   }));
@@ -592,7 +625,8 @@ export async function updateCaller(
 
 async function getCallerRow(db: D1Database, id: string): Promise<CallerRow | null> {
   const row = await db.prepare(`${CALLER_SELECT} WHERE callers.id = ?`).bind(id).first<CallerRow>();
-  return row ?? null;
+  if (!row) return null;
+  return { ...row, extra_phones: (await getExtraPhonesByCallerIds(db, [id])).get(id) ?? [] };
 }
 
 export async function listCallerAliases(db: D1Database, callerId: string): Promise<CallerAliasRow[]> {
@@ -6222,4 +6256,222 @@ export async function listWorkEventsForUser(
     .bind(...binds)
     .all<WorkEventRow>();
   return results ?? [];
+}
+
+// ---------------------------------------------------------------------------
+// Contact merge + multiple numbers — migration 0048. One merge path serves
+// both "associate a number / another contact" on a phoneless contact and the
+// "same name, different numbers" review list.
+// ---------------------------------------------------------------------------
+
+export class CallerMergeError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
+interface MergeCallerRow {
+  id: string;
+  name: string;
+  phone: string | null;
+  category: CallerCategory;
+  staff_user_id: string | null;
+  created_at: string;
+}
+
+/**
+ * Folds `mergedId` into `survivorId`: calls, site links, aliases and numbers
+ * move across (the merged contact's number becomes the survivor's main number
+ * if it has none, else an additional one), the merged contact is deleted, and
+ * a snapshot is written to caller_merges.
+ *
+ * - `keepName` must be one of the two names; the other is kept as an alias.
+ * - If either is staff (office/service), the result is staff: the survivor
+ *   takes that type and the login link, which is never changed. Two contacts
+ *   linked to different logins can't be merged.
+ */
+export async function mergeCallers(
+  db: D1Database,
+  input: { survivorId: string; mergedId: string; keepName: string; actorUserId: string | null }
+): Promise<CallerRow> {
+  if (input.survivorId === input.mergedId) throw new CallerMergeError("Pick two different contacts", 400);
+  const { results } = await db
+    .prepare(`SELECT id, name, phone, category, staff_user_id, created_at FROM callers WHERE id IN (?, ?)`)
+    .bind(input.survivorId, input.mergedId)
+    .all<MergeCallerRow>();
+  const survivor = results?.find((r) => r.id === input.survivorId);
+  const merged = results?.find((r) => r.id === input.mergedId);
+  if (!survivor || !merged) throw new CallerMergeError("Contact not found", 404);
+  if (survivor.staff_user_id && merged.staff_user_id && survivor.staff_user_id !== merged.staff_user_id) {
+    throw new CallerMergeError("Both contacts are linked to different staff logins — unlink one first", 409);
+  }
+  const keepName = input.keepName.trim();
+  if (keepName !== survivor.name.trim() && keepName !== merged.name.trim()) {
+    throw new CallerMergeError("The kept name must be one of the two contacts' names", 400);
+  }
+  const otherName = keepName === survivor.name.trim() ? merged.name.trim() : survivor.name.trim();
+
+  // Staff rule: either side staff → merged contact is staff, login unchanged.
+  const staffUserId = survivor.staff_user_id ?? merged.staff_user_id;
+  const category: CallerCategory = isStaffCategory(survivor.category)
+    ? survivor.category
+    : isStaffCategory(merged.category)
+      ? merged.category
+      : survivor.category;
+
+  const [aliasRows, siteRows, callRows, extraRows] = await Promise.all([
+    db.prepare(`SELECT id, alias FROM caller_aliases WHERE caller_id = ?`).bind(merged.id).all<{ id: string; alias: string }>(),
+    db.prepare(`SELECT site_id FROM caller_sites WHERE caller_id = ?`).bind(merged.id).all<{ site_id: string }>(),
+    db.prepare(`SELECT id FROM calls WHERE client_id = ?`).bind(merged.id).all<{ id: string }>(),
+    db.prepare(`SELECT phone FROM caller_phones WHERE caller_id = ?`).bind(merged.id).all<{ phone: string }>(),
+  ]);
+  const snapshot = {
+    caller: merged,
+    extra_phones: (extraRows.results ?? []).map((r) => r.phone),
+    aliases: (aliasRows.results ?? []).map((r) => r.alias),
+    site_ids: (siteRows.results ?? []).map((r) => r.site_id),
+    call_ids: (callRows.results ?? []).map((r) => r.id),
+    survivor_before: survivor,
+  };
+
+  const survivorPhone = survivor.phone ?? merged.phone;
+  const newExtra = survivor.phone && merged.phone ? merged.phone : null;
+  const nameAlias =
+    otherName && otherName.toLowerCase() !== keepName.toLowerCase() && /[a-zA-Z\u0900-\u097F]/.test(otherName)
+      ? otherName
+      : null;
+
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO caller_merges (id, survivor_id, merged_caller_id, merged_snapshot, calls_moved, merged_by_user_id)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .bind(crypto.randomUUID(), survivor.id, merged.id, JSON.stringify(snapshot), snapshot.call_ids.length, input.actorUserId),
+    db.prepare(`UPDATE calls SET client_id = ? WHERE client_id = ?`).bind(survivor.id, merged.id),
+    db
+      .prepare(`INSERT OR IGNORE INTO caller_sites (caller_id, site_id) SELECT ?, site_id FROM caller_sites WHERE caller_id = ?`)
+      .bind(survivor.id, merged.id),
+    db.prepare(`DELETE FROM caller_sites WHERE caller_id = ?`).bind(merged.id),
+    db.prepare(`UPDATE OR IGNORE caller_aliases SET caller_id = ? WHERE caller_id = ?`).bind(survivor.id, merged.id),
+    db.prepare(`DELETE FROM caller_aliases WHERE caller_id = ?`).bind(merged.id),
+    db.prepare(`UPDATE caller_phones SET caller_id = ? WHERE caller_id = ?`).bind(survivor.id, merged.id),
+    // Free the merged contact's number (UNIQUE) before the survivor takes it.
+    db.prepare(`UPDATE callers SET phone = NULL, staff_user_id = NULL WHERE id = ?`).bind(merged.id),
+    db
+      .prepare(`UPDATE callers SET name = ?, phone = ?, category = ?, staff_user_id = ? WHERE id = ?`)
+      .bind(keepName, survivorPhone, category, staffUserId, survivor.id),
+    ...(newExtra
+      ? [db.prepare(`INSERT OR IGNORE INTO caller_phones (phone, caller_id) VALUES (?, ?)`).bind(newExtra, survivor.id)]
+      : []),
+    ...(nameAlias
+      ? [
+          db
+            .prepare(`INSERT OR IGNORE INTO caller_aliases (id, caller_id, alias) VALUES (?, ?, ?)`)
+            .bind(crypto.randomUUID(), survivor.id, nameAlias),
+        ]
+      : []),
+    db.prepare(`DELETE FROM callers WHERE id = ?`).bind(merged.id),
+  ]);
+  const row = await getCallerRow(db, survivor.id);
+  return row!;
+}
+
+/** Survivor for a merge: the staff-linked contact, else a staff type, else
+ *  the one with more calls, else the older. Names are chosen separately. */
+export async function pickMergeSurvivor(db: D1Database, a: string, b: string): Promise<{ survivorId: string; mergedId: string }> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, (staff_user_id IS NOT NULL) AS linked, (category IN ${SQL_STAFF_CATEGORIES}) AS staff,
+              (SELECT COUNT(*) FROM calls WHERE client_id = callers.id) AS calls, created_at
+       FROM callers WHERE id IN (?, ?)
+       ORDER BY linked DESC, staff DESC, calls DESC, created_at ASC`
+    )
+    .bind(a, b)
+    .all<{ id: string }>();
+  const rows = results ?? [];
+  if (rows.length !== 2) throw new CallerMergeError("Contact not found", 404);
+  return { survivorId: rows[0].id, mergedId: rows[1].id };
+}
+
+export type AssociatePhoneResult =
+  | { status: "set"; caller: CallerRow }
+  | { status: "merged_unsaved"; caller: CallerRow; merged_name: string }
+  | { status: "conflict"; existing: CallerRow };
+
+/**
+ * Give a phoneless contact a number. If the number already belongs to an
+ * unsaved contact (its name is just the number), that contact is merged in
+ * and leaves Unsaved contacts. If it belongs to a named contact, nothing
+ * changes and the caller gets `conflict` — the UI offers a merge instead.
+ */
+export async function associateCallerPhone(
+  db: D1Database,
+  input: { callerId: string; phone: string; actorUserId: string | null }
+): Promise<AssociatePhoneResult> {
+  const phone = normalizeCallerPhone(input.phone);
+  if (!phone) throw new CallerMergeError("Enter a phone number", 400);
+  const target = await db.prepare(`SELECT id, name, phone FROM callers WHERE id = ?`).bind(input.callerId).first<{ id: string; name: string; phone: string | null }>();
+  if (!target) throw new CallerMergeError("Contact not found", 404);
+  const holder = await findCallerByPhone(db, phone);
+  if (!holder) {
+    if (target.phone) {
+      await db.prepare(`INSERT INTO caller_phones (phone, caller_id) VALUES (?, ?)`).bind(phone, target.id).run();
+    } else {
+      await db.prepare(`UPDATE callers SET phone = ? WHERE id = ?`).bind(phone, target.id).run();
+    }
+    return { status: "set", caller: (await getCallerRow(db, target.id))! };
+  }
+  if (holder.id === target.id) return { status: "set", caller: (await getCallerRow(db, target.id))! };
+  const holderRow = (await getCallerRow(db, holder.id))!;
+  if (isUnsavedPhoneContact(holderRow.name, holderRow.phone) && !holderRow.staff_user_id) {
+    const merged = await mergeCallers(db, {
+      survivorId: target.id,
+      mergedId: holder.id,
+      keepName: target.name,
+      actorUserId: input.actorUserId,
+    });
+    return { status: "merged_unsaved", caller: merged, merged_name: holderRow.name };
+  }
+  return { status: "conflict", existing: holderRow };
+}
+
+export interface SameNameGroup {
+  name: string;
+  contacts: (CallerRow & { calls: number })[];
+}
+
+/** "Same name, different numbers": named contacts sharing a name where at
+ *  least two carry different numbers. Staff rows included (their login shows). */
+export async function listSameNameCallerGroups(db: D1Database): Promise<SameNameGroup[]> {
+  const { results } = await db
+    .prepare(
+      `${CALLER_SELECT}
+       WHERE lower(trim(callers.name)) IN (
+         SELECT lower(trim(name)) FROM callers
+         WHERE phone IS NOT NULL AND category <> 'spam' AND trim(name) GLOB '*[a-zA-Z]*'
+         GROUP BY lower(trim(name)) HAVING COUNT(*) > 1
+       ) AND callers.category <> 'spam'
+       ORDER BY lower(trim(callers.name)), callers.created_at`
+    )
+    .all<CallerRow>();
+  const rows = results ?? [];
+  const ids = rows.map((r) => r.id);
+  const [phones, callCounts] = await Promise.all([
+    getExtraPhonesByCallerIds(db, ids),
+    queryAllByIdChunks<{ client_id: string; n: number }>(
+      db,
+      ids,
+      (ph) => `SELECT client_id, COUNT(*) AS n FROM calls WHERE client_id IN (${ph}) GROUP BY client_id`
+    ),
+  ]);
+  const calls = new Map((callCounts ?? []).map((r) => [r.client_id, r.n]));
+  const groups = new Map<string, SameNameGroup>();
+  for (const row of rows) {
+    const key = row.name.trim().toLowerCase();
+    const g = groups.get(key) ?? { name: row.name.trim(), contacts: [] };
+    g.contacts.push({ ...row, extra_phones: phones.get(row.id) ?? [], calls: calls.get(row.id) ?? 0 });
+    groups.set(key, g);
+  }
+  return [...groups.values()].filter((g) => g.contacts.length > 1);
 }
