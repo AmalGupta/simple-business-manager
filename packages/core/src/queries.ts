@@ -5827,7 +5827,12 @@ export type WorkEventType =
   | "marked_urgent"
   | "urgent_cleared"
   /** migration 0045 — bulk move of all open work to the router (the owner). */
-  | "rerouted";
+  | "rerouted"
+  /** Site task due date changed on (re)assign — from/to hold the dates. */
+  | "due_changed"
+  /** Call todo parked (status snoozed) / taken back out of parked. */
+  | "parked"
+  | "unparked";
 
 export interface WorkEventInput {
   kind: WorkItemKind;
@@ -6484,4 +6489,60 @@ export async function listSameNameCallerGroups(db: D1Database): Promise<SameName
     groups.set(key, g);
   }
   return [...groups.values()].filter((g) => g.contacts.length > 1);
+}
+
+export interface TaskAuditRow extends WorkEventRow {
+  actor_role: string | null;
+  subject_name: string | null;
+}
+
+/**
+ * Business-wide task audit (admin "Task Audit" tile): every transition on
+ * any call todo or site task, newest first. 'received' rows are left out —
+ * each is the mirror of a 'handed_off' row, which already names the
+ * receiver. Paged by rowid like listWorkEventsForUser.
+ */
+export async function listTaskAudit(
+  db: D1Database,
+  opts: { limit?: number; beforeSeq?: number | null } = {}
+): Promise<{ items: TaskAuditRow[]; today_count: number }> {
+  const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
+  const beforeClause = opts.beforeSeq != null ? `AND work_events.rowid < ?` : "";
+  const binds: unknown[] = [];
+  if (opts.beforeSeq != null) binds.push(opts.beforeSeq);
+  binds.push(limit);
+  // IST day boundary, as a UTC datetime('now')-style string.
+  const todayStartUtc = new Date(Date.parse(`${todayKeyKolkata()}T00:00:00+05:30`)).toISOString().replace("T", " ").slice(0, 19);
+  const [list, today] = await Promise.all([
+    db
+      .prepare(
+        `SELECT work_events.rowid AS seq, work_events.id AS id, work_events.item_kind AS item_kind, work_events.item_id AS item_id,
+                COALESCE(todos.text, workflow_stages.label) AS item_title,
+                sites.name AS site_name,
+                actor.name AS actor_name, actor.role AS actor_role,
+                work_events.subject_user_id AS subject_user_id, subject.name AS subject_name,
+                work_events.event AS event, work_events.from_value AS from_value, work_events.to_value AS to_value,
+                from_user.name AS from_user_name, to_user.name AS to_user_name,
+                work_events.created_at AS created_at
+         FROM work_events
+         LEFT JOIN todos ON work_events.item_kind = 'todo' AND todos.id = work_events.item_id
+         LEFT JOIN site_tasks ON work_events.item_kind = 'site_task' AND site_tasks.id = work_events.item_id
+         LEFT JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+         LEFT JOIN sites ON sites.id = work_events.site_id
+         LEFT JOIN users AS actor ON actor.id = work_events.actor_user_id
+         LEFT JOIN users AS subject ON subject.id = work_events.subject_user_id
+         LEFT JOIN users AS from_user ON from_user.id = work_events.from_value
+         LEFT JOIN users AS to_user ON to_user.id = work_events.to_value
+         WHERE work_events.event <> 'received' ${beforeClause}
+         ORDER BY work_events.rowid DESC
+         LIMIT ?`
+      )
+      .bind(...binds)
+      .all<TaskAuditRow>(),
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM work_events WHERE event <> 'received' AND created_at >= ?`)
+      .bind(todayStartUtc)
+      .first<{ n: number }>(),
+  ]);
+  return { items: list.results ?? [], today_count: today?.n ?? 0 };
 }

@@ -21,6 +21,7 @@ import {
   isWorkItemKind,
   listAssignedWork,
   listWorkEventsForUser,
+  listTaskAudit,
   logWorkEvents,
   setWorkScheduledFor,
   setWorkUrgent,
@@ -179,6 +180,22 @@ export async function handleGetWorkEvents(request: Request, env: Env): Promise<R
   const limit = Number(params.get("limit") ?? "100");
   return json(
     await listWorkEventsForUser(env.DB, userId, {
+      limit: Number.isFinite(limit) ? limit : 100,
+      beforeSeq: params.get("before_seq") ? Number(params.get("before_seq")) : null,
+    })
+  );
+}
+
+/** GET /api/work/audit?before_seq=&limit= — admin Task Audit: every task
+ *  transition business-wide, newest first, plus today's count for the tile. */
+export async function handleGetTaskAudit(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  if (session.user_role === "staff") return json({ error: "forbidden" }, 403);
+  const params = new URL(request.url).searchParams;
+  const limit = Number(params.get("limit") ?? "100");
+  return json(
+    await listTaskAudit(env.DB, {
       limit: Number.isFinite(limit) ? limit : 100,
       beforeSeq: params.get("before_seq") ? Number(params.get("before_seq")) : null,
     })
