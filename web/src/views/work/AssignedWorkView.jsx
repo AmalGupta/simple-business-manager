@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRightLeft, Check, ChevronRight, MapPin, MessageSquareWarning, Phone, Plus, Star } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Check, ChevronRight, MapPin, MessageSquareWarning, Phone, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtDate, fmtShort, todayIso } from "../../lib/dates.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES, WORKFLOW_CATEGORY_LABEL, WORK_LOCATIONS } from "../../lib/constants.js";
@@ -194,11 +194,6 @@ function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, hideSite,
         {item.kind === "complaint" && (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
             <MessageSquareWarning size={12} /> Complaint
-          </span>
-        )}
-        {item.important_at && (
-          <span style={{ color: t.accent, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
-            <Star size={12} /> Important
           </span>
         )}
         {overdue && <span style={{ color: t.putty, fontWeight: 700 }}>planned {fmtShort(item.scheduled_for)}</span>}

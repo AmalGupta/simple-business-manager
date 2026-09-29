@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowRightLeft, Check, MapPin, Star } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Check, MapPin } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtDate, fmtShort, todayIso } from "../../lib/dates.js";
 import { SMALL_SECONDARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
@@ -23,7 +23,7 @@ const sectionLabel = {
 
 /* SBM-71 — one complaint: what was said (voice note + transcript), photos and
    videos, and who holds it. The assignee plans it onto a day or passes it on,
-   like any task; an admin also assigns, flags urgent/important, and resolves.
+   like any task; an admin also assigns, flags urgent, and resolves.
    Urgent work is pinned to today and staff can't move it. */
 export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplaint, onBack, onOpenSite, onChanged }) {
   const [c, setC] = useState(null);
@@ -252,17 +252,9 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
               type="button"
               disabled={busy}
               onClick={() => act(() => patchWork("complaint", c.id, { urgent: !c.urgent_at }))}
-              style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, color: c.urgent_at ? t.signal : t.edge, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
+              style={{ ...SMALL_SECONDARY_BUTTON_STYLE, gridColumn: "1 / -1", minHeight: 44, color: c.urgent_at ? t.signal : t.edge, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
             >
               <AlertTriangle size={14} /> {c.urgent_at ? "Clear urgent" : "Mark urgent"}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => act(() => patchWork("complaint", c.id, { important: !c.important_at }))}
-              style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, color: c.important_at ? t.accent : t.edge, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
-            >
-              <Star size={14} /> {c.important_at ? "Clear important" : "Mark important"}
             </button>
             <button
               type="button"
