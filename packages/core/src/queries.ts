@@ -3676,6 +3676,7 @@ export interface ComplaintRow extends EscalationRow {
   important_at: string | null;
   resolved_by_name: string | null;
   voice_call_id: string | null;
+  due_date: string | null;
   /** Photos + videos attached, for the card's attachment hint. */
   media_count: number;
 }
@@ -3686,7 +3687,7 @@ const COMPLAINT_LIST_SELECT = `SELECT escalations.id, escalations.text, escalati
               escalations.source, creator.name AS created_by_name,
               escalations.assigned_to_user_id, assignee.name AS assignee_name,
               escalations.scheduled_for, escalations.urgent_at, escalations.important_at,
-              resolver.name AS resolved_by_name, escalations.voice_call_id,
+              resolver.name AS resolved_by_name, escalations.voice_call_id, escalations.due_date,
               (SELECT COUNT(*) FROM site_media WHERE site_media.escalation_id = escalations.id) AS media_count
        FROM escalations
        LEFT JOIN sites ON sites.id = escalations.site_id
@@ -3857,17 +3858,29 @@ export async function createEscalation(db: D1Database, input: NewEscalationInput
       input.voiceCallId ?? null
     )
     .run();
-  if (input.assignedToUserId) {
+  if ((input.source ?? "admin") === "staff_field") {
     await logWorkEvents(db, [
       {
         kind: "complaint",
         itemId: id,
         siteId: input.siteId ?? null,
         actorUserId: input.createdByUserId ?? null,
-        subjectUserId: input.assignedToUserId,
-        event: "assigned",
-        toValue: input.assignedToUserId,
+        subjectUserId: input.createdByUserId ?? null,
+        event: "created",
       },
+      ...(input.assignedToUserId
+        ? [
+            {
+              kind: "complaint" as const,
+              itemId: id,
+              siteId: input.siteId ?? null,
+              actorUserId: input.createdByUserId ?? null,
+              subjectUserId: input.assignedToUserId,
+              event: "assigned" as const,
+              toValue: input.assignedToUserId,
+            },
+          ]
+        : []),
     ]);
   }
   const row = await db.prepare(`SELECT * FROM escalations WHERE id = ?`).bind(id).first<Escalation>();
@@ -5998,6 +6011,9 @@ export type WorkEventType =
   /** SBM-71 — admin important flag on a complaint. */
   | "marked_important"
   | "important_cleared"
+  /** SBM-71 — a complaint was filed / moved to another site. */
+  | "created"
+  | "site_changed"
   /** SBM-67 — Office ↔ Factory changed by an admin; from/to hold the locations. */
   | "location_changed";
 
@@ -6123,7 +6139,7 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
     db
       .prepare(
         `SELECT escalations.id, escalations.text, escalations.site_id, sites.name AS site_name,
-                escalations.scheduled_for, escalations.urgent_at, escalations.important_at
+                escalations.scheduled_for, escalations.urgent_at, escalations.important_at, escalations.due_date
          FROM escalations LEFT JOIN sites ON sites.id = escalations.site_id
          WHERE escalations.assigned_to_user_id = ? AND escalations.status = 'open' AND escalations.source = 'staff_field'`
       )
@@ -6136,6 +6152,7 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
         scheduled_for: string | null;
         urgent_at: string | null;
         important_at: string | null;
+        due_date: string | null;
       }>(),
   ]);
   const plan = new Map((planRows.results ?? []).map((r) => [r.todo_id, r]));
@@ -6192,7 +6209,7 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
       call_id: null,
       client_name: null,
       category: null,
-      due_date: null,
+      due_date: c.due_date,
       scheduled_for: c.scheduled_for,
       urgent_at: c.urgent_at,
       context: null,
@@ -6530,7 +6547,7 @@ export async function getStaffRosterGrid(db: D1Database, to: string): Promise<St
     db
       .prepare(
         `SELECT 'complaint' AS kind, escalations.id AS id, escalations.text AS title, sites.name AS site_name,
-                NULL AS call_id, NULL AS due_date,
+                NULL AS call_id, escalations.due_date AS due_date,
                 escalations.scheduled_for AS scheduled_for, escalations.urgent_at AS urgent_at,
                 NULL AS context, escalations.assigned_to_user_id AS user_id
          FROM escalations
@@ -6890,10 +6907,13 @@ const TASK_AUDIT_SELECT = `
  */
 export async function listTaskAudit(
   db: D1Database,
-  opts: { limit?: number; beforeSeq?: number | null; q?: string | null } = {}
+  opts: { limit?: number; beforeSeq?: number | null; q?: string | null; scope?: "tasks" | "complaints" | "all" } = {}
 ): Promise<{ items: TaskAuditRow[]; today_count: number }> {
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
   const where: string[] = [`work_events.event <> 'received'`];
+  /* SBM-71: complaints have their own "Complaint audit" tab. */
+  if (opts.scope === "complaints") where.push(`work_events.item_kind = 'complaint'`);
+  else if (opts.scope === "tasks") where.push(`work_events.item_kind <> 'complaint'`);
   const binds: unknown[] = [];
   if (opts.beforeSeq != null) {
     where.push(`work_events.rowid < ?`);
@@ -7440,4 +7460,59 @@ export async function getEscalationIdForInstallationUpdate(db: D1Database, insta
     .bind(installationUpdateId)
     .first<{ id: string }>();
   return row?.id ?? null;
+}
+
+/**
+ * SBM-71 — admin edits a complaint's site and/or deadline (the "set up"
+ * step right after an admin files one, and the detail page). Each actual
+ * change is audited: 'site_changed' (event site_id = the new site) and
+ * 'due_changed' (from/to = the dates).
+ */
+export async function updateComplaintDetails(
+  db: D1Database,
+  id: string,
+  changes: { siteId?: string | null; dueDate?: string | null },
+  actorUserId: string
+): Promise<boolean> {
+  const before = await db
+    .prepare(`SELECT site_id, due_date, assigned_to_user_id FROM escalations WHERE id = ? AND source = 'staff_field'`)
+    .bind(id)
+    .first<{ site_id: string | null; due_date: string | null; assigned_to_user_id: string | null }>();
+  if (!before) return false;
+  const stmts: D1PreparedStatement[] = [];
+  const subject = before.assigned_to_user_id;
+  if (changes.siteId !== undefined && changes.siteId !== before.site_id) {
+    stmts.push(
+      db.prepare(`UPDATE escalations SET site_id = ? WHERE id = ?`).bind(changes.siteId, id),
+      workEventStmt(db, {
+        kind: "complaint",
+        itemId: id,
+        siteId: changes.siteId,
+        actorUserId,
+        subjectUserId: subject,
+        event: "site_changed",
+        fromValue: before.site_id,
+        toValue: changes.siteId,
+      })
+    );
+  }
+  if (changes.dueDate !== undefined && changes.dueDate !== before.due_date) {
+    stmts.push(
+      db.prepare(`UPDATE escalations SET due_date = ? WHERE id = ?`).bind(changes.dueDate, id),
+      workEventStmt(db, {
+        kind: "complaint",
+        itemId: id,
+        siteId: changes.siteId ?? before.site_id,
+        actorUserId,
+        subjectUserId: subject,
+        event: "due_changed",
+        fromValue: before.due_date,
+        toValue: changes.dueDate,
+      })
+    );
+  }
+  if (stmts.length) await db.batch(stmts);
+  const siteId = changes.siteId ?? before.site_id;
+  if (siteId) await touchSiteActivity(db, siteId, { source: "complaint", refId: id });
+  return true;
 }

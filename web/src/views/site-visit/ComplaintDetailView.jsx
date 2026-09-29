@@ -3,7 +3,7 @@ import { AlertTriangle, ArrowRightLeft, Check, MapPin, Star } from "lucide-react
 import { t } from "../../theme.js";
 import { fmtDate, fmtShort, todayIso } from "../../lib/dates.js";
 import { SMALL_SECONDARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
-import { fetchComplaint, fetchStaffRoster, patchWork, postWorkHandoff } from "../../lib/api.js";
+import { fetchComplaint, fetchStaffRoster, patchComplaintFields, patchWork, postWorkHandoff } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
@@ -97,6 +97,12 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
           {c.installation_label ? ` · ${c.installation_label}` : ""}
         </span>
         <ComplaintStatusLabel status={c.status} closedAt={c.closed_at} />
+        {c.due_date && open && (
+          <span style={{ fontSize: 13, fontWeight: 600, color: c.due_date < today ? t.putty : t.edge }}>
+            Deadline {fmtShort(c.due_date)}
+            {c.due_date < today ? " — passed" : ""}
+          </span>
+        )}
         {!open && c.resolved_by_name && <span style={{ fontSize: 12, color: t.edge2 }}>Resolved by {c.resolved_by_name}</span>}
         {urgent && (
           <span style={{ fontSize: 12, fontWeight: 700, color: t.signal, display: "flex", alignItems: "center", gap: 4 }}>
@@ -180,6 +186,20 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
         )}
         {canWork && c.scheduled_for && c.scheduled_for < today && !urgent && (
           <span style={{ fontSize: 12, fontWeight: 700, color: t.putty }}>Planned {fmtShort(c.scheduled_for)}, not done</span>
+        )}
+
+        {isAdmin && open && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: t.edge2 }}>
+            Deadline
+            <input
+              type="date"
+              aria-label="Deadline"
+              value={c.due_date ?? ""}
+              disabled={busy}
+              onChange={(e) => act(() => patchComplaintFields(c.id, { due_date: e.target.value || null }))}
+              style={{ ...TEXT_INPUT_STYLE, minHeight: 44, flex: 1, minWidth: 0 }}
+            />
+          </label>
         )}
 
         {/* Admin routes (assigns or reassigns) — works whether or not anyone holds it yet.

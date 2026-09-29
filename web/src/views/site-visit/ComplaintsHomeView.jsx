@@ -95,6 +95,9 @@ function ComplaintCard({ c, showAssignee, selfId, onOpen }) {
             )}
           </span>
         )}
+        {c.due_date && c.status === "open" && (
+          <span style={{ fontSize: 12, color: t.edge2 }}>Due {fmtShort(c.due_date)}</span>
+        )}
         {(showAssignee || raisedNotHeld) && (
           <span style={{ fontSize: 12, color: t.edge2 }}>
             {c.assignee_name ? `Assignee: ${c.assignee_name}` : "Not assigned yet"}
@@ -182,7 +185,7 @@ export function ComplaintsHomeView({
               whiteSpace: "nowrap",
             }}
           >
-            <Plus size={14} /> Add new complaint
+            <Plus size={14} /> Add complaint
           </button>
         )}
       </div>
