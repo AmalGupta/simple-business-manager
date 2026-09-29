@@ -33,6 +33,9 @@ import { CallersDirectoryView } from "./views/callers/CallersDirectoryView.jsx";
 import { MaintenanceSiteContactView } from "./views/maintenance/MaintenanceSiteContactView.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
+import { StaffHubView } from "./views/staff/StaffHubView.jsx";
+import { OffboardingListView } from "./views/staff/OffboardingListView.jsx";
+import { OffboardingView } from "./views/staff/OffboardingView.jsx";
 import { SitesReviewView } from "./views/sites/SitesReviewView.jsx";
 import { SiteView } from "./views/sites/SiteView.jsx";
 import { SiteVisitSiteList } from "./views/site-visit/SiteVisitSiteList.jsx";
@@ -989,7 +992,38 @@ export default function SimpleBusinessManager() {
       />
     );
 
-  if (view.name === "staff-directory") return shell(<StaffDirectoryView onBack={() => setView(homeView)} />);
+  /* SBM-64: the Staff tile opens a hub — Staff list, and Offboard a staff member. */
+  if (view.name === "staff-hub")
+    return shell(
+      <StaffHubView
+        staffCount={staffRoster.length}
+        onBack={() => setView(homeView)}
+        onOpenList={() => setView({ name: "staff-directory", from: view })}
+        onOpenOffboarding={() => setView({ name: "offboarding-list", from: view })}
+      />
+    );
+
+  if (view.name === "offboarding-list")
+    return shell(
+      <OffboardingListView
+        onBack={() => setView(view.from ?? { name: "staff-hub" })}
+        onOpen={(staffId) => setView({ name: "offboarding", staffId, from: view })}
+      />
+    );
+
+  if (view.name === "offboarding")
+    return shell(
+      <OffboardingView
+        key={view.staffId}
+        staffId={view.staffId}
+        onBack={() => setView(view.from ?? { name: "offboarding-list" })}
+        onOpenCall={(id) => setView({ name: "call", id, from: view })}
+        onFinished={() => setView(view.from ?? { name: "offboarding-list" })}
+      />
+    );
+
+  if (view.name === "staff-directory")
+    return shell(<StaffDirectoryView onBack={() => setView(view.from ?? { name: "staff-hub" })} />);
 
   if (view.name === "maintenance-site-contact")
     return shell(
@@ -1367,7 +1401,7 @@ export default function SimpleBusinessManager() {
           busyIds={busyIds}
         />
         {(me.role === "admin" || me.role === "superadmin") && (
-          <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-directory" })} />
+          <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-hub" })} />
         )}
         {(me.role === "admin" || me.role === "superadmin") && (
           <CallerTile count={callersCount} onOpen={() => setView({ name: "callers-directory" })} />

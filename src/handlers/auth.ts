@@ -33,6 +33,10 @@ import {
   findSimilarStaffUsers,
   relinkCallersFromStaffUser,
   deleteStaffUser,
+  hasJoined,
+  isIsoDate,
+  istTodayIso,
+  staffUserHasHistory,
   type SessionWithUser,
   type User,
   type UserCustomization,
@@ -132,6 +136,12 @@ export async function handleLogin(request: Request, env: Env): Promise<Response>
   if (!user || user.disabled_at) {
     if (isForm) return loginFailedRedirect(name);
     return json({ error: "invalid name or pin" }, 401);
+  }
+
+  /* SBM-64: a new hire's login opens on their joining day. */
+  if (!hasJoined(user.joined_on, istTodayIso())) {
+    if (isForm) return loginFailedRedirect(name);
+    return json({ error: "this account starts on its joining day" }, 403);
   }
 
   if (user.locked_until && new Date(user.locked_until) > new Date()) {
@@ -345,6 +355,9 @@ export async function handleListStaff(request: Request, env: Env): Promise<Respo
       role: u.role,
       pin: u.pin_encrypted ? await decryptPin(env, u.pin_encrypted) : null,
       is_self: u.id === gate.user_id,
+      joined_on: u.joined_on ?? null,
+      last_working_day: u.last_working_day ?? null,
+      disabled_at: u.disabled_at,
     }))
   );
   return json(rows);
@@ -387,14 +400,17 @@ export async function handleCreateStaff(request: Request, env: Env): Promise<Res
   const phone = typeof record.phone === "string" && record.phone.trim() ? record.phone.trim() : null;
   if (!name) return json({ error: "name is required" }, 400);
   if (await getUserByName(env.DB, name)) return json({ error: "a user with that name already exists" }, 409);
+  /* SBM-64: joining date — today by default, a future date allowed. */
+  const joinedOn = record.joined_on == null || record.joined_on === "" ? istTodayIso() : record.joined_on;
+  if (!isIsoDate(joinedOn)) return json({ error: "joined_on must be yyyy-mm-dd" }, 400);
 
   const pin = generateRandomPin();
   const { hash, salt } = await hashPin(env, pin);
   const pinEncrypted = await encryptPin(env, pin);
-  const user = await createUser(env.DB, name, hash, salt, "staff", normalizeCallerPhone(phone), pinEncrypted);
+  const user = await createUser(env.DB, name, hash, salt, "staff", normalizeCallerPhone(phone), pinEncrypted, joinedOn);
   // The login and the contact carrying its number are one person.
   await linkStaffUserContact(env.DB, user.id);
-  return json({ id: user.id, name: user.name, phone: user.phone, role: user.role, pin }, 201);
+  return json({ id: user.id, name: user.name, phone: user.phone, role: user.role, joined_on: user.joined_on, pin }, 201);
 }
 
 /** PATCH /api/staff/:id — admin editing a staff member's phone (e.g. backfilling it so site-assignment auto-fill has something to show). */
@@ -502,6 +518,12 @@ export async function handleDeleteStaff(request: Request, env: Env, id: string):
     typeof record.contact_action === "string" ? record.contact_action.trim() : "none";
   if (!["none", "unlink", "relink", "create"].includes(contactAction)) {
     return json({ error: "contact_action must be none, unlink, relink, or create" }, 400);
+  }
+
+  /* SBM-64: anyone who has done work is offboarded, not deleted — deleting
+     would strip their name from history (and trip work_events' user FK). */
+  if (await staffUserHasHistory(env.DB, id)) {
+    return json({ error: "this person has work history — offboard them instead of deleting" }, 409);
   }
 
   const linked = await listCallersLinkedToStaffUser(env.DB, id);

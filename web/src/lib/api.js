@@ -452,11 +452,11 @@ export async function fetchStaffRoster() {
   return res.json();
 }
 
-export async function postCreateStaff(name, phone) {
+export async function postCreateStaff(name, phone, joinedOn) {
   const res = await fetch("/api/staff", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, phone: phone || null }),
+    body: JSON.stringify({ name, phone: phone || null, joined_on: joinedOn || null }),
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
@@ -480,6 +480,34 @@ export async function postResetStaffPin(id) {
   if (!res.ok) throw new Error(`POST /api/staff/${id}/reset-pin → ${res.status}`);
   return res.json();
 }
+
+/* SBM-64 staff transitions — notice-period offboarding (migration 0050).
+   Session-cookie gated, admin only, same as the rest of /api/staff*. */
+async function staffJson(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `${method} ${path} → ${res.status}`);
+  return data;
+}
+
+export const fetchOffboardingList = () => staffJson("GET", "/api/staff/offboarding");
+export const fetchOffboarding = (id) => staffJson("GET", `/api/staff/${id}/offboarding`);
+export const postStartOffboarding = (id, lastWorkingDay) =>
+  staffJson("POST", `/api/staff/${id}/offboarding`, { last_working_day: lastWorkingDay });
+export const patchLastWorkingDay = (id, lastWorkingDay) =>
+  staffJson("PATCH", `/api/staff/${id}/offboarding`, { last_working_day: lastWorkingDay });
+export const deleteOffboarding = (id) => staffJson("DELETE", `/api/staff/${id}/offboarding`);
+/** items: [{kind, id}]; toUserId: a staff id, or "self" for the acting admin. */
+export const postOffboardingTransfer = (id, items, toUserId) =>
+  staffJson("POST", `/api/staff/${id}/offboarding/transfer`, { items, to_user_id: toUserId });
+export const postOffboardingHandoverSite = (id, siteId, toUserId) =>
+  staffJson("POST", `/api/staff/${id}/offboarding/handover-site`, { site_id: siteId, to_user_id: toUserId });
+export const postOffboardingFinishNow = (id) => staffJson("POST", `/api/staff/${id}/offboarding/finish-now`);
+export const postReactivateStaff = (id) => staffJson("POST", `/api/staff/${id}/reactivate`);
 
 export async function fetchStaffDeletePreview(id) {
   const res = await fetch(`/api/staff/${id}/delete-preview`);
