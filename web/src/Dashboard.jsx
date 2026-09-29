@@ -32,6 +32,8 @@ import { CallersDirectoryView } from "./views/callers/CallersDirectoryView.jsx";
 import { MaintenanceSiteContactView } from "./views/maintenance/MaintenanceSiteContactView.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
+import { StaffLanguagePicker } from "./views/staff/StaffLanguagePicker.jsx";
+import { LanguageProvider } from "./lib/i18n.jsx";
 import { StaffHubView } from "./views/staff/StaffHubView.jsx";
 import { OffboardingListView } from "./views/staff/OffboardingListView.jsx";
 import { OffboardingView } from "./views/staff/OffboardingView.jsx";
@@ -105,6 +107,8 @@ export default function SimpleBusinessManager() {
   /** Home tile count — from summary (read-only); list loads on My call tasks. */
   const [myOpenTodosCount, setMyOpenTodosCount] = useState(0);
   const [urgentWorkCount, setUrgentWorkCount] = useState(0);
+  /** SBM-72 — open complaints assigned to this staff member (red line on the Assigned work tile). */
+  const [assignedComplaintsCount, setAssignedComplaintsCount] = useState(0);
   /** Admin home bookmark tabs — staff holding ≥1 open call todo, site stage, or complaint. */
   const [staffWithOpenTodos, setStaffWithOpenTodos] = useState([]);
   /** Selected admin-home tab: "admin" or a staff user id. */
@@ -186,6 +190,7 @@ export default function SimpleBusinessManager() {
     setMyOpenTodos([]);
     setMyOpenTodosCount(0);
     setUrgentWorkCount(0);
+    setAssignedComplaintsCount(0);
     setStaffWithOpenTodos([]);
     setHomeTab("admin");
     setStaffPanel(null);
@@ -207,6 +212,7 @@ export default function SimpleBusinessManager() {
       setStaffRoster(summary.staff_roster ?? []);
       setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
       setUrgentWorkCount(summary.urgent_work_count ?? 0);
+      setAssignedComplaintsCount(summary.assigned_complaints_count ?? 0);
     };
 
     if (me.role === "staff") {
@@ -385,6 +391,7 @@ export default function SimpleBusinessManager() {
                   summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0,
                 sites: summary.sites ?? [],
                 urgentWorkCount: summary.urgent_work_count ?? 0,
+                assignedComplaintsCount: summary.assigned_complaints_count ?? 0,
               });
             })
             .catch((err) => console.error("[sbm] failed to refresh staff panel after todo mutate", err));
@@ -463,6 +470,7 @@ export default function SimpleBusinessManager() {
             staffSum.my_open_todos_count ?? staffSum.my_open_todos?.length ?? 0,
           sites: staffSum.sites ?? [],
           urgentWorkCount: staffSum.urgent_work_count ?? 0,
+          assignedComplaintsCount: staffSum.assigned_complaints_count ?? 0,
         });
       }
     } catch (err) {
@@ -518,6 +526,7 @@ export default function SimpleBusinessManager() {
                   openSiteTasks: summary.open_site_tasks ?? [],
                   myOpenTodosCount: summary.my_open_todos_count ?? 0,
                   urgentWorkCount: summary.urgent_work_count ?? 0,
+                assignedComplaintsCount: summary.assigned_complaints_count ?? 0,
                 }
               : prev
           );
@@ -526,6 +535,7 @@ export default function SimpleBusinessManager() {
         setOpenSiteTasks(summary.open_site_tasks ?? []);
         setMyOpenTodosCount(summary.my_open_todos_count ?? 0);
         setUrgentWorkCount(summary.urgent_work_count ?? 0);
+      setAssignedComplaintsCount(summary.assigned_complaints_count ?? 0);
       })
       .catch((err) => console.error("[sbm] failed to refresh work counts", err));
   }, []);
@@ -553,6 +563,7 @@ export default function SimpleBusinessManager() {
             summary.my_open_todos_count ?? summary.my_open_todos?.length ?? 0,
           sites: summary.sites ?? [],
           urgentWorkCount: summary.urgent_work_count ?? 0,
+                assignedComplaintsCount: summary.assigned_complaints_count ?? 0,
         }));
       })
       .catch((err) => {
@@ -605,7 +616,13 @@ export default function SimpleBusinessManager() {
     setMe((m) => (m ? { ...m, customization: next } : m));
   }, []);
 
+  /* SBM-72 — staff see their screens in their display language (Hindi by
+     default); admin screens stay English, including when an admin opens a
+     staff member's bookmark. */
+  const displayLang = me?.role === "staff" ? me.display_language ?? "hi" : "en";
+
   const shell = (children, { wide = false, fillViewport = false } = {}) => (
+    <LanguageProvider lang={displayLang}>
     <div
       className={fillViewport ? "sbm-fill-viewport" : undefined}
       data-inner-scrolls={innerScrolls ? "1" : "0"}
@@ -710,6 +727,7 @@ export default function SimpleBusinessManager() {
         {children}
       </main>
     </div>
+    </LanguageProvider>
   );
 
   if (me === undefined) return shell(<p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>);
@@ -1067,6 +1085,7 @@ export default function SimpleBusinessManager() {
           openSiteTasks={openSiteTasks}
           myOpenTodosCount={myOpenTodosCount}
           urgentWorkCount={urgentWorkCount}
+          assignedComplaintsCount={assignedComplaintsCount}
           sites={allSites}
           complaintsRefreshKey={complaintsRefreshKey}
           onOpenAssignedWork={() => setView({ name: "assigned-work", from: { name: "staff-home" } })}
@@ -1211,9 +1230,9 @@ export default function SimpleBusinessManager() {
   if (view.name === "complaint-sites")
     return shellInStaffBookmark(
       <SiteVisitSiteList
-        title="New complaint"
-        prompt="Which site is this about?"
-        addLabel="Add new site"
+        titleKey="newComplaint"
+        promptKey="whichSite"
+        addLabelKey="addNewSite"
         forUserId={view.forUserId || null}
         onBack={() =>
           setView(
@@ -1329,10 +1348,13 @@ export default function SimpleBusinessManager() {
         staffPanelLoading ? (
           <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
         ) : staffPanel?.userId === homeTab ? (
+          <>
+          <StaffLanguagePicker staffId={homeTab} staffName={staffWithOpenTodos.find((s) => s.id === homeTab)?.name} />
           <StaffHomePanel
             openSiteTasks={staffPanel.openSiteTasks}
             myOpenTodosCount={staffPanel.myOpenTodosCount}
             urgentWorkCount={staffPanel.urgentWorkCount}
+            assignedComplaintsCount={staffPanel.assignedComplaintsCount ?? 0}
             sites={staffPanel.sites}
             complaintsRefreshKey={complaintsRefreshKey}
             forUserId={homeTab}
@@ -1346,6 +1368,7 @@ export default function SimpleBusinessManager() {
               setView({ name: "complaints-home", forUserId: homeTab, from: { name: "home" } })
             }
           />
+          </>
         ) : (
           <p style={{ fontSize: 14, color: t.edge2 }}>Couldn’t load this staff dashboard.</p>
         )

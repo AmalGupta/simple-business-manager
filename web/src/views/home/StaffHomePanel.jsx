@@ -10,6 +10,7 @@ export function StaffHomePanel({
   openSiteTasks,
   myOpenTodosCount,
   urgentWorkCount = 0,
+  assignedComplaintsCount = 0,
   sites,
   complaintsRefreshKey = 0,
   forUserId = null,
@@ -31,6 +32,7 @@ export function StaffHomePanel({
       <AssignedWorkTile
         count={(myOpenTodosCount ?? 0) + openSiteTasks.length}
         urgentCount={urgentWorkCount}
+        complaintsCount={assignedComplaintsCount}
         onOpen={onOpenAssignedWork}
       />
 

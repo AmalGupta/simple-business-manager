@@ -5,6 +5,7 @@ import { PRIMARY_BUTTON_STYLE } from "../../styles.js";
 import { postSiteComplaint } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
+import { useT } from "../../lib/i18n.jsx";
 import { VoiceNoteModal } from "../sites/VoiceNoteModal.jsx";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 
@@ -28,6 +29,7 @@ const actionButtonStyle = (busy) => ({
    then optional photo/video once voice is attached. Writes to escalations
    (admin tile) and site timeline media. */
 export function SiteComplaintForm({ site, onBack, onSubmitted }) {
+  const tr = useT();
   const [text, setText] = useState("");
   const [voice, setVoice] = useState(null); // { blob, fileName, previewUrl }
   const [media, setMedia] = useState([]); // { file, previewUrl?, kind }
@@ -67,7 +69,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
     try {
       const created = await postSiteComplaint(
         site.id,
-        text.trim() || `Complaint at ${site.name}`,
+        text.trim() || tr("complaintAt", { site: site.name }),
         voice.blob,
         voice.fileName,
         media.map((m) => m.file)
@@ -75,7 +77,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
       onSubmitted?.(created);
     } catch (err) {
       console.error("[sbm] failed to file complaint", err);
-      setError(err.message || "Failed to submit — try again.");
+      setError(err.message || tr("failedSubmit"));
     } finally {
       setSaving(false);
     }
@@ -85,22 +87,22 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
 
   return (
     <div>
-      <BackLink onClick={onBack}>Back</BackLink>
+      <BackLink onClick={onBack}>{tr("back")}</BackLink>
       <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
-        {site.name} — Complaint
+        {tr("complaintTitle", { site: site.name })}
       </h1>
 
       <Card>
         {!voice ? (
           <>
             <p style={{ fontSize: 14, color: t.edge2, margin: "0 0 12px", lineHeight: 1.5 }}>
-              Record a voice note describing the complaint. You can add photos or video after.
+              {tr("recordComplaintHint")}
             </p>
             <button
               onClick={() => setShowVoiceModal(true)}
               style={{ ...actionButtonStyle(false), width: "100%", justifyContent: "center" }}
             >
-              <Mic size={15} /> Record voice note
+              <Mic size={15} /> {tr("recordVoiceNote")}
             </button>
           </>
         ) : (
@@ -119,7 +121,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
             >
               <Check size={18} color={t.accent} style={{ flexShrink: 0, marginTop: 2 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: t.edge, marginBottom: 6 }}>Voice note attached</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: t.edge, marginBottom: 6 }}>{tr("voiceNoteAttached")}</div>
                 <AudioPlayer src={voice.previewUrl} />
                 <button
                   onClick={() => setShowVoiceModal(true)}
@@ -134,7 +136,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
                     cursor: "pointer",
                   }}
                 >
-                  Re-record
+                  {tr("reRecord")}
                 </button>
               </div>
             </div>
@@ -142,7 +144,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="Optional short note (voice note is the main record)"
+              placeholder={tr("optionalNote")}
               rows={3}
               style={{
                 width: "100%",
@@ -188,7 +190,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
                 onClick={() => photoInputRef.current?.click()}
                 style={actionButtonStyle(saving)}
               >
-                <Image size={15} /> Add photo
+                <Image size={15} /> {tr("addPhoto")}
               </button>
               <button
                 type="button"
@@ -196,7 +198,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
                 onClick={() => videoInputRef.current?.click()}
                 style={actionButtonStyle(saving)}
               >
-                <Video size={15} /> Add video
+                <Video size={15} /> {tr("addVideo")}
               </button>
             </div>
 
@@ -239,7 +241,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
                         cursor: "pointer",
                       }}
                     >
-                      Remove
+                      {tr("remove")}
                     </button>
                   </div>
                 ))}
@@ -261,7 +263,7 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
             opacity: canSubmit ? 1 : 0.6,
           }}
         >
-          {saving ? "Submitting…" : "Submit complaint"}
+          {saving ? tr("submitting") : tr("submitComplaint")}
         </button>
       </Card>
 

@@ -5103,6 +5103,8 @@ export interface DashboardSummary {
   staff_with_open_todos: StaffWithOpenTodosRow[];
   /** Staff-scoped summaries only (migration 0044) — open urgent work for that person. */
   urgent_work_count?: number;
+  /** Staff-scoped summaries only (SBM-72) — open complaints assigned to that person (the red line on Assigned work). */
+  assigned_complaints_count?: number;
 }
 
 export interface StaffWithOpenTodosRow {
@@ -5835,11 +5837,18 @@ export async function getDashboardSummary(
   viewerUserId?: string | null
 ): Promise<DashboardSummary> {
   if (forUserId) {
-    const [sites, open_site_tasks, my_open_todos_count, urgent_work_count] = await Promise.all([
+    const [sites, open_site_tasks, my_open_todos_count, urgent_work_count, complaintRow] = await Promise.all([
       listSites(db, forUserId),
       listOpenSiteTasks(db, forUserId),
       countMyOpenTodos(db, forUserId),
       countUrgentWork(db, forUserId),
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM escalations
+           WHERE assigned_to_user_id = ? AND status = 'open' AND source = 'staff_field'`
+        )
+        .bind(forUserId)
+        .first<{ n: number }>(),
     ]);
     return {
       open_today: 0,
@@ -5861,6 +5870,7 @@ export async function getDashboardSummary(
       resolved_calls_count: 0,
       staff_with_open_todos: [],
       urgent_work_count,
+      assigned_complaints_count: complaintRow?.n ?? 0,
     };
   }
 
@@ -5986,6 +5996,8 @@ export interface WorkItem {
   work_location: WorkLocation;
   /** SBM-67 — sites.poc_contact_number, shown on the site tile. */
   site_contact_number: string | null;
+  /** SBM-72 — site stages only: the fixed stage id, so the UI can show a translated label. */
+  stage_id?: string | null;
 }
 
 export type WorkEventType =
@@ -6194,6 +6206,7 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
       assignee_name: tk.assignee_name,
       work_location: effectiveWorkLocation(tk.work_location, tk.category),
       site_contact_number: null,
+      stage_id: tk.stage_id,
     });
   }
   for (const c of complaints.results ?? []) {
