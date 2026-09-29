@@ -39,6 +39,15 @@ const headStyle = {
   textAlign: "left",
 };
 
+/* SBM-64: a day outside someone's working span — before their joining day,
+   or after their last working day while on notice. Grey + hatched so it
+   reads as "not available", not just "empty". Work planned into one of
+   these days still shows, which is itself a flag to move it. */
+const outsideSpanStyle = {
+  background: `repeating-linear-gradient(135deg, ${t.pane}, ${t.pane} 6px, ${t.frost} 6px, ${t.frost} 7px)`,
+  color: t.edge2,
+};
+
 const stickyCol = { position: "sticky", left: 0, background: t.white, zIndex: 1, borderLeft: "none", minWidth: 96 };
 
 function weekdayLabel(iso) {
@@ -285,8 +294,15 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
                           style={{
                             ...cellStyle,
                             ...(d === today ? { background: t.frostSoft } : {}),
-                            ...(outside(d) ? { background: t.pane } : {}),
+                            ...(outside(d) ? outsideSpanStyle : {}),
                           }}
+                          title={
+                            outside(d)
+                              ? s.joined_on && d < s.joined_on
+                                ? `Before ${s.name} joins`
+                                : `After ${s.name}’s last working day`
+                              : undefined
+                          }
                         >
                           <CellList
                             items={row.byDay.get(d) ?? []}
