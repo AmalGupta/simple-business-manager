@@ -65,14 +65,14 @@ export function SiteComplaintForm({ site, onBack, onSubmitted }) {
     setSaving(true);
     setError("");
     try {
-      await postSiteComplaint(
+      const created = await postSiteComplaint(
         site.id,
         text.trim() || `Complaint at ${site.name}`,
         voice.blob,
         voice.fileName,
         media.map((m) => m.file)
       );
-      onSubmitted?.();
+      onSubmitted?.(created);
     } catch (err) {
       console.error("[sbm] failed to file complaint", err);
       setError(err.message || "Failed to submit — try again.");

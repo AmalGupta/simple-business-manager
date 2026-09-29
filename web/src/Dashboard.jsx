@@ -43,6 +43,7 @@ import { InstallationScreen } from "./views/site-visit/InstallationScreen.jsx";
 import { SiteComplaintForm } from "./views/site-visit/SiteComplaintForm.jsx";
 import { ComplaintsHomeView } from "./views/site-visit/ComplaintsHomeView.jsx";
 import { ComplaintDetailView } from "./views/site-visit/ComplaintDetailView.jsx";
+import { ComplaintSetupView } from "./views/site-visit/ComplaintSetupView.jsx";
 import { ComplaintsTile } from "./views/site-visit/ComplaintsTile.jsx";
 import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
@@ -1182,7 +1183,7 @@ export default function SimpleBusinessManager() {
         onAddComplaint={() =>
           setView({ name: "complaint-sites", from: view, forUserId: view.forUserId })
         }
-        canAdd={me.role === "staff"}
+        canAdd
         canAssign={me.role !== "staff" && !view.forUserId}
         selfId={me.role === "staff" ? me.id : view.forUserId || null}
         onOpenComplaint={(id) => setView({ name: "complaint", id, from: view, forUserId: view.forUserId })}
@@ -1287,13 +1288,29 @@ export default function SimpleBusinessManager() {
             }
           )
         }
-        onSubmitted={() => {
+        onSubmitted={(created) => {
           setComplaintsRefreshKey((k) => k + 1);
-          setView({
-            name: "complaints-home",
-            from: homeView,
-            forUserId: view.forUserId,
-          });
+          const list = { name: "complaints-home", from: homeView, forUserId: view.forUserId };
+          /* SBM-71: an admin gets the set-up step (urgent / site / deadline / route). */
+          if (me.role !== "staff" && created?.id) {
+            setView({ name: "complaint-setup", complaint: created, site: view.site, from: list });
+            return;
+          }
+          setView(list);
+        }}
+      />
+    );
+
+  if (view.name === "complaint-setup")
+    return shell(
+      <ComplaintSetupView
+        complaint={view.complaint}
+        site={view.site}
+        me={me}
+        staffRoster={staffRoster}
+        onDone={(id) => {
+          setComplaintsRefreshKey((k) => k + 1);
+          setView({ name: "complaint", id, from: view.from ?? { name: "complaints-home", from: homeView } });
         }}
       />
     );

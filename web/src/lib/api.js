@@ -1003,6 +1003,21 @@ export async function fetchStaffComplaints() {
 }
 
 /** Site-level complaint — voice note required; optional text + photo/video attachments. */
+/** SBM-71 — admin sets any of { assigned_to_user_id, site_id, due_date } on a complaint; returns the detail. */
+export async function patchComplaintFields(id, patch) {
+  const res = await fetch(`/api/complaints/${id}`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/complaints/${id} → ${res.status}`);
+  }
+  return res.json();
+}
+
 /** SBM-71 — one complaint with its voice transcript and photos/videos. */
 export async function fetchComplaint(id) {
   const res = await fetch(`/api/complaints/${id}`, { credentials: "same-origin" });
@@ -1013,6 +1028,7 @@ export async function fetchComplaint(id) {
   return res.json();
 }
 
+/** Resolves to the created complaint ({ id, … }). */
 export async function postSiteComplaint(siteId, text, blob, fileName, mediaFiles = []) {
   const fd = new FormData();
   if (text?.trim()) fd.append("text", text.trim());
@@ -1183,8 +1199,9 @@ export function fetchSameNameCallers() {
 }
 
 /** Admin Task Audit — { items: [...], today_count }. Paged by `seq`. */
-export function fetchTaskAudit({ beforeSeq, limit = 100, q } = {}) {
-  const params = new URLSearchParams({ limit: String(limit) });
+/** scope: "tasks" (todos + site stages, the default) or "complaints" (SBM-71 Complaint audit tab). */
+export function fetchTaskAudit({ beforeSeq, limit = 100, q, scope = "tasks" } = {}) {
+  const params = new URLSearchParams({ limit: String(limit), scope });
   if (beforeSeq != null) params.set("before_seq", String(beforeSeq));
   if (q && q.trim()) params.set("q", q.trim());
   return workFetch(`/api/work/audit?${params}`);

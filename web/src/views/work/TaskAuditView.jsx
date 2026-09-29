@@ -15,6 +15,8 @@ const TABS = [
   { id: "date", label: "By date" },
   { id: "site", label: "By site" },
   { id: "assignee", label: "By assignee" },
+  /* SBM-71: every complaint step, from "Complaint filed" to resolved. */
+  { id: "complaints", label: "Complaint audit" },
 ];
 
 const th = {
@@ -173,6 +175,7 @@ export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initial
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [selectedAssignee, setSelectedAssignee] = useState(null);
+  const scope = tab === "complaints" ? "complaints" : "tasks";
 
   useEffect(() => {
     const timer = setTimeout(() => setAppliedQ(q.trim()), SEARCH_DEBOUNCE_MS);
@@ -190,7 +193,7 @@ export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initial
     let cancelled = false;
     setItems(null);
     setError(null);
-    fetchTaskAudit({ limit: PAGE, q: appliedQ })
+    fetchTaskAudit({ limit: PAGE, q: appliedQ, scope })
       .then((r) => {
         if (cancelled) return;
         setItems(r.items ?? []);
@@ -203,13 +206,13 @@ export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initial
     return () => {
       cancelled = true;
     };
-  }, [appliedQ]);
+  }, [appliedQ, scope]);
 
   const loadMore = useCallback(async () => {
     if (!items?.length) return;
     setLoadingMore(true);
     try {
-      const r = await fetchTaskAudit({ limit: PAGE, beforeSeq: items[items.length - 1].seq, q: appliedQ });
+      const r = await fetchTaskAudit({ limit: PAGE, beforeSeq: items[items.length - 1].seq, q: appliedQ, scope });
       setItems((prev) => [...prev, ...(r.items ?? [])]);
       setHasMore((r.items ?? []).length === PAGE);
     } catch (err) {
@@ -217,7 +220,7 @@ export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initial
     } finally {
       setLoadingMore(false);
     }
-  }, [items, appliedQ]);
+  }, [items, appliedQ, scope]);
 
   const byDate = useMemo(() => (items ? groupBy(items, auditDayKey) : []), [items]);
   const bySite = useMemo(() => (items ? groupBy(items, (e) => e.site_name ?? "No site") : []), [items]);
@@ -264,12 +267,16 @@ export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initial
       {items && items.length === 0 && (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>
-            {appliedQ ? `No task changes match “${appliedQ}”.` : "No task activity yet."}
+            {appliedQ
+              ? `No ${scope === "complaints" ? "complaint" : "task"} changes match “${appliedQ}”.`
+              : scope === "complaints"
+                ? "No complaint activity yet."
+                : "No task activity yet."}
           </p>
         </Card>
       )}
 
-      {items && items.length > 0 && tab === "date" &&
+      {items && items.length > 0 && (tab === "date" || tab === "complaints") &&
         byDate.map(([day, rows]) => (
           <GroupCard key={day} title={fmtLong(day)} count={rows.length}>
             <AuditTable rows={rows} onOpenTask={onOpenTask} timeOnly />

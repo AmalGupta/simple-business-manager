@@ -208,6 +208,8 @@ export interface Escalation {
   important_at?: string | null;
   resolved_by_user_id?: string | null;
   voice_call_id?: string | null;
+  /** migration 0052 — admin-set deadline. */
+  due_date?: string | null;
 }
 
 /** migration 0033/0034: an in-app "request/report an issue" form — voice only, filed directly into Jira. */
