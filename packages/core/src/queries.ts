@@ -5899,7 +5899,8 @@ export async function getDashboardSummary(
     getCallsCount(db),
     countCallersByBucket(db).then((b) => ({ n: b.saved + b.unsaved })),
     getSitesNeedingAttention(db),
-    listOpenEscalations(db),
+    /* SBM-71: the Escalations tile is gone (complaints replaced it); field kept empty for API compatibility. */
+    Promise.resolve([] as EscalationRow[]),
     listSites(db),
     listStaffRoster(db),
     listOpenSiteTasks(db),
