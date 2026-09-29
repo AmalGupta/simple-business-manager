@@ -75,6 +75,16 @@ import {
   handleStaffDeletePreview,
   handleDeleteStaff,
 } from "./handlers/auth";
+import {
+  handleCancelOffboarding,
+  handleGetOffboarding,
+  handleListOffboarding,
+  handleOffboardingFinishNow,
+  handleOffboardingHandoverSite,
+  handleOffboardingTransfer,
+  handleReactivateStaff,
+  handleStartOffboarding,
+} from "./handlers/staff-transition";
 import { handleGetCallRecording, handleGetMedia, handleGetSiteMedia, handlePostSiteMedia } from "./handlers/site-media";
 import {
   handleCreateCaller,
@@ -125,7 +135,7 @@ import {
   handlePostSiteComplaint,
 } from "./handlers/installation";
 import { assertSiteMembership, requireSession } from "./lib/auth";
-import { getDrivePollSettings } from "@sbm/core";
+import { finalizeDueOffboardings, getDrivePollSettings } from "@sbm/core";
 import { pollDriveCalls } from "./lib/drive-calls-poller";
 
 export interface Env {
@@ -550,6 +560,28 @@ export default {
       return handleStaffDeletePreview(request, env, staffDeletePreviewMatch[1]);
     }
 
+    // --- SBM-64 staff transitions (migration 0050) — admin only. ---
+    if (url.pathname === "/api/staff/offboarding" && request.method === "GET") {
+      return handleListOffboarding(request, env);
+    }
+    const offboardMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/offboarding$/);
+    if (offboardMatch) {
+      if (request.method === "GET") return handleGetOffboarding(request, env, offboardMatch[1]);
+      if (request.method === "POST" || request.method === "PATCH") return handleStartOffboarding(request, env, offboardMatch[1]);
+      if (request.method === "DELETE") return handleCancelOffboarding(request, env, offboardMatch[1]);
+    }
+    const offboardActionMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/offboarding\/(transfer|handover-site|finish-now)$/);
+    if (offboardActionMatch && request.method === "POST") {
+      const [, staffId, action] = offboardActionMatch;
+      if (action === "transfer") return handleOffboardingTransfer(request, env, staffId);
+      if (action === "handover-site") return handleOffboardingHandoverSite(request, env, staffId);
+      return handleOffboardingFinishNow(request, env, staffId);
+    }
+    const reactivateMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/reactivate$/);
+    if (reactivateMatch && request.method === "POST") {
+      return handleReactivateStaff(request, env, reactivateMatch[1]);
+    }
+
     const staffDeleteMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/delete$/);
     if (staffDeleteMatch && request.method === "POST") {
       return handleDeleteStaff(request, env, staffDeleteMatch[1]);
@@ -790,6 +822,14 @@ export default {
   },
 
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    /* SBM-64: runs every tick regardless of the drive-poll switch below —
+       finalizes any offboarding whose last working day has passed. */
+    try {
+      const finished = await finalizeDueOffboardings(env.DB);
+      for (const f of finished) console.log(`[offboarding] finalized ${f.userId}, rerouted=${f.rerouted}`);
+    } catch (err) {
+      console.error("[offboarding] finalize failed:", String(err));
+    }
     const settings = await getDrivePollSettings(env.DB);
     if (!settings.enabled) {
       console.log("[drive-poll] skipped — permanent polling off");

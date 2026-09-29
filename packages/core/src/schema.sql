@@ -355,7 +355,15 @@ CREATE TABLE users (
   -- encryptPin/decryptPin) — lets admin/superadmin view a staff member's PIN
   -- from the Staff page. NULL until the PIN is next set/reset under this
   -- scheme.
-  pin_encrypted   TEXT
+  pin_encrypted   TEXT,
+
+  -- migration 0050 (SBM-64): staff transitions. joined_on gates login and the
+  -- roster row; last_working_day is set while offboarding, and the day after
+  -- it the cron hands leftovers to the router and sets disabled_at.
+  joined_on              TEXT,
+  last_working_day       TEXT,
+  offboarding_started_at TEXT,
+  offboarding_started_by TEXT REFERENCES users(id)
 );
 
 CREATE TABLE sessions (
@@ -447,6 +455,8 @@ CREATE INDEX idx_todo_assignees_scheduled ON todo_assignees(user_id, scheduled_f
 --          rerouted (migration 0045 bulk move to the router) |
 --          marked_urgent | urgent_cleared |
 --          location_changed (migration 0049, SBM-67 — Office ↔ Factory)
+--          offboard_rerouted (migration 0050, SBM-64 — left after the
+--          leaver's last working day, moved to the router)
 CREATE TABLE work_events (
   id              TEXT PRIMARY KEY,
   item_kind       TEXT NOT NULL,

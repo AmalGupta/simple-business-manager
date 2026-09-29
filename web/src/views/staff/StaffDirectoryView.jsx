@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
-import { fetchStaff, patchStaffPhone, postResetStaffPin, postCreateStaff } from "../../lib/api.js";
+import { fetchStaff, patchStaffPhone, postResetStaffPin, postCreateStaff, postReactivateStaff } from "../../lib/api.js";
+import { fmtShort, todayIso } from "../../lib/dates.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { AddStaffModal } from "./AddStaffModal.jsx";
@@ -14,7 +15,27 @@ import { DeleteStaffModal } from "./DeleteStaffModal.jsx";
    back decrypted from GET /api/staff and are masked client-side behind a
    per-row reveal toggle; a null pin means the account predates reversible
    storage and needs a reset before it's viewable.
+
+   SBM-64: each row shows when the person joined (or joins), a "Leaving"
+   badge while they serve notice, and people who have left move to a
+   Former staff section with a Reactivate action.
    ------------------------------------------------------------------ */
+
+function StaffStatusLine({ s }) {
+  const today = todayIso();
+  const parts = [];
+  if (s.joined_on) parts.push(s.joined_on > today ? `Joins ${fmtShort(s.joined_on)}` : `Joined ${fmtShort(s.joined_on)}`);
+  return (
+    <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 12, color: t.edge2 }}>
+      {parts.join(" · ")}
+      {s.last_working_day && (
+        <span style={{ fontWeight: 700, color: t.putty, background: t.puttyBg, borderRadius: t.radius, padding: "2px 6px" }}>
+          Leaving {fmtShort(s.last_working_day)}
+        </span>
+      )}
+    </span>
+  );
+}
 export function StaffDirectoryView({ onBack }) {
   const [staff, setStaff] = useState(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -25,6 +46,21 @@ export function StaffDirectoryView({ onBack }) {
   const [busyId, setBusyId] = useState(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+
+  const reactivate = async (s) => {
+    setBusyId(s.id);
+    setError("");
+    try {
+      await postReactivateStaff(s.id);
+      setNotice(`${s.name} is back — their login works again.`);
+      await load();
+    } catch (err) {
+      console.error("[sbm] failed to reactivate", err);
+      setError(err.message || "Failed to reactivate — try again.");
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const load = useCallback(() => {
     return fetchStaff()
@@ -124,7 +160,7 @@ export function StaffDirectoryView({ onBack }) {
         </Card>
       ) : (
         <Card>
-          {staff.map((s) => {
+          {staff.filter((s) => !s.disabled_at).map((s) => {
             const draft = phoneDrafts[s.id] ?? s.phone ?? "";
             const dirty = draft !== (s.phone ?? "");
             const isRevealed = revealed.has(s.id);
@@ -164,6 +200,7 @@ export function StaffDirectoryView({ onBack }) {
                     )}
                   </span>
                 </div>
+                {s.role === "staff" && <StaffStatusLine s={s} />}
 
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <input
@@ -209,11 +246,55 @@ export function StaffDirectoryView({ onBack }) {
         </Card>
       )}
 
+      {staff?.some((s) => s.disabled_at) && (
+        <>
+          <p
+            style={{
+              fontFamily: t.label,
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              color: t.edge2,
+              margin: "1.5rem 0 6px",
+            }}
+          >
+            Former staff
+          </p>
+          <Card>
+            {staff
+              .filter((s) => s.disabled_at)
+              .map((s, i) => (
+                <div
+                  key={s.id}
+                  style={{ ...TILE_ROW_STYLE, ...(i === 0 ? { borderTop: "none" } : {}), display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}
+                >
+                  <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                    <span style={{ fontSize: 14, color: t.edge2, fontWeight: 600 }}>{s.name}</span>
+                    <span style={{ fontSize: 12, color: t.edge2 }}>
+                      {s.joined_on ? `${fmtShort(s.joined_on)} – ` : "Left "}
+                      {fmtShort(s.last_working_day ?? s.disabled_at.slice(0, 10))}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => reactivate(s)}
+                    disabled={busyId === s.id}
+                    style={{ border: "none", background: "none", color: t.accent, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0, minHeight: 44 }}
+                  >
+                    Reactivate
+                  </button>
+                </div>
+              ))}
+          </Card>
+        </>
+      )}
+
       {showAddModal && (
         <AddStaffModal
           onClose={() => setShowAddModal(false)}
-          onCreate={async (name, phone) => {
-            const created = await postCreateStaff(name, phone);
+          onCreate={async (name, phone, joinedOn) => {
+            const created = await postCreateStaff(name, phone, joinedOn);
             await load();
             setRevealed((s) => new Set(s).add(created.id));
             return created;

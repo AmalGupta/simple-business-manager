@@ -132,6 +132,12 @@ export interface User {
   phone: string | null;
   /** AES-GCM ciphertext of the current raw PIN — see src/lib/auth.ts encryptPin/decryptPin. NULL until set/reset under this scheme. */
   pin_encrypted: string | null;
+  /** migration 0050 (SBM-64) — yyyy-mm-dd start day; login refused before it. */
+  joined_on: string | null;
+  /** migration 0050 (SBM-64) — set while offboarding; disabled the day after. */
+  last_working_day: string | null;
+  offboarding_started_at: string | null;
+  offboarding_started_by: string | null;
 }
 
 export interface Session {

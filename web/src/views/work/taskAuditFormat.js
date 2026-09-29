@@ -23,6 +23,8 @@ export function describeTransition(e) {
       return "Parked → Open";
     case "rerouted":
       return "Staff → Back to owner for routing";
+    case "offboard_rerouted":
+      return "Staff left → Back to owner for routing";
     case "marked_urgent":
       return "Marked urgent";
     case "urgent_cleared":
@@ -43,7 +45,7 @@ export function describeTransition(e) {
 
 /* Whose task it is after the transition. */
 export function assignedToName(e) {
-  if (e.event === "assigned" || e.event === "handed_off" || e.event === "rerouted") {
+  if (e.event === "assigned" || e.event === "handed_off" || e.event === "rerouted" || e.event === "offboard_rerouted") {
     return e.to_user_name ?? "NA";
   }
   return e.subject_name ?? "NA";
