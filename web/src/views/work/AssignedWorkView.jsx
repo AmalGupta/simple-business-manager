@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, ArrowRightLeft, Check, ChevronRight, MapPin, Phone, Plus } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Check, ChevronRight, MapPin, MessageSquareWarning, Phone, Plus, Star } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtDate, fmtShort, todayIso } from "../../lib/dates.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES, WORKFLOW_CATEGORY_LABEL, WORK_LOCATIONS } from "../../lib/constants.js";
@@ -88,7 +88,7 @@ function groupItems(items, today) {
   return { urgent, overdue, days, unplanned };
 }
 
-function PassOnPicker({ roster, selfId, busy, onPick, onCancel }) {
+export function PassOnPicker({ roster, selfId, busy, onPick, onCancel }) {
   const [to, setTo] = useState("");
   const options = roster.filter((s) => s.id !== selfId);
   return (
@@ -121,7 +121,7 @@ function PassOnPicker({ roster, selfId, busy, onPick, onCancel }) {
   );
 }
 
-function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, hideSite, onSchedule, onDone, onHandOff, onOpenSite, onOpenCall }) {
+function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, hideSite, onSchedule, onDone, onHandOff, onOpenSite, onOpenCall, onOpenComplaint }) {
   const [passing, setPassing] = useState(false);
   const urgent = Boolean(item.urgent_at);
   const deadline = urgent ? urgentDeadline(item.urgent_at) : null;
@@ -146,10 +146,20 @@ function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, hideSite,
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-        <span style={{ fontSize: 15, fontWeight: 500, color: t.edge, lineHeight: 1.4 }}>
-          {item.title}
-          <TodoContext text={item.context} />
-        </span>
+        {item.kind === "complaint" && onOpenComplaint ? (
+          <button
+            type="button"
+            onClick={() => onOpenComplaint(item.id)}
+            style={{ all: "unset", cursor: "pointer", fontSize: 15, fontWeight: 500, color: t.edge, lineHeight: 1.4 }}
+          >
+            {item.title}
+          </button>
+        ) : (
+          <span style={{ fontSize: 15, fontWeight: 500, color: t.edge, lineHeight: 1.4 }}>
+            {item.title}
+            <TodoContext text={item.context} />
+          </span>
+        )}
         {urgent ? (
           <span style={{ fontSize: 12, fontWeight: 700, color: t.signal, whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 4 }}>
             <AlertTriangle size={13} /> {fmtTimeLeft(deadline)}
@@ -181,6 +191,16 @@ function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, hideSite,
           </button>
         )}
         {item.kind === "site_task" && context && <span>{context}</span>}
+        {item.kind === "complaint" && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <MessageSquareWarning size={12} /> Complaint
+          </span>
+        )}
+        {item.important_at && (
+          <span style={{ color: t.accent, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <Star size={12} /> Important
+          </span>
+        )}
         {overdue && <span style={{ color: t.putty, fontWeight: 700 }}>planned {fmtShort(item.scheduled_for)}</span>}
       </div>
       <CarriedForwardLabel item={item} style={{ fontSize: 12, marginTop: 4 }} />
@@ -204,19 +224,30 @@ function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, hideSite,
             />
           </label>
         )}
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => onDone(item)}
-          style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
-        >
-          <Check size={14} /> Done
-        </button>
+        {/* SBM-71: only an admin resolves a complaint; staff plan it and pass it on. */}
+        {(item.kind !== "complaint" || canAdmin) && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => onDone(item)}
+            style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
+          >
+            <Check size={14} /> {item.kind === "complaint" ? "Resolve" : "Done"}
+          </button>
+        )}
         <button
           type="button"
           disabled={busy}
           onClick={() => setPassing((p) => !p)}
-          style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
+          style={{
+            ...SMALL_SECONDARY_BUTTON_STYLE,
+            minHeight: 44,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+            ...(item.kind === "complaint" && !canAdmin ? { gridColumn: "1 / -1" } : {}),
+          }}
         >
           <ArrowRightLeft size={14} /> Pass on
         </button>
@@ -362,6 +393,7 @@ export function AssignedWorkView({
   onBack,
   onOpenSite,
   onOpenCall,
+  onOpenComplaint,
   onChanged,
 }) {
   const [items, setItems] = useState(null);
@@ -428,6 +460,7 @@ export function AssignedWorkView({
     hideSite: siteKey !== null,
     onOpenSite,
     onOpenCall,
+    onOpenComplaint,
     onSchedule: (item, date) =>
       withBusy(item, async () => {
         await patchWork(item.kind, item.id, { scheduled_for: date }, { forUserId });

@@ -43,6 +43,7 @@ import { SiteVisitCategoryGrid } from "./views/site-visit/SiteVisitCategoryGrid.
 import { InstallationScreen } from "./views/site-visit/InstallationScreen.jsx";
 import { SiteComplaintForm } from "./views/site-visit/SiteComplaintForm.jsx";
 import { ComplaintsHomeView } from "./views/site-visit/ComplaintsHomeView.jsx";
+import { ComplaintDetailView } from "./views/site-visit/ComplaintDetailView.jsx";
 import { ComplaintsTile } from "./views/site-visit/ComplaintsTile.jsx";
 import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
@@ -1113,6 +1114,7 @@ export default function SimpleBusinessManager() {
         onBack={() => setView(view.from ?? homeView)}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
         onOpenCall={(id) => setView({ name: "call", id, from: view })}
+        onOpenComplaint={(id) => setView({ name: "complaint", id, from: view, forUserId: scopeId })}
         onChanged={() => refreshWorkCounts(scopeId)}
       />
     );
@@ -1125,6 +1127,7 @@ export default function SimpleBusinessManager() {
         onOpenStaff={(staff) => setView({ name: "staff-audit", staff, from: view })}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
         onOpenCall={(id) => setView({ name: "call", id, from: view })}
+        onOpenComplaint={(id) => setView({ name: "complaint", id, from: view })}
       />
     );
 
@@ -1203,8 +1206,26 @@ export default function SimpleBusinessManager() {
         }
         canAdd={me.role === "staff"}
         canAssign={me.role !== "staff" && !view.forUserId}
+        onOpenComplaint={(id) => setView({ name: "complaint", id, from: view, forUserId: view.forUserId })}
+      />
+    );
+
+  /* SBM-71: one complaint — voice note, media, plan / pass on; admin assigns, flags, resolves. */
+  if (view.name === "complaint")
+    return shellInStaffBookmark(
+      <ComplaintDetailView
+        key={view.id}
+        id={view.id}
+        me={me}
+        forUserId={view.forUserId || null}
         staffRoster={staffRoster}
         onAssignComplaint={onAssignComplaint}
+        onBack={() => setView(view.from ?? { name: "complaints-home" })}
+        onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
+        onChanged={() => {
+          setComplaintsRefreshKey((k) => k + 1);
+          refreshWorkCounts(view.forUserId || null);
+        }}
       />
     );
 

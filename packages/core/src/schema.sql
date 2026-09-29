@@ -225,8 +225,18 @@ CREATE TABLE escalations (
   installation_update_id TEXT REFERENCES installation_updates(id),
   assigned_to_user_id    TEXT REFERENCES users(id),
   assigned_by_user_id    TEXT REFERENCES users(id),
-  assigned_at            TEXT
+  assigned_at            TEXT,
+  -- migration 0051 (SBM-71): complaints are work items — planned day,
+  -- admin urgent/important flags, who resolved it, and the voice note.
+  scheduled_for          TEXT,
+  urgent_at              TEXT,
+  urgent_by_user_id      TEXT REFERENCES users(id),
+  important_at           TEXT,
+  important_by_user_id   TEXT REFERENCES users(id),
+  resolved_by_user_id    TEXT REFERENCES users(id),
+  voice_call_id          TEXT REFERENCES calls(id)
 );
+CREATE INDEX idx_escalations_assignee ON escalations(assigned_to_user_id, status);
 
 CREATE TABLE todos (
   id                TEXT PRIMARY KEY,
@@ -394,9 +404,12 @@ CREATE TABLE site_media (
   -- migration 0016: set when this photo/video documents a specific
   -- installation_updates checklist row, in addition to always being tied
   -- to site_id above (keeps every existing site-scoped query unmodified).
-  installation_update_id TEXT REFERENCES installation_updates(id)
+  installation_update_id TEXT REFERENCES installation_updates(id),
+  -- migration 0051 (SBM-71): photo/video attached to a site-level complaint.
+  escalation_id TEXT REFERENCES escalations(id)
 );
 CREATE INDEX idx_site_media_site ON site_media(site_id, created_at DESC);
+CREATE INDEX idx_site_media_escalation ON site_media(escalation_id);
 CREATE INDEX idx_site_media_installation_update ON site_media(installation_update_id);
 
 -- sites.address/poc_name are overwritten in place with no history; one row

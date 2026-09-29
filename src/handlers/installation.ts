@@ -29,6 +29,8 @@ import {
   type InstallationUpdateCategory,
   type MaterialShortageStatus,
   type SessionWithUser,
+  getEscalationIdForInstallationUpdate,
+  istTodayIso,
 } from "@sbm/core";
 import { assertSiteMembership, requireSession } from "../lib/auth";
 import { normalizeAudioContentType, submitRecording } from "../lib/sarvam";
@@ -168,12 +170,16 @@ export async function handlePostInstallationUpdate(
   await linkCallToInstallationUpdate(env.DB, callId, installationUpdateId);
 
   if (category === "complaints") {
+    // SBM-71: on the reporter's roster today until an admin reassigns it.
     await createEscalation(env.DB, {
       text: `Complaint reported during site visit — "${installation.label}". See linked voice note for details.`,
       siteId: installation.site_id,
       createdByUserId: reportedByUserId,
       source: "staff_field",
       installationUpdateId,
+      assignedToUserId: reportedByUserId,
+      scheduledFor: istTodayIso(),
+      voiceCallId: callId,
     });
   }
   if (category === "material_short") {
@@ -224,6 +230,8 @@ export async function handlePostInstallationUpdateMedia(request: Request, env: E
     caption: null,
     uploadedBy,
     installationUpdateId: updateId,
+    // SBM-71: a photo on a Complaints checklist row belongs to that complaint too.
+    escalationId: await getEscalationIdForInstallationUpdate(env.DB, updateId),
   });
 
   return json(media, 201);
@@ -286,11 +294,15 @@ export async function handlePostSiteComplaint(
       .catch((err) => setCallFailed(env.DB, callId, `submit: ${String(err)}`))
   );
 
+  // SBM-71: on the reporter's roster today until an admin reassigns it.
   const escalation = await createEscalation(env.DB, {
     text,
     siteId,
     createdByUserId: reportedByUserId,
     source: "staff_field",
+    assignedToUserId: reportedByUserId,
+    scheduledFor: istTodayIso(),
+    voiceCallId: callId,
   });
 
   const mediaIds: string[] = [];
@@ -311,6 +323,7 @@ export async function handlePostSiteComplaint(
       fileSize: entry.size ?? null,
       caption: "Complaint attachment",
       uploadedBy: reportedByUserId,
+      escalationId: escalation.id,
     });
     mediaIds.push(media.id);
   }
