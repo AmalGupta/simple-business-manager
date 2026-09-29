@@ -3670,18 +3670,34 @@ export interface ComplaintRow extends EscalationRow {
   site_poc_name: string | null;
   assigned_to_user_id: string | null;
   assignee_name: string | null;
+  /** SBM-71 — work-item fields. */
+  scheduled_for: string | null;
+  urgent_at: string | null;
+  important_at: string | null;
+  resolved_by_name: string | null;
+  voice_call_id: string | null;
+  /** Photos + videos attached, for the card's attachment hint. */
+  media_count: number;
 }
 
 const COMPLAINT_LIST_SELECT = `SELECT escalations.id, escalations.text, escalations.site_id, sites.name AS site_name,
               sites.address AS site_address, sites.poc_name AS site_poc_name,
               escalations.status, escalations.created_at, escalations.closed_at,
               escalations.source, creator.name AS created_by_name,
-              escalations.assigned_to_user_id, assignee.name AS assignee_name
+              escalations.assigned_to_user_id, assignee.name AS assignee_name,
+              escalations.scheduled_for, escalations.urgent_at, escalations.important_at,
+              resolver.name AS resolved_by_name, escalations.voice_call_id,
+              (SELECT COUNT(*) FROM site_media WHERE site_media.escalation_id = escalations.id) AS media_count
        FROM escalations
        LEFT JOIN sites ON sites.id = escalations.site_id
        LEFT JOIN users AS creator ON creator.id = escalations.created_by_user_id
        LEFT JOIN users AS assignee ON assignee.id = escalations.assigned_to_user_id
+       LEFT JOIN users AS resolver ON resolver.id = escalations.resolved_by_user_id
        WHERE escalations.source = 'staff_field'`;
+
+/** Open first, then urgent, then important, then newest. */
+const COMPLAINT_ORDER = `ORDER BY (escalations.status = 'open') DESC, (escalations.urgent_at IS NOT NULL) DESC,
+         (escalations.important_at IS NOT NULL) DESC, escalations.created_at DESC`;
 
 export interface CallForSiteScan {
   id: string;
@@ -3724,18 +3740,15 @@ export async function listOpenEscalations(db: D1Database): Promise<EscalationRow
   return results;
 }
 
-/** All staff-filed complaints — admin view; newest first. */
+/** Staff-filed complaints — admin: all; with `forUserId` (SBM-71): only those assigned to that person. */
 export async function listComplaints(db: D1Database, forUserId?: string | null): Promise<ComplaintRow[]> {
   let sql = COMPLAINT_LIST_SELECT;
   const binds: string[] = [];
   if (forUserId) {
-    sql += ` AND (
-         escalations.created_by_user_id = ?
-         OR escalations.site_id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)
-       )`;
-    binds.push(forUserId, forUserId);
+    sql += ` AND escalations.assigned_to_user_id = ?`;
+    binds.push(forUserId);
   }
-  sql += ` ORDER BY escalations.created_at DESC`;
+  sql += ` ${COMPLAINT_ORDER}`;
   const stmt = db.prepare(sql);
   const bound = binds.length ? stmt.bind(...binds) : stmt;
   const { results } = await bound.all<ComplaintRow>();
@@ -3748,11 +3761,8 @@ export async function countOpenComplaints(db: D1Database, forUserId?: string | n
              WHERE source = 'staff_field' AND status = 'open'`;
   const binds: string[] = [];
   if (forUserId) {
-    sql += ` AND (
-         created_by_user_id = ?
-         OR site_id IN (SELECT site_id FROM site_team_members WHERE user_id = ?)
-       )`;
-    binds.push(forUserId, forUserId);
+    sql += ` AND assigned_to_user_id = ?`;
+    binds.push(forUserId);
   }
   const stmt = db.prepare(sql);
   const bound = binds.length ? stmt.bind(...binds) : stmt;
@@ -3760,20 +3770,45 @@ export async function countOpenComplaints(db: D1Database, forUserId?: string | n
   return row?.n ?? 0;
 }
 
+/**
+ * Admin (re)assigns a complaint. SBM-71: it lands on the new assignee's
+ * roster for today (they can re-plan it), and the move is audited.
+ */
 export async function assignComplaint(
   db: D1Database,
   id: string,
   assignedToUserId: string,
   assignedByUserId: string
 ): Promise<ComplaintRow | null> {
-  await db
-    .prepare(
-      `UPDATE escalations
-       SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now')
-       WHERE id = ? AND source = 'staff_field'`
-    )
-    .bind(assignedToUserId, assignedByUserId, id)
-    .run();
+  const prev = await db
+    .prepare(`SELECT assigned_to_user_id, site_id FROM escalations WHERE id = ? AND source = 'staff_field'`)
+    .bind(id)
+    .first<{ assigned_to_user_id: string | null; site_id: string | null }>();
+  if (!prev) return null;
+  const stmts: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `UPDATE escalations
+         SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now'), scheduled_for = ?
+         WHERE id = ? AND source = 'staff_field'`
+      )
+      .bind(assignedToUserId, assignedByUserId, istTodayIso(), id),
+  ];
+  if (prev.assigned_to_user_id !== assignedToUserId) {
+    stmts.push(
+      workEventStmt(db, {
+        kind: "complaint",
+        itemId: id,
+        siteId: prev.site_id,
+        actorUserId: assignedByUserId,
+        subjectUserId: assignedToUserId,
+        event: "assigned",
+        fromValue: prev.assigned_to_user_id,
+        toValue: assignedToUserId,
+      })
+    );
+  }
+  await db.batch(stmts);
   const { results } = await db
     .prepare(`${COMPLAINT_LIST_SELECT} AND escalations.id = ?`)
     .bind(id)
@@ -3793,6 +3828,10 @@ export interface NewEscalationInput {
   createdByUserId?: string | null;
   source?: EscalationSource;
   installationUpdateId?: string | null;
+  /** SBM-71: new staff complaints go to their creator, planned for today. */
+  assignedToUserId?: string | null;
+  scheduledFor?: string | null;
+  voiceCallId?: string | null;
 }
 
 /** Manual only — see schema.sql comment on `escalations`. Never called from the extraction path. */
@@ -3800,8 +3839,9 @@ export async function createEscalation(db: D1Database, input: NewEscalationInput
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO escalations (id, text, site_id, created_by_user_id, source, installation_update_id)
-       VALUES (?, ?, ?, ?, ?, ?)`
+      `INSERT INTO escalations (id, text, site_id, created_by_user_id, source, installation_update_id,
+                                assigned_to_user_id, assigned_by_user_id, assigned_at, scheduled_for, voice_call_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE datetime('now') END, ?, ?)`
     )
     .bind(
       id,
@@ -3809,19 +3849,60 @@ export async function createEscalation(db: D1Database, input: NewEscalationInput
       input.siteId ?? null,
       input.createdByUserId ?? null,
       input.source ?? "admin",
-      input.installationUpdateId ?? null
+      input.installationUpdateId ?? null,
+      input.assignedToUserId ?? null,
+      input.assignedToUserId ? input.createdByUserId ?? null : null,
+      input.assignedToUserId ?? null,
+      input.scheduledFor ?? null,
+      input.voiceCallId ?? null
     )
     .run();
+  if (input.assignedToUserId) {
+    await logWorkEvents(db, [
+      {
+        kind: "complaint",
+        itemId: id,
+        siteId: input.siteId ?? null,
+        actorUserId: input.createdByUserId ?? null,
+        subjectUserId: input.assignedToUserId,
+        event: "assigned",
+        toValue: input.assignedToUserId,
+      },
+    ]);
+  }
   const row = await db.prepare(`SELECT * FROM escalations WHERE id = ?`).bind(id).first<Escalation>();
   if (input.siteId) await touchSiteActivity(db, input.siteId, { source: "complaint", refId: id });
   return row!;
 }
 
-export async function closeEscalation(db: D1Database, id: string): Promise<Escalation | null> {
-  await db
-    .prepare(`UPDATE escalations SET status = 'done', closed_at = datetime('now') WHERE id = ?`)
+/**
+ * Resolve an escalation / complaint (admin only — see handleCloseEscalation
+ * and the work PATCH). SBM-71: records who resolved it, and for a staff
+ * complaint writes a 'completed' event so the Task audit shows it.
+ */
+export async function closeEscalation(db: D1Database, id: string, actorUserId: string | null = null): Promise<Escalation | null> {
+  const before = await db
+    .prepare(`SELECT status, source, site_id, assigned_to_user_id FROM escalations WHERE id = ?`)
     .bind(id)
-    .run();
+    .first<{ status: string; source: string; site_id: string | null; assigned_to_user_id: string | null }>();
+  const stmts: D1PreparedStatement[] = [
+    db
+      .prepare(`UPDATE escalations SET status = 'done', closed_at = datetime('now'), resolved_by_user_id = ? WHERE id = ?`)
+      .bind(actorUserId, id),
+  ];
+  if (before && before.status === "open" && before.source === "staff_field") {
+    stmts.push(
+      workEventStmt(db, {
+        kind: "complaint",
+        itemId: id,
+        siteId: before.site_id,
+        actorUserId,
+        subjectUserId: before.assigned_to_user_id,
+        event: "completed",
+      })
+    );
+  }
+  await db.batch(stmts);
   return db.prepare(`SELECT * FROM escalations WHERE id = ?`).bind(id).first<Escalation>();
 }
 
@@ -4327,14 +4408,16 @@ export interface NewSiteMediaInput {
   uploadedBy: string;
   /** Set when this documents a specific installation checklist row — see src/handlers/installation.ts. */
   installationUpdateId?: string | null;
+  /** SBM-71: set when attached to a site-level complaint. */
+  escalationId?: string | null;
 }
 
 export async function addSiteMedia(db: D1Database, input: NewSiteMediaInput): Promise<SiteMedia> {
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO site_media (id, site_id, media_type, r2_key, content_type, file_size, caption, uploaded_by, installation_update_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO site_media (id, site_id, media_type, r2_key, content_type, file_size, caption, uploaded_by, installation_update_id, escalation_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
@@ -4345,7 +4428,8 @@ export async function addSiteMedia(db: D1Database, input: NewSiteMediaInput): Pr
       input.fileSize,
       input.caption,
       input.uploadedBy,
-      input.installationUpdateId ?? null
+      input.installationUpdateId ?? null,
+      input.escalationId ?? null
     )
     .run();
   await touchSiteActivity(db, input.siteId, { source: "media", refId: id });
@@ -5848,10 +5932,23 @@ export async function getDashboardSummary(
 // work_events for the admin's staff-by-staff audit.
 // ---------------------------------------------------------------------------
 
-export type WorkItemKind = "todo" | "site_task";
+/** SBM-71: staff-filed complaints (escalations, source 'staff_field') are work items too. */
+export type WorkItemKind = "todo" | "site_task" | "complaint";
 
 export function isWorkItemKind(v: unknown): v is WorkItemKind {
-  return v === "todo" || v === "site_task";
+  return v === "todo" || v === "site_task" || v === "complaint";
+}
+
+/** The row-per-item table behind a work item kind (todos keep assignees in todo_assignees). */
+function workItemTable(kind: WorkItemKind): "todos" | "site_tasks" | "escalations" {
+  return kind === "todo" ? "todos" : kind === "site_task" ? "site_tasks" : "escalations";
+}
+
+/** Still open: a todo not done, a stage still assigned, a complaint not resolved. */
+function isOpenWorkStatus(ref: { kind: WorkItemKind; status: string }): boolean {
+  if (ref.kind === "todo") return ref.status !== "done";
+  if (ref.kind === "site_task") return ref.status === "assigned";
+  return ref.status === "open";
 }
 
 export interface WorkItem {
@@ -5876,6 +5973,8 @@ export interface WorkItem {
   work_location: WorkLocation;
   /** SBM-67 — sites.poc_contact_number, shown on the site tile. */
   site_contact_number: string | null;
+  /** SBM-71 — complaints only: admin "important" flag (sorts first, no scheduling rule). */
+  important_at?: string | null;
 }
 
 export type WorkEventType =
@@ -5896,6 +5995,9 @@ export type WorkEventType =
   | "unparked"
   /** SBM-64 — still held by a leaver after their last working day; moved to the router by the cron sweep. */
   | "offboard_rerouted"
+  /** SBM-71 — admin important flag on a complaint. */
+  | "marked_important"
+  | "important_cleared"
   /** SBM-67 — Office ↔ Factory changed by an admin; from/to hold the locations. */
   | "location_changed";
 
@@ -5947,7 +6049,9 @@ export async function countUrgentWork(db: D1Database, userId: string): Promise<n
          (SELECT COUNT(*) FROM todo_assignees JOIN todos ON todos.id = todo_assignees.todo_id
           WHERE todo_assignees.user_id = ?1 AND todos.status = 'open' AND todos.urgent_at IS NOT NULL)
        + (SELECT COUNT(*) FROM site_tasks
-          WHERE assigned_to_user_id = ?1 AND status = 'assigned' AND urgent_at IS NOT NULL) AS n`
+          WHERE assigned_to_user_id = ?1 AND status = 'assigned' AND urgent_at IS NOT NULL)
+       + (SELECT COUNT(*) FROM escalations
+          WHERE assigned_to_user_id = ?1 AND status = 'open' AND source = 'staff_field' AND urgent_at IS NOT NULL) AS n`
     )
     .bind(userId)
     .first<{ n: number }>();
@@ -5979,9 +6083,13 @@ export async function getWorkItemRef(db: D1Database, kind: WorkItemKind, id: str
     return { kind, ...row, assignee_ids: (results ?? []).map((r) => r.user_id) };
   }
   const row = await db
-    .prepare(`SELECT id, site_id, status, urgent_at, assigned_to_user_id FROM site_tasks WHERE id = ?`)
+    .prepare(
+      kind === "complaint"
+        ? `SELECT id, site_id, status, urgent_at, assigned_to_user_id FROM escalations WHERE id = ? AND source = 'staff_field'`
+        : `SELECT id, site_id, status, urgent_at, assigned_to_user_id FROM site_tasks WHERE id = ?`
+    )
     .bind(id)
-    .first<{ id: string; site_id: string; status: string; urgent_at: string | null; assigned_to_user_id: string | null }>();
+    .first<{ id: string; site_id: string | null; status: string; urgent_at: string | null; assigned_to_user_id: string | null }>();
   if (!row) return null;
   return {
     kind,
@@ -5999,7 +6107,7 @@ export async function getWorkItemRef(db: D1Database, kind: WorkItemKind, id: str
  * scheduled_for lives on the todo_assignees row the claim creates).
  */
 export async function listAssignedWork(db: D1Database, userId: string): Promise<WorkItem[]> {
-  const [todos, tasks, planRows, user] = await Promise.all([
+  const [todos, tasks, planRows, user, complaints] = await Promise.all([
     listMyOpenTodos(db, userId),
     listOpenSiteTasks(db, userId),
     db
@@ -6011,6 +6119,24 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
       .bind(userId)
       .all<{ todo_id: string; scheduled_for: string | null; urgent_at: string | null }>(),
     getUserById(db, userId),
+    /* SBM-71: open complaints assigned to them. */
+    db
+      .prepare(
+        `SELECT escalations.id, escalations.text, escalations.site_id, sites.name AS site_name,
+                escalations.scheduled_for, escalations.urgent_at, escalations.important_at
+         FROM escalations LEFT JOIN sites ON sites.id = escalations.site_id
+         WHERE escalations.assigned_to_user_id = ? AND escalations.status = 'open' AND escalations.source = 'staff_field'`
+      )
+      .bind(userId)
+      .all<{
+        id: string;
+        text: string;
+        site_id: string | null;
+        site_name: string | null;
+        scheduled_for: string | null;
+        urgent_at: string | null;
+        important_at: string | null;
+      }>(),
   ]);
   const plan = new Map((planRows.results ?? []).map((r) => [r.todo_id, r]));
   const items: WorkItem[] = [];
@@ -6056,6 +6182,27 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
       site_contact_number: null,
     });
   }
+  for (const c of complaints.results ?? []) {
+    items.push({
+      kind: "complaint",
+      id: c.id,
+      title: c.text,
+      site_id: c.site_id,
+      site_name: c.site_name,
+      call_id: null,
+      client_name: null,
+      category: null,
+      due_date: null,
+      scheduled_for: c.scheduled_for,
+      urgent_at: c.urgent_at,
+      context: null,
+      assignee_user_id: userId,
+      assignee_name: user?.name ?? null,
+      work_location: "office",
+      site_contact_number: null,
+      important_at: c.important_at,
+    });
+  }
 
   /* SBM-67: the site tiles show each site's contact number. */
   const siteIds = [...new Set(items.map((i) => i.site_id).filter((id): id is string => Boolean(id)))];
@@ -6082,6 +6229,7 @@ export async function setWorkLocation(
   location: WorkLocation,
   actorUserId: string
 ): Promise<{ previous: WorkLocation }> {
+  if (ref.kind === "complaint") throw new Error("complaints have no work location");
   const table = ref.kind === "todo" ? "todos" : "site_tasks";
   const row =
     ref.kind === "todo"
@@ -6143,12 +6291,13 @@ export async function setWorkScheduledFor(
       .run();
     return { previous: prev?.scheduled_for ?? null };
   }
+  const table = kind === "complaint" ? "escalations" : "site_tasks";
   const prev = await db
-    .prepare(`SELECT scheduled_for FROM site_tasks WHERE id = ? AND assigned_to_user_id = ?`)
+    .prepare(`SELECT scheduled_for FROM ${table} WHERE id = ? AND assigned_to_user_id = ?`)
     .bind(id, userId)
     .first<{ scheduled_for: string | null }>();
   await db
-    .prepare(`UPDATE site_tasks SET scheduled_for = ? WHERE id = ? AND assigned_to_user_id = ?`)
+    .prepare(`UPDATE ${table} SET scheduled_for = ? WHERE id = ? AND assigned_to_user_id = ?`)
     .bind(date, id, userId)
     .run();
   return { previous: prev?.scheduled_for ?? null };
@@ -6165,7 +6314,7 @@ export async function setWorkUrgent(
   urgent: boolean,
   actorUserId: string
 ): Promise<void> {
-  const table = ref.kind === "todo" ? "todos" : "site_tasks";
+  const table = workItemTable(ref.kind);
   const today = istTodayIso();
   const stmts: D1PreparedStatement[] = [
     urgent
@@ -6178,7 +6327,7 @@ export async function setWorkUrgent(
     stmts.push(
       ref.kind === "todo"
         ? db.prepare(`UPDATE todo_assignees SET scheduled_for = ? WHERE todo_id = ?`).bind(today, ref.id)
-        : db.prepare(`UPDATE site_tasks SET scheduled_for = ? WHERE id = ?`).bind(today, ref.id)
+        : db.prepare(`UPDATE ${table} SET scheduled_for = ? WHERE id = ?`).bind(today, ref.id)
     );
   }
   const subjects = ref.assignee_ids.length ? ref.assignee_ids : [null];
@@ -6244,7 +6393,7 @@ export function handOffWorkStmts(
       : [
           db
             .prepare(
-              `UPDATE site_tasks SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now'),
+              `UPDATE ${workItemTable(ref.kind)} SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now'),
                                      scheduled_for = ?
                WHERE id = ?`
             )
@@ -6310,7 +6459,7 @@ export interface StaffRosterGrid {
  * — those enter the grid the first time that staff member opens Assigned work.
  */
 export async function getStaffRosterGrid(db: D1Database, to: string): Promise<StaffRosterGrid> {
-  const [staffRes, todoRes, taskRes, unTodoRes, unTaskRes] = await Promise.all([
+  const [staffRes, todoRes, taskRes, unTodoRes, unTaskRes, complaintRes, unComplaintRes] = await Promise.all([
     db
       .prepare(
         `SELECT id, name, joined_on, last_working_day, disabled_at,
@@ -6377,15 +6526,39 @@ export async function getStaffRosterGrid(db: D1Database, to: string): Promise<St
          GROUP BY assigned_to_user_id`
       )
       .all<{ user_id: string; n: number }>(),
+    /* SBM-71: complaints are on the roster like any other work. */
+    db
+      .prepare(
+        `SELECT 'complaint' AS kind, escalations.id AS id, escalations.text AS title, sites.name AS site_name,
+                NULL AS call_id, NULL AS due_date,
+                escalations.scheduled_for AS scheduled_for, escalations.urgent_at AS urgent_at,
+                NULL AS context, escalations.assigned_to_user_id AS user_id
+         FROM escalations
+         LEFT JOIN sites ON sites.id = escalations.site_id
+         JOIN users ON users.id = escalations.assigned_to_user_id AND users.role = 'staff'
+         WHERE escalations.status = 'open' AND escalations.source = 'staff_field'
+           AND (escalations.scheduled_for <= ? OR escalations.urgent_at IS NOT NULL)`
+      )
+      .bind(to)
+      .all<RosterWorkItem>(),
+    db
+      .prepare(
+        `SELECT assigned_to_user_id AS user_id, COUNT(*) AS n
+         FROM escalations
+         WHERE status = 'open' AND source = 'staff_field' AND scheduled_for IS NULL AND urgent_at IS NULL
+           AND assigned_to_user_id IS NOT NULL
+         GROUP BY assigned_to_user_id`
+      )
+      .all<{ user_id: string; n: number }>(),
   ]);
   const unscheduled: Record<string, number> = {};
-  for (const r of [...(unTodoRes.results ?? []), ...(unTaskRes.results ?? [])]) {
+  for (const r of [...(unTodoRes.results ?? []), ...(unTaskRes.results ?? []), ...(unComplaintRes.results ?? [])]) {
     if (!r.user_id) continue;
     unscheduled[r.user_id] = (unscheduled[r.user_id] ?? 0) + r.n;
   }
   return {
     staff: staffRes.results ?? [],
-    items: [...(todoRes.results ?? []), ...(taskRes.results ?? [])],
+    items: [...(todoRes.results ?? []), ...(taskRes.results ?? []), ...(complaintRes.results ?? [])],
     unscheduled_counts: unscheduled,
   };
 }
@@ -6425,7 +6598,7 @@ export async function listWorkEventsForUser(
   const { results } = await db
     .prepare(
       `SELECT work_events.rowid AS seq, work_events.id AS id, work_events.item_kind AS item_kind, work_events.item_id AS item_id,
-              COALESCE(todos.text, workflow_stages.label) AS item_title,
+              COALESCE(todos.text, workflow_stages.label, complaint.text) AS item_title,
               sites.name AS site_name,
               actor.name AS actor_name,
               work_events.subject_user_id AS subject_user_id,
@@ -6439,6 +6612,7 @@ export async function listWorkEventsForUser(
        LEFT JOIN todos ON work_events.item_kind = 'todo' AND todos.id = work_events.item_id
        LEFT JOIN site_tasks ON work_events.item_kind = 'site_task' AND site_tasks.id = work_events.item_id
        LEFT JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+       LEFT JOIN escalations AS complaint ON work_events.item_kind = 'complaint' AND complaint.id = work_events.item_id
        LEFT JOIN sites ON sites.id = work_events.site_id
        LEFT JOIN users AS actor ON actor.id = work_events.actor_user_id
        LEFT JOIN users AS from_user ON from_user.id = work_events.from_value
@@ -6681,7 +6855,7 @@ export interface TaskAuditRow extends WorkEventRow {
 
 const TASK_AUDIT_SELECT = `
   SELECT work_events.rowid AS seq, work_events.id AS id, work_events.item_kind AS item_kind, work_events.item_id AS item_id,
-         COALESCE(todos.text, workflow_stages.label) AS item_title,
+         COALESCE(todos.text, workflow_stages.label, complaint.text) AS item_title,
          sites.name AS site_name,
          actor.name AS actor_name, actor.role AS actor_role,
          work_events.subject_user_id AS subject_user_id, subject.name AS subject_name,
@@ -6700,6 +6874,7 @@ const TASK_AUDIT_SELECT = `
   LEFT JOIN callers ON callers.id = calls.client_id
   LEFT JOIN site_tasks ON work_events.item_kind = 'site_task' AND site_tasks.id = work_events.item_id
   LEFT JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+  LEFT JOIN escalations AS complaint ON work_events.item_kind = 'complaint' AND complaint.id = work_events.item_id
   LEFT JOIN sites ON sites.id = work_events.site_id
   LEFT JOIN users AS actor ON actor.id = work_events.actor_user_id
   LEFT JOIN users AS subject ON subject.id = work_events.subject_user_id
@@ -6728,7 +6903,7 @@ export async function listTaskAudit(
   const q = opts.q?.trim();
   if (q) {
     const cols = [
-      "todos.text", "workflow_stages.label", "sites.name", "callers.name",
+      "todos.text", "workflow_stages.label", "complaint.text", "sites.name", "callers.name",
       "actor.name", "subject.name", "to_user.name", "from_user.name",
     ];
     where.push(`(${cols.map((c) => `${c} LIKE ?`).join(" OR ")})`);
@@ -6774,6 +6949,19 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
           )
           .bind(id)
           .first<{ title: string; status: string; site_name: string | null; call_id: string; urgent: number; assignees: string | null }>()
+      : kind === "complaint"
+        ? await db
+            .prepare(
+              `SELECT escalations.text AS title, escalations.status AS status, sites.name AS site_name,
+                      escalations.voice_call_id AS call_id, escalations.urgent_at IS NOT NULL AS urgent,
+                      users.name AS assignees
+               FROM escalations
+               LEFT JOIN sites ON sites.id = escalations.site_id
+               LEFT JOIN users ON users.id = escalations.assigned_to_user_id
+               WHERE escalations.id = ?`
+            )
+            .bind(id)
+            .first<{ title: string; status: string; site_name: string | null; call_id: string | null; urgent: number; assignees: string | null }>()
       : await db
           .prepare(
             `SELECT workflow_stages.label AS title, site_tasks.status AS status, sites.name AS site_name, NULL AS call_id,
@@ -6816,7 +7004,8 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
 // sets disabled_at — never a delete, so history keeps the leaver's name.
 // ---------------------------------------------------------------------------
 
-export type OffboardItemKind = WorkItemKind | "complaint";
+/** Complaints are a WorkItemKind since SBM-71; kept as an alias for SBM-64 callers. */
+export type OffboardItemKind = WorkItemKind;
 
 /** Open todos (incl. parked) + assigned stages + open complaints held by `users.id` — one definition
  *  so the offboarding screen, the Offboard tile and the roster's "N left" never disagree. */
@@ -7014,21 +7203,10 @@ export async function transferWorkItems(
   const groups: D1PreparedStatement[][] = [];
   const sites = new Set<string>();
   for (const item of opts.items) {
-    if (item.kind === "complaint") {
-      groups.push([
-        db
-          .prepare(
-            `UPDATE escalations SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now')
-             WHERE id = ? AND assigned_to_user_id = ? AND status = 'open'`
-          )
-          .bind(toUserId, actorUserId, item.id, fromUserId),
-      ]);
-      continue;
-    }
     if (!isWorkItemKind(item.kind)) continue;
     const ref = await getWorkItemRef(db, item.kind, item.id);
     if (!ref || !ref.assignee_ids.includes(fromUserId)) continue;
-    if (ref.kind === "todo" ? ref.status === "done" : ref.status !== "assigned") continue;
+    if (!isOpenWorkStatus(ref)) continue;
     groups.push(handOffWorkStmts(db, ref, fromUserId, toUserId, actorUserId, opts.fromEvent ?? "handed_off"));
     if (ref.site_id) sites.add(ref.site_id);
   }
@@ -7151,4 +7329,107 @@ export async function staffUserHasHistory(db: D1Database, userId: string): Promi
     .bind(userId)
     .first<{ has_history: number }>();
   return Boolean(row?.has_history);
+}
+
+// ---------------------------------------------------------------------------
+// SBM-71 — complaints as work items (migration 0051).
+// ---------------------------------------------------------------------------
+
+export interface ComplaintDetail extends ComplaintRow {
+  installation_label: string | null;
+  voice_transcript: string | null;
+  media: { id: string; media_type: string; content_type: string; created_at: string }[];
+}
+
+/** One complaint with its voice note transcript and attached photos/videos. */
+export async function getComplaintDetail(db: D1Database, id: string): Promise<ComplaintDetail | null> {
+  const row = await db
+    .prepare(`${COMPLAINT_LIST_SELECT} AND escalations.id = ?`)
+    .bind(id)
+    .first<ComplaintRow>();
+  if (!row) return null;
+  const [extra, media] = await Promise.all([
+    db
+      .prepare(
+        `SELECT installations.label AS installation_label, transcripts.transcript AS voice_transcript
+         FROM escalations
+         LEFT JOIN installation_updates ON installation_updates.id = escalations.installation_update_id
+         LEFT JOIN installations ON installations.id = installation_updates.installation_id
+         LEFT JOIN calls ON calls.id = escalations.voice_call_id
+         LEFT JOIN transcripts ON transcripts.r2_key = calls.r2_key
+         WHERE escalations.id = ?`
+      )
+      .bind(id)
+      .first<{ installation_label: string | null; voice_transcript: string | null }>(),
+    db
+      .prepare(
+        `SELECT id, media_type, content_type, created_at FROM site_media
+         WHERE escalation_id = ? ORDER BY created_at ASC`
+      )
+      .bind(id)
+      .all<{ id: string; media_type: string; content_type: string; created_at: string }>(),
+  ]);
+  return {
+    ...row,
+    installation_label: extra?.installation_label ?? null,
+    voice_transcript: extra?.voice_transcript ?? null,
+    media: media.results ?? [],
+  };
+}
+
+/** Admin "important" flag — a badge that sorts the complaint first; no scheduling rule (unlike urgent). */
+export async function setComplaintImportant(
+  db: D1Database,
+  ref: WorkItemRef,
+  important: boolean,
+  actorUserId: string
+): Promise<void> {
+  if (ref.kind !== "complaint") throw new Error("only complaints can be marked important");
+  const subjects = ref.assignee_ids.length ? ref.assignee_ids : [null];
+  await db.batch([
+    important
+      ? db
+          .prepare(`UPDATE escalations SET important_at = datetime('now'), important_by_user_id = ? WHERE id = ?`)
+          .bind(actorUserId, ref.id)
+      : db.prepare(`UPDATE escalations SET important_at = NULL, important_by_user_id = NULL WHERE id = ?`).bind(ref.id),
+    ...subjects.map((subject) =>
+      workEventStmt(db, {
+        kind: "complaint",
+        itemId: ref.id,
+        siteId: ref.site_id,
+        actorUserId,
+        subjectUserId: subject,
+        event: important ? "marked_important" : "important_cleared",
+      })
+    ),
+  ]);
+}
+
+/** A staff member may stream a complaint's voice note / media when the complaint is assigned to them. */
+export async function isCallOnComplaintAssignedTo(db: D1Database, callId: string, userId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 FROM escalations WHERE voice_call_id = ? AND assigned_to_user_id = ? LIMIT 1`)
+    .bind(callId, userId)
+    .first();
+  return row !== null;
+}
+
+export async function isMediaOnComplaintAssignedTo(db: D1Database, mediaId: string, userId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM site_media JOIN escalations ON escalations.id = site_media.escalation_id
+       WHERE site_media.id = ? AND escalations.assigned_to_user_id = ? LIMIT 1`
+    )
+    .bind(mediaId, userId)
+    .first();
+  return row !== null;
+}
+
+/** The complaint filed from a Complaints checklist row, if any (SBM-71 — links its photos to it). */
+export async function getEscalationIdForInstallationUpdate(db: D1Database, installationUpdateId: string): Promise<string | null> {
+  const row = await db
+    .prepare(`SELECT id FROM escalations WHERE installation_update_id = ? LIMIT 1`)
+    .bind(installationUpdateId)
+    .first<{ id: string }>();
+  return row?.id ?? null;
 }

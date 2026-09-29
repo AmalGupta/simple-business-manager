@@ -14,7 +14,7 @@ export function describeTransition(e) {
     case "handed_off":
       return "Open → Passed";
     case "completed":
-      return "Open → Done";
+      return e.item_kind === "complaint" ? "Open → Resolved" : "Open → Done";
     case "reopened":
       return "Done → Open";
     case "parked":
@@ -29,6 +29,10 @@ export function describeTransition(e) {
       return "Marked urgent";
     case "urgent_cleared":
       return "Urgent cleared";
+    case "marked_important":
+      return "Marked important";
+    case "important_cleared":
+      return "Important cleared";
     case "location_changed":
       return `Moved: ${e.from_value === "factory" ? "Factory" : "Office"} → ${e.to_value === "factory" ? "Factory" : "Office"}`;
     case "due_changed":

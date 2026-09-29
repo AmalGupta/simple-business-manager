@@ -19,6 +19,7 @@ import {
   handleGetComplaints,
   handleGetComplaintsCount,
   handlePatchComplaint,
+  handleGetComplaint,
   handleGetCallsCount,
   handleGetCallTranscripts,
   handleGetDashboardSummary,
@@ -781,6 +782,9 @@ export default {
     const complaintMatch = url.pathname.match(/^\/api\/complaints\/([^/]+)$/);
     if (complaintMatch && request.method === "PATCH") {
       return handlePatchComplaint(request, env, complaintMatch[1]);
+    }
+    if (complaintMatch && request.method === "GET" && complaintMatch[1] !== "count") {
+      return handleGetComplaint(request, env, complaintMatch[1]);
     }
 
     // In-app "request/report an issue" form → Jira (migration 0033/0034,

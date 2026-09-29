@@ -17,6 +17,8 @@ export const t = {
   signal: "var(--color-danger)",
   signalBg: "var(--color-danger-bg)",
   unread: "var(--color-unread)",
+  ok: "var(--color-ok)",
+  okBg: "var(--color-ok-bg)",
   white: "var(--color-surface)",
   display: "var(--font-display)",
   label: "var(--font-label)",
