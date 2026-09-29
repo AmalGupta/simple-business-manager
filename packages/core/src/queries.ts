@@ -3673,7 +3673,6 @@ export interface ComplaintRow extends EscalationRow {
   /** SBM-71 — work-item fields. */
   scheduled_for: string | null;
   urgent_at: string | null;
-  important_at: string | null;
   resolved_by_name: string | null;
   voice_call_id: string | null;
   due_date: string | null;
@@ -3686,7 +3685,7 @@ const COMPLAINT_LIST_SELECT = `SELECT escalations.id, escalations.text, escalati
               escalations.status, escalations.created_at, escalations.closed_at,
               escalations.source, creator.name AS created_by_name,
               escalations.assigned_to_user_id, assignee.name AS assignee_name,
-              escalations.scheduled_for, escalations.urgent_at, escalations.important_at,
+              escalations.scheduled_for, escalations.urgent_at,
               resolver.name AS resolved_by_name, escalations.voice_call_id, escalations.due_date,
               (SELECT COUNT(*) FROM site_media WHERE site_media.escalation_id = escalations.id) AS media_count
        FROM escalations
@@ -3696,9 +3695,9 @@ const COMPLAINT_LIST_SELECT = `SELECT escalations.id, escalations.text, escalati
        LEFT JOIN users AS resolver ON resolver.id = escalations.resolved_by_user_id
        WHERE escalations.source = 'staff_field'`;
 
-/** Open first, then urgent, then important, then newest. */
+/** Open first, then urgent, then newest. */
 const COMPLAINT_ORDER = `ORDER BY (escalations.status = 'open') DESC, (escalations.urgent_at IS NOT NULL) DESC,
-         (escalations.important_at IS NOT NULL) DESC, escalations.created_at DESC`;
+         escalations.created_at DESC`;
 
 export interface CallForSiteScan {
   id: string;
@@ -5987,8 +5986,6 @@ export interface WorkItem {
   work_location: WorkLocation;
   /** SBM-67 — sites.poc_contact_number, shown on the site tile. */
   site_contact_number: string | null;
-  /** SBM-71 — complaints only: admin "important" flag (sorts first, no scheduling rule). */
-  important_at?: string | null;
 }
 
 export type WorkEventType =
@@ -6009,7 +6006,7 @@ export type WorkEventType =
   | "unparked"
   /** SBM-64 — still held by a leaver after their last working day; moved to the router by the cron sweep. */
   | "offboard_rerouted"
-  /** SBM-71 — admin important flag on a complaint. */
+  /** SBM-71 — retired complaint "important" flag; kept so historic events still render. */
   | "marked_important"
   | "important_cleared"
   /** SBM-71 — a complaint was filed / moved to another site. */
@@ -6140,7 +6137,7 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
     db
       .prepare(
         `SELECT escalations.id, escalations.text, escalations.site_id, sites.name AS site_name,
-                escalations.scheduled_for, escalations.urgent_at, escalations.important_at, escalations.due_date
+                escalations.scheduled_for, escalations.urgent_at, escalations.due_date
          FROM escalations LEFT JOIN sites ON sites.id = escalations.site_id
          WHERE escalations.assigned_to_user_id = ? AND escalations.status = 'open' AND escalations.source = 'staff_field'`
       )
@@ -6152,7 +6149,6 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
         site_name: string | null;
         scheduled_for: string | null;
         urgent_at: string | null;
-        important_at: string | null;
         due_date: string | null;
       }>(),
   ]);
@@ -6218,7 +6214,6 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
       assignee_name: user?.name ?? null,
       work_location: "office",
       site_contact_number: null,
-      important_at: c.important_at,
     });
   }
 
@@ -7402,34 +7397,6 @@ export async function getComplaintDetail(db: D1Database, id: string): Promise<Co
     voice_transcript: extra?.voice_transcript ?? null,
     media: media.results ?? [],
   };
-}
-
-/** Admin "important" flag — a badge that sorts the complaint first; no scheduling rule (unlike urgent). */
-export async function setComplaintImportant(
-  db: D1Database,
-  ref: WorkItemRef,
-  important: boolean,
-  actorUserId: string
-): Promise<void> {
-  if (ref.kind !== "complaint") throw new Error("only complaints can be marked important");
-  const subjects = ref.assignee_ids.length ? ref.assignee_ids : [null];
-  await db.batch([
-    important
-      ? db
-          .prepare(`UPDATE escalations SET important_at = datetime('now'), important_by_user_id = ? WHERE id = ?`)
-          .bind(actorUserId, ref.id)
-      : db.prepare(`UPDATE escalations SET important_at = NULL, important_by_user_id = NULL WHERE id = ?`).bind(ref.id),
-    ...subjects.map((subject) =>
-      workEventStmt(db, {
-        kind: "complaint",
-        itemId: ref.id,
-        siteId: ref.site_id,
-        actorUserId,
-        subjectUserId: subject,
-        event: important ? "marked_important" : "important_cleared",
-      })
-    ),
-  ]);
 }
 
 /** A staff member may stream a complaint's voice note / media when it's assigned to them or they raised it. */
