@@ -3,7 +3,7 @@
 // teammate, the admin roster grid, and the staff-by-staff audit trail.
 //
 //   GET   /api/work/assigned[?for_user_id=]     staff: own; admin: one staff member
-//   PATCH /api/work/:kind/:id[?for_user_id=]    { scheduled_for } | { status: "done" } | { urgent } | { work_location } | { important }
+//   PATCH /api/work/:kind/:id[?for_user_id=]    { scheduled_for } | { status: "done" } | { urgent } | { work_location }
 //   kind: todo | site_task | complaint (SBM-71). A complaint is resolved (status "done") by an admin only.
 //   POST  /api/work/:kind/:id/handoff[?for_user_id=]   { to_user_id }
 //   GET   /api/work/roster?to=yyyy-mm-dd         admin
@@ -27,7 +27,6 @@ import {
   getTaskTimeline,
   logWorkEvents,
   closeEscalation,
-  setComplaintImportant,
   setWorkLocation,
   setWorkScheduledFor,
   setWorkUrgent,
@@ -90,14 +89,6 @@ export async function handlePatchWork(request: Request, env: Env, kindRaw: strin
     if (!isAdmin) return json({ error: "forbidden" }, 403);
     await setWorkUrgent(env.DB, ref, record.urgent === true, session.user_id);
     return json({ ok: true, urgent: record.urgent === true });
-  }
-
-  // Admin-only (SBM-71): important flag on a complaint.
-  if ("important" in record) {
-    if (!isAdmin) return json({ error: "forbidden" }, 403);
-    if (kind !== "complaint") return json({ error: "only complaints can be marked important" }, 400);
-    await setComplaintImportant(env.DB, ref, record.important === true, session.user_id);
-    return json({ ok: true, important: record.important === true });
   }
 
   // Admin-only: resolving a complaint (SBM-71) — staff plan and pass it on, but don't close it.

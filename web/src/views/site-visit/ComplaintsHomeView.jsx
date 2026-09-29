@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { AlertTriangle, ChevronRight, Image as ImageIcon, Mic, Plus, Star } from "lucide-react";
+import { AlertTriangle, ChevronRight, Image as ImageIcon, Mic, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtDate, fmtShort } from "../../lib/dates.js";
 import { fetchComplaints } from "../../lib/api.js";
@@ -37,19 +37,12 @@ export function ComplaintStatusLabel({ status, closedAt }) {
 }
 
 export function ComplaintFlags({ c }) {
-  if (!c.urgent_at && !c.important_at) return null;
+  if (!c.urgent_at || c.status !== "open") return null;
   return (
     <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      {c.urgent_at && c.status === "open" && (
-        <span style={{ fontSize: 11, fontWeight: 700, color: t.signal, display: "inline-flex", alignItems: "center", gap: 3 }}>
-          <AlertTriangle size={12} /> Urgent
-        </span>
-      )}
-      {c.important_at && (
-        <span style={{ fontSize: 11, fontWeight: 700, color: t.accent, display: "inline-flex", alignItems: "center", gap: 3 }}>
-          <Star size={12} /> Important
-        </span>
-      )}
+      <span style={{ fontSize: 11, fontWeight: 700, color: t.signal, display: "inline-flex", alignItems: "center", gap: 3 }}>
+        <AlertTriangle size={12} /> Urgent
+      </span>
     </span>
   );
 }
