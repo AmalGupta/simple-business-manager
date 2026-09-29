@@ -211,7 +211,7 @@ const DECISION_LOOK = {
 
 /* Marking a site Valid needs a mapped contact with a number (the server
    refuses the confirm otherwise). Without one, the switch opens the
-   contacts picker instead of flipping. */
+   contacts picker instead of flipping; its "Skip" confirms with no contact. */
 function ValidSwitch({ site, decision, onChoose, onNeedContact }) {
   const look = DECISION_LOOK[decision ?? "null"];
   const on = decision === "Y";
@@ -412,6 +412,7 @@ export function SitesReviewGrid({
   tabCounts = {},
   onDecisionTabChange,
   onChoose,
+  onConfirmWithoutContact,
   canManage = true,
   onContactsChanged,
   onDetailsSaved,
@@ -755,6 +756,16 @@ export function SitesReviewGrid({
           )}
           onClose={() => setContactsSite(null)}
           onSave={saveContacts}
+          onSkip={
+            onConfirmWithoutContact &&
+            contactsSite.is_confirmed !== "Y" &&
+            !(contactsBySite[contactsSite.id] ?? contactsSite.contacts ?? []).some((c) => c.phone)
+              ? () => {
+                  onConfirmWithoutContact(contactsSite.id);
+                  setContactsSite(null);
+                }
+              : undefined
+          }
         />
       )}
       {detailsSite && (

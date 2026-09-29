@@ -182,8 +182,11 @@ function CheckBox({ checked, disabled, label, onToggle }) {
  * `onSave(callerIds)` does the write and resolves to the site's full
  * contact list — SitesReviewGrid owns it, the same way SiteView owns the
  * write behind AddPeopleModal.
+ *
+ * `onSkip` (Review sites, unconfirmed site with no phone contact): offers
+ * "Skip" — mark the site valid without adding a contact.
  */
-export function AssociateContactsModal({ site, existingContactIds = [], onClose, onSave }) {
+export function AssociateContactsModal({ site, existingContactIds = [], onClose, onSave, onSkip }) {
   const gridRef = useRef(null);
   const seededStrong = useRef(false);
   const searchSeq = useRef(0);
@@ -759,17 +762,40 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
         <span style={{ fontSize: 12, color: t.edge2 }}>
           {selected.size === 0 ? "Nothing ticked yet." : `${selected.size} ticked.`}
         </span>
-        <button
-          onClick={submit}
-          disabled={saving || selected.size === 0}
-          style={{
-            ...PRIMARY_BUTTON_STYLE,
-            cursor: saving || selected.size === 0 ? "not-allowed" : "pointer",
-            opacity: saving || selected.size === 0 ? 0.5 : 1,
-          }}
-        >
-          {saving ? "Adding…" : "Add to site"}
-        </button>
+        <span style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          {onSkip && (
+            <button
+              type="button"
+              onClick={onSkip}
+              disabled={saving}
+              title="Mark this site valid without adding a contact"
+              style={{
+                minHeight: 40,
+                padding: "0 14px",
+                border: `1px solid ${t.frost}`,
+                borderRadius: t.radiusButton,
+                background: t.white,
+                color: t.edge2,
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: saving ? "not-allowed" : "pointer",
+              }}
+            >
+              Skip — mark valid without a contact
+            </button>
+          )}
+          <button
+            onClick={submit}
+            disabled={saving || selected.size === 0}
+            style={{
+              ...PRIMARY_BUTTON_STYLE,
+              cursor: saving || selected.size === 0 ? "not-allowed" : "pointer",
+              opacity: saving || selected.size === 0 ? 0.5 : 1,
+            }}
+          >
+            {saving ? "Adding…" : "Add to site"}
+          </button>
+        </span>
       </div>
     </Modal>
   );

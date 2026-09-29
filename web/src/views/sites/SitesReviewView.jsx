@@ -82,9 +82,20 @@ export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
   const changed = sites.filter((s) => pending[s.id] !== s.is_confirmed);
   const dirty = changed.length > 0;
 
+  /* Sites the reviewer chose to confirm without mapping a contact ("Skip"
+     in the contacts picker). Update sends skip_contact for these so the
+     server's contact-required check lets them through. */
+  const [skipContactIds, setSkipContactIds] = useState(() => new Set());
+
   const setChoice = (id, value) => {
     setSaved(false);
     setPending((p) => ({ ...p, [id]: p[id] === value ? null : value }));
+  };
+
+  const confirmWithoutContact = (id) => {
+    setSaved(false);
+    setSkipContactIds((s) => new Set(s).add(id));
+    setPending((p) => ({ ...p, [id]: "Y" }));
   };
 
   /* The details dialog confirms as it saves — the one place on this screen
@@ -102,8 +113,16 @@ export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
   const update = async () => {
     setSaving(true);
     try {
-      await Promise.all(changed.map((s) => patchSite(s.id, { is_confirmed: pending[s.id] })));
+      await Promise.all(
+        changed.map((s) =>
+          patchSite(s.id, {
+            is_confirmed: pending[s.id],
+            ...(pending[s.id] === "Y" && skipContactIds.has(s.id) ? { skip_contact: true } : {}),
+          })
+        )
+      );
       await onSaved();
+      setSkipContactIds(new Set());
       setSaved(true);
     } catch (err) {
       console.error("[sbm] failed to update site confirmations", err);
@@ -151,6 +170,7 @@ export function SitesReviewView({ sites, onBack, onSaved, canManage = true }) {
           tabCounts={tabCounts}
           onDecisionTabChange={setTab}
           onChoose={setChoice}
+          onConfirmWithoutContact={confirmWithoutContact}
           canManage={canManage}
           onContactsChanged={onSaved}
           onDetailsSaved={saveDetails}
