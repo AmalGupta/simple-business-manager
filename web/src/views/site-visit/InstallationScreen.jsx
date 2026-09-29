@@ -5,6 +5,7 @@ import { INSTALLATION_UPDATE_CATEGORIES } from "../../lib/constants.js";
 import { fetchInstallation, fetchSiteTimeline, postInstallationUpdate, postInstallationUpdateMedia } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
+import { checklistLabel, translate, useLang, useT } from "../../lib/i18n.jsx";
 import { VoiceNoteModal } from "../sites/VoiceNoteModal.jsx";
 import { SiteTimeline } from "../sites/SiteTimeline.jsx";
 
@@ -33,10 +34,10 @@ const tableHeaderStyle = {
   color: t.edge2,
 };
 
-function rowStatus(current) {
+function rowStatus(current, lang = "en") {
   if (!current?.voice_note_call_id) return { label: "—", complete: false, started: false };
-  if (current.media_count > 0) return { label: "Done", complete: true, started: true };
-  return { label: "In progress", complete: false, started: true };
+  if (current.media_count > 0) return { label: translate(lang, "done"), complete: true, started: true };
+  return { label: translate(lang, "inProgress"), complete: false, started: true };
 }
 
 function filterTimelineForCategory(timeline, updates, categoryKey) {
@@ -61,6 +62,8 @@ function filterTimelineForCategory(timeline, updates, categoryKey) {
  * SiteTimeline filtered to that category's installation_updates.
  */
 export function InstallationScreen({ installation, onBack, onHome }) {
+  const tr = useT();
+  const lang = useLang();
   const [updates, setUpdates] = useState(null);
   const [timeline, setTimeline] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState(INSTALLATION_UPDATE_CATEGORIES[0].key);
@@ -129,7 +132,7 @@ export function InstallationScreen({ installation, onBack, onHome }) {
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: "1rem" }}>
         <BackLink onClick={onBack} style={{ marginBottom: 0 }}>
-          Back
+          {tr("back")}
         </BackLink>
         {onHome && (
           <button
@@ -145,7 +148,7 @@ export function InstallationScreen({ installation, onBack, onHome }) {
               fontWeight: 600,
             }}
           >
-            Home
+            {tr("home")}
           </button>
         )}
       </div>
@@ -177,7 +180,7 @@ export function InstallationScreen({ installation, onBack, onHome }) {
       />
 
       {updates === null ? (
-        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+        <p style={{ fontSize: 14, color: t.edge2 }}>{tr("loading")}</p>
       ) : (
         <div className="sbm-install-grid">
           <Card style={{ padding: 0, alignSelf: "start" }}>
@@ -191,12 +194,12 @@ export function InstallationScreen({ installation, onBack, onHome }) {
                 ...tableHeaderStyle,
               }}
             >
-              <span>Section</span>
-              <span>Status</span>
+              <span>{tr("section")}</span>
+              <span>{tr("status")}</span>
             </div>
             {INSTALLATION_UPDATE_CATEGORIES.map((cat) => {
               const row = latestByCategory.get(cat.key);
-              const { label: status, complete: rowComplete } = rowStatus(row);
+              const { label: status, complete: rowComplete } = rowStatus(row, lang);
               const selected = selectedCategory === cat.key;
 
               return (
@@ -230,7 +233,7 @@ export function InstallationScreen({ installation, onBack, onHome }) {
                       minWidth: 0,
                     }}
                   >
-                    {cat.label}
+                    {checklistLabel(lang, cat.key, cat.label)}
                   </span>
                   <span
                     style={{
@@ -253,19 +256,19 @@ export function InstallationScreen({ installation, onBack, onHome }) {
 
           <div>
             <h2 style={{ fontFamily: t.display, fontSize: 17, fontWeight: 500, color: t.edge, margin: "0 0 12px" }}>
-              {selectedMeta?.label}
+              {selectedMeta ? checklistLabel(lang, selectedMeta.key, selectedMeta.label) : null}
             </h2>
 
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
               {!hasVoice && (
                 <button type="button" onClick={() => setRecordingCategory(selectedCategory)} style={actionButtonStyle(false)}>
-                  <Mic size={15} /> Add voice note
+                  <Mic size={15} /> {tr("addVoiceNote")}
                 </button>
               )}
               {hasVoice && (
                 <>
                   <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: t.edge2, minHeight: 40 }}>
-                    <Mic size={13} /> Voice note recorded
+                    <Mic size={13} /> {tr("voiceNoteRecorded")}
                   </span>
                   <button
                     type="button"
@@ -276,7 +279,7 @@ export function InstallationScreen({ installation, onBack, onHome }) {
                     }}
                     style={actionButtonStyle(busy)}
                   >
-                    <Image size={15} /> Add photo
+                    <Image size={15} /> {tr("addPhoto")}
                   </button>
                   {selectedMeta?.allowVideo && (
                     <button
@@ -288,7 +291,7 @@ export function InstallationScreen({ installation, onBack, onHome }) {
                       }}
                       style={actionButtonStyle(busy)}
                     >
-                      <Video size={15} /> Add video
+                      <Video size={15} /> {tr("addVideo")}
                     </button>
                   )}
                 </>
@@ -299,16 +302,16 @@ export function InstallationScreen({ installation, onBack, onHome }) {
                   onClick={() => setRecordingCategory(selectedCategory)}
                   style={{ all: "unset", cursor: "pointer", fontSize: 12, fontWeight: 600, color: t.accent, minHeight: 40, display: "flex", alignItems: "center" }}
                 >
-                  Log another update →
+                  {tr("logAnotherUpdate")}
                 </button>
               )}
             </div>
 
             {timeline === null ? (
-              <p style={{ fontSize: 13, color: t.edge2 }}>Loading timeline…</p>
+              <p style={{ fontSize: 13, color: t.edge2 }}>{tr("loadingTimeline")}</p>
             ) : categoryTimeline.length === 0 ? (
               <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
-                <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>Nothing logged in this section yet.</p>
+                <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>{tr("nothingLoggedHere")}</p>
               </Card>
             ) : (
               <SiteTimeline entries={categoryTimeline} canManage={false} onOpenCall={() => {}} />

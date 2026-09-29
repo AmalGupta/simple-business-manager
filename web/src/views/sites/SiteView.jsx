@@ -14,6 +14,7 @@ import {
 } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
+import { fmtShortLang, stageLabel, useLang, useT } from "../../lib/i18n.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
 import { SiteMediaUploadRow } from "./SiteMediaUploadRow.jsx";
 import { MyTaskBanner } from "./MyTaskBanner.jsx";
@@ -46,6 +47,8 @@ export function SiteView({
   currentUser = null,
   onAssignTodo,
 }) {
+  /* SBM-72: staff open this page from their work; they read it in their language. */
+  const tr = useT();
   const [showWorkTimeline, setShowWorkTimeline] = useState(false);
   /* "Assign new site" only for a genuinely blank site — no details AND no
      call history yet. Anything with either already shows "Add more site
@@ -188,7 +191,7 @@ export function SiteView({
 
   return (
     <div>
-      <BackLink onClick={onBack}>Back</BackLink>
+      <BackLink onClick={onBack}>{tr("back")}</BackLink>
 
       <h1
         style={{
@@ -224,7 +227,7 @@ export function SiteView({
             fontWeight: 600,
           }}
         >
-          You've missed the target closure date by {daysMissed} day{daysMissed === 1 ? "" : "s"}.
+          {tr("missedClosure", { n: daysMissed })}
         </div>
       )}
 
@@ -243,8 +246,8 @@ export function SiteView({
             const count = result?.assignedTo?.length ?? 0;
             setVoiceNoteNotice(
               count > 0
-                ? `Voice note saved and assigned to ${count} ${count === 1 ? "person" : "people"}.`
-                : "Voice note saved. No one is assigned to this site yet, so it wasn't given to anyone."
+                ? tr("voiceSavedAssigned", { n: count })
+                : tr("voiceSavedNobody")
             );
           }}
         />
@@ -283,7 +286,7 @@ export function SiteView({
               ) : undefined
             }
           >
-            Site details
+            {tr("siteDetails")}
           </TileLabel>
 
           {
@@ -295,16 +298,19 @@ export function SiteView({
             // happens in SiteDetailsModal, so the summary no longer has to
             // yield the space to a form.
             <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontSize: 14, color: t.edge }}>{siteRecord?.address?.trim() || "No address on file."}</span>
+              <span style={{ fontSize: 14, color: t.edge }}>{siteRecord?.address?.trim() || tr("noAddressDot")}</span>
               {siteRecord?.poc_name?.trim() && (
-                <span style={{ fontSize: 13, color: t.edge2 }}>Point of contact: {siteRecord.poc_name}</span>
+                <span style={{ fontSize: 13, color: t.edge2 }}>{tr("pointOfContact", { name: siteRecord.poc_name })}</span>
               )}
               {siteRecord?.poc_contact_number?.trim() && (
                 <span style={{ fontSize: 13, color: t.edge2 }}>Contact: {siteRecord.poc_contact_number}</span>
               )}
               {(siteRecord?.assigned_by?.trim() || siteRecord?.referred_by?.trim()) && (
                 <span style={{ fontSize: 13, color: t.edge2 }}>
-                  {[siteRecord.assigned_by && `Assigned by ${siteRecord.assigned_by}`, siteRecord.referred_by && `Referred by ${siteRecord.referred_by}`]
+                  {[
+                    siteRecord.assigned_by && tr("assignedBy", { name: siteRecord.assigned_by }),
+                    siteRecord.referred_by && tr("referredBy", { name: siteRecord.referred_by }),
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
                 </span>
@@ -323,8 +329,10 @@ export function SiteView({
               )}
               <span style={{ fontSize: 13, color: targetMissed ? t.signal : t.edge2, fontWeight: targetMissed ? 700 : 400 }}>
                 {siteRecord?.target_closure_date
-                  ? `Target closure date: ${fmtDate(siteRecord.target_closure_date)}${targetMissed ? ` — missed by ${daysMissed}d` : ""}`
-                  : "No target closure date set."}
+                  ? `${tr("targetClosure", { date: fmtDate(siteRecord.target_closure_date) })}${
+                      targetMissed ? tr("missedByDays", { n: daysMissed }) : ""
+                    }`
+                  : tr("noTargetClosure")}
               </span>
             </div>
           }
@@ -355,12 +363,12 @@ export function SiteView({
               ) : undefined
             }
           >
-            Team
+            {tr("team")}
           </TileLabel>
           {team === null ? (
-            <p style={{ fontSize: 13, color: t.edge2, margin: "6px 0 0" }}>Loading…</p>
+            <p style={{ fontSize: 13, color: t.edge2, margin: "6px 0 0" }}>{tr("loading")}</p>
           ) : team.length === 0 ? (
-            <p style={{ fontSize: 13, color: t.edge2, margin: "6px 0 0" }}>No one assigned yet.</p>
+            <p style={{ fontSize: 13, color: t.edge2, margin: "6px 0 0" }}>{tr("noOneAssigned")}</p>
           ) : (
             team.map((m) => (
               <div key={m.id} style={{ display: "flex", justifyContent: "space-between", ...TILE_ROW_STYLE }}>
@@ -377,7 +385,7 @@ export function SiteView({
               site would be noise. */}
           {contacts && contacts.length > 0 && (
             <div style={{ marginTop: 14 }}>
-              <TileLabel>Contacts</TileLabel>
+              <TileLabel>{tr("contacts")}</TileLabel>
               {contacts.map((c) => (
                 <div
                   key={c.caller_id}
@@ -422,7 +430,7 @@ export function SiteView({
         <MyTaskBanner siteId={siteRecord.id} myTasks={myOpenTasks} onChanged={onTasksChanged} />
       )}
 
-      <TileLabel>Timeline</TileLabel>
+      <TileLabel>{tr("timeline")}</TileLabel>
       <div style={{ marginTop: 8 }}>
         <SiteTimeline
           entries={timeline}

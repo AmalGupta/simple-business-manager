@@ -1,21 +1,23 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { AlertTriangle, ChevronRight, Image as ImageIcon, Mic, Plus } from "lucide-react";
 import { t } from "../../theme.js";
-import { fmtDate, fmtShort } from "../../lib/dates.js";
+import { fmtDateLang, fmtShortLang, translate, useLang, useT } from "../../lib/i18n.jsx";
 import { fetchComplaints } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 
-export function siteDetailsLine(c) {
+export function siteDetailsLine(c, lang = "en") {
   const parts = [];
   if (c.site_address?.trim()) parts.push(c.site_address.trim());
-  if (c.site_poc_name?.trim()) parts.push(`POC: ${c.site_poc_name.trim()}`);
-  return parts.length ? parts.join(" · ") : "No address on file";
+  if (c.site_poc_name?.trim()) parts.push(translate(lang, "poc", { name: c.site_poc_name.trim() }));
+  return parts.length ? parts.join(" · ") : translate(lang, "noAddress");
 }
 
 /* Resolved = green, unresolved = amber. Red is kept for genuine urgency
    (the Urgent badge), per the colour rule in SCAFFOLDING.md §7. */
 export function ComplaintStatusLabel({ status, closedAt }) {
+  const tr = useT();
+  const lang = useLang();
   const resolved = status !== "open";
   return (
     <span
@@ -31,27 +33,30 @@ export function ComplaintStatusLabel({ status, closedAt }) {
         background: resolved ? t.okBg : t.puttyBg,
       }}
     >
-      {resolved ? `Resolved${closedAt ? ` · ${fmtShort(closedAt)}` : ""}` : "Unresolved"}
+      {resolved ? (closedAt ? tr("resolvedOn", { date: fmtShortLang(lang, closedAt) }) : tr("resolved")) : tr("unresolved")}
     </span>
   );
 }
 
 export function ComplaintFlags({ c }) {
+  const tr = useT();
   if (!c.urgent_at || c.status !== "open") return null;
   return (
     <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
       <span style={{ fontSize: 11, fontWeight: 700, color: t.signal, display: "inline-flex", alignItems: "center", gap: 3 }}>
-        <AlertTriangle size={12} /> Urgent
+        <AlertTriangle size={12} /> {tr("urgent")}
       </span>
     </span>
   );
 }
 
 function ComplaintCard({ c, showAssignee, selfId, onOpen }) {
+  const tr = useT();
+  const lang = useLang();
   /* Staff see complaints they raised too; for those held by someone else, say who. */
   const raisedNotHeld = selfId && c.assigned_to_user_id !== selfId;
   return (
-    <button type="button" onClick={onOpen} style={{ all: "unset", cursor: "pointer", display: "block", minWidth: 0 }} aria-label={`Complaint: ${c.text}`}>
+    <button type="button" onClick={onOpen} style={{ all: "unset", cursor: "pointer", display: "block", minWidth: 0 }} aria-label={`${tr("complaint")}: ${c.text}`}>
       <Card style={{ height: "100%", minHeight: 150, display: "flex", flexDirection: "column", gap: 8, boxSizing: "border-box" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 6 }}>
           <ComplaintFlags c={c} />
@@ -71,14 +76,14 @@ function ComplaintCard({ c, showAssignee, selfId, onOpen }) {
           {c.text}
         </span>
         <span style={{ fontSize: 12, color: t.edge2 }}>
-          Raised {fmtDate(c.created_at)}
+          {tr("raisedOn", { date: fmtDateLang(lang, c.created_at) })}
           {c.created_by_name ? ` · ${c.created_by_name}` : ""}
         </span>
         {(c.voice_call_id || c.media_count > 0) && (
           <span style={{ fontSize: 12, color: t.edge2, display: "flex", gap: 10 }}>
             {c.voice_call_id && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                <Mic size={12} /> Voice note
+                <Mic size={12} /> {tr("voiceNote")}
               </span>
             )}
             {c.media_count > 0 && (
@@ -93,8 +98,8 @@ function ComplaintCard({ c, showAssignee, selfId, onOpen }) {
         )}
         {(showAssignee || raisedNotHeld) && (
           <span style={{ fontSize: 12, color: t.edge2 }}>
-            {c.assignee_name ? `Assignee: ${c.assignee_name}` : "Not assigned yet"}
-            {raisedNotHeld ? " · raised by you" : ""}
+            {c.assignee_name ? tr("assignee", { name: c.assignee_name }) : tr("notAssignedYet")}
+            {raisedNotHeld ? ` · ${tr("raisedByYou")}` : ""}
           </span>
         )}
         <div style={{ marginTop: "auto" }}>
@@ -119,6 +124,7 @@ export function ComplaintsHomeView({
   /** Staff viewer (or the staff member an admin is looking at) — marks complaints they raised but don't hold. */
   selfId = null,
 }) {
+  const tr = useT();
   const [complaints, setComplaints] = useState(null);
   const [hideResolved, setHideResolved] = useState(false);
 
@@ -142,7 +148,7 @@ export function ComplaintsHomeView({
     for (const c of complaints) {
       if (hideResolved && c.status !== "open") continue;
       const key = c.site_id ?? "none";
-      if (!bySite.has(key)) bySite.set(key, { key, name: c.site_name ?? "No site", items: [] });
+      if (!bySite.has(key)) bySite.set(key, { key, name: c.site_name ?? tr("noSite"), items: [] });
       bySite.get(key).items.push(c);
     }
     return [...bySite.values()].sort((a, b) => {
@@ -151,13 +157,13 @@ export function ComplaintsHomeView({
       if (ua !== ub) return ua ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
-  }, [complaints, hideResolved]);
+  }, [complaints, hideResolved, tr]);
 
   return (
     <div>
-      <BackLink onClick={onBack}>Back</BackLink>
+      <BackLink onClick={onBack}>{tr("back")}</BackLink>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "1rem", gap: 12, flexWrap: "wrap" }}>
-        <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>Complaints</h1>
+        <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>{tr("complaints")}</h1>
         {canAdd && (
           <button
             onClick={onAddComplaint}
@@ -178,7 +184,7 @@ export function ComplaintsHomeView({
               whiteSpace: "nowrap",
             }}
           >
-            <Plus size={14} /> Add complaint
+            <Plus size={14} /> {tr("addComplaint")}
           </button>
         )}
       </div>
@@ -186,16 +192,16 @@ export function ComplaintsHomeView({
       {resolvedCount > 0 && (
         <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, color: t.edge2, marginBottom: "1rem", minHeight: 32, cursor: "pointer" }}>
           <input type="checkbox" checked={hideResolved} onChange={(e) => setHideResolved(e.target.checked)} style={{ width: 18, height: 18 }} />
-          Hide resolved ({resolvedCount})
+          {tr("hideResolved", { n: resolvedCount })}
         </label>
       )}
 
       {complaints === null ? (
-        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+        <p style={{ fontSize: 14, color: t.edge2 }}>{tr("loading")}</p>
       ) : groups.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
           <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>
-            {complaints.length === 0 ? "No complaints yet." : "No unresolved complaints."}
+            {complaints.length === 0 ? tr("noComplaints") : tr("noUnresolvedComplaints")}
           </p>
         </Card>
       ) : (
