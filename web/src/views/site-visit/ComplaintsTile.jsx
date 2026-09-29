@@ -5,10 +5,12 @@ import { TILE_VALUE_ROW_STYLE, TILE_NUMBER_STYLE } from "../../styles.js";
 import { fetchComplaintsCount } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
+import { useT } from "../../lib/i18n.jsx";
 
 /* Home-panel Complaints tile — open staff-filed complaint count for staff
    and admin. Always shows the number (including 0). */
 export function ComplaintsTile({ onOpen, refreshKey = 0, forUserId = null }) {
+  const tr = useT();
   const [count, setCount] = useState(null);
 
   useEffect(() => {
@@ -30,10 +32,10 @@ export function ComplaintsTile({ onOpen, refreshKey = 0, forUserId = null }) {
     <button
       onClick={onOpen}
       style={{ all: "unset", cursor: "pointer", display: "block" }}
-      aria-label={`Complaints — ${count ?? 0} open`}
+      aria-label={`${tr("complaints")} — ${tr("nOpen", { n: count ?? 0 })}`}
     >
       <Card tile>
-        <TileLabel action={<MessageSquareWarning size={14} color={t.edge2} />}>Complaints</TileLabel>
+        <TileLabel action={<MessageSquareWarning size={14} color={t.edge2} />}>{tr("complaints")}</TileLabel>
         <div style={TILE_VALUE_ROW_STYLE}>
           <span style={TILE_NUMBER_STYLE}>{count ?? 0}</span>
         </div>

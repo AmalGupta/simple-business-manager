@@ -3,10 +3,12 @@ import { Image, Video, Mic } from "lucide-react";
 import { t } from "../../theme.js";
 import { postSiteMedia } from "../../lib/api.js";
 import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
+import { fmtShortLang, stageLabel, useLang, useT } from "../../lib/i18n.jsx";
 
 /* Add photo / video / voice note — sits at the top of SiteView. Photo/video
    upload immediately on file selection; voice note opens VoiceNoteModal. */
 export function SiteMediaUploadRow({ siteId, onUploaded, onVoiceNote }) {
+  const tr = useT();
   const photoInputRef = useRef(null);
   const videoInputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
@@ -66,13 +68,13 @@ export function SiteMediaUploadRow({ siteId, onUploaded, onVoiceNote }) {
         }}
       />
       <button disabled={uploading} onClick={() => photoInputRef.current?.click()} style={actionButtonStyle}>
-        <Image size={15} /> Add photo
+        <Image size={15} /> {tr("addPhoto")}
       </button>
       <button disabled={uploading} onClick={() => videoInputRef.current?.click()} style={actionButtonStyle}>
-        <Video size={15} /> Add video
+        <Video size={15} /> {tr("addVideo")}
       </button>
       <button disabled={uploading} onClick={() => setShowVoiceModal(true)} style={actionButtonStyle}>
-        <Mic size={15} /> Add voice note
+        <Mic size={15} /> {tr("addVoiceNote")}
       </button>
       {showVoiceModal && (
         <VoiceNoteModal

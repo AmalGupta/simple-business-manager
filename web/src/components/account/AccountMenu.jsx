@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { User, ChevronDown, ChevronRight, ChevronLeft } from "lucide-react";
 import { t } from "../../theme.js";
+import { useT } from "../../lib/i18n.jsx";
 import { ResetPinModal } from "./ResetPinModal.jsx";
 import { UpdatePhoneModal } from "./UpdatePhoneModal.jsx";
 import { patchMyCustomization } from "../../lib/api.js";
@@ -18,6 +19,7 @@ export function AccountMenu({
   onRequestReport,
   onOpenMaintenanceSiteContact,
 }) {
+  const tr = useT();
   const [open, setOpen] = useState(false);
   const [panel, setPanel] = useState("root"); // root | settings | site-customization | maintenance
   const [showResetModal, setShowResetModal] = useState(false);
@@ -110,7 +112,7 @@ export function AccountMenu({
         }}
         style={menuItemStyle}
       >
-        Update phone
+        {tr("updatePhone")}
       </button>
       {onRequestReport && (
         <button
@@ -121,7 +123,7 @@ export function AccountMenu({
           }}
           style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
         >
-          Request / Report
+          {tr("requestOrReport")}
         </button>
       )}
       {canCustomize && (
@@ -142,7 +144,7 @@ export function AccountMenu({
         }}
         style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
       >
-        Reset PIN
+        {tr("resetPin")}
       </button>
       <button
         role="menuitem"
@@ -152,7 +154,7 @@ export function AccountMenu({
         }}
         style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
       >
-        Log out
+        {tr("logOut")}
       </button>
     </>
   );

@@ -1,7 +1,9 @@
 import { Phone } from "lucide-react";
 import { t } from "../theme.js";
+import { useT } from "../lib/i18n.jsx";
 
 export function PhoneLink({ phone }) {
+  const tr = useT();
   if (!phone) return null;
   return (
     <a
@@ -20,7 +22,7 @@ export function PhoneLink({ phone }) {
       }}
     >
       <Phone size={14} />
-      Call {phone}
+      {tr("call", { n: phone })}
     </a>
   );
 }

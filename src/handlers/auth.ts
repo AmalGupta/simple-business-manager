@@ -37,6 +37,9 @@ import {
   isIsoDate,
   istTodayIso,
   staffUserHasHistory,
+  DISPLAY_LANGUAGE_KEY,
+  isDisplayLanguage,
+  resolveDisplayLanguage,
   type SessionWithUser,
   type User,
   type UserCustomization,
@@ -204,9 +207,44 @@ export async function handleMe(request: Request, env: Env): Promise<Response> {
     role: session.user_role,
     phone: session.user_phone,
     customization,
+    // SBM-72 — staff screens render in this language (hi | en | pa).
+    display_language: resolveDisplayLanguage(
+      rows.find((r) => r.key === DISPLAY_LANGUAGE_KEY)?.value,
+      session.user_role
+    ),
     // migration 0045 — this user routes every new todo to staff.
     is_todo_router: routerUserId === session.user_id,
   });
+}
+
+/** GET /api/staff/:id/language — SBM-72, admin: a staff member's display language. */
+export async function handleGetStaffLanguage(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const user = await getUserById(env.DB, id);
+  if (!user) return json({ error: "not found" }, 404);
+  const rows = await listUserSettings(env.DB, id);
+  return json({
+    display_language: resolveDisplayLanguage(rows.find((r) => r.key === DISPLAY_LANGUAGE_KEY)?.value, user.role),
+  });
+}
+
+/** PATCH /api/staff/:id/language { display_language: "hi" | "en" | "pa" } — SBM-72, admin sets it for a staff member. */
+export async function handlePatchStaffLanguage(request: Request, env: Env, id: string): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const user = await getUserById(env.DB, id);
+  if (!user || user.role !== "staff") return json({ error: "staff member not found" }, 404);
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const lang = typeof body === "object" && body !== null ? (body as Record<string, unknown>).display_language : undefined;
+  if (!isDisplayLanguage(lang)) return json({ error: "display_language must be hi, en, or pa" }, 400);
+  await setUserSetting(env.DB, id, DISPLAY_LANGUAGE_KEY, lang);
+  return json({ ok: true, display_language: lang });
 }
 
 /**

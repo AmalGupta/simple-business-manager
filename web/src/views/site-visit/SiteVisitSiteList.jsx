@@ -4,6 +4,7 @@ import { t } from "../../theme.js";
 import { fetchConfirmedSites } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
+import { checklistLabel, useLang, useT } from "../../lib/i18n.jsx";
 
 /* Entry point for the "Site Visit" home tile — pick a site, then a
    category. Complaints use ComplaintsHomeView instead. Reuses
@@ -13,11 +14,16 @@ export function SiteVisitSiteList({
   onBack,
   onSelectSite,
   onAddSite,
-  title = "Site Visit",
-  prompt = "Which site are you at?",
-  addLabel = "Add new site",
+  /* SBM-72: i18n keys, not text — the caller sits outside the language provider. */
+  titleKey = "siteVisitTitle",
+  promptKey = "pickSite",
+  addLabelKey = "addNewSite",
   forUserId = null,
 }) {
+  const tr = useT();
+  const title = tr(titleKey);
+  const prompt = tr(promptKey);
+  const addLabel = tr(addLabelKey);
   const [sites, setSites] = useState(null);
 
   useEffect(() => {
@@ -37,7 +43,7 @@ export function SiteVisitSiteList({
 
   return (
     <div>
-      <BackLink onClick={onBack}>Back</BackLink>
+      <BackLink onClick={onBack}>{tr("back")}</BackLink>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5rem", gap: 12 }}>
         <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: 0 }}>{title}</h1>
         {onAddSite && (
@@ -66,10 +72,10 @@ export function SiteVisitSiteList({
       <p style={{ fontSize: 13, color: t.edge2, margin: "0 0 1rem" }}>{prompt}</p>
 
       {sites === null ? (
-        <p style={{ fontSize: 14, color: t.edge2 }}>Loading…</p>
+        <p style={{ fontSize: 14, color: t.edge2 }}>{tr("loading")}</p>
       ) : sites.length === 0 ? (
         <Card style={{ padding: "2rem 1.5rem", textAlign: "center" }}>
-          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>No sites assigned to you yet.</p>
+          <p style={{ fontSize: 14, color: t.edge2, margin: 0 }}>{tr("noSitesAssigned")}</p>
         </Card>
       ) : (
         <Card>
