@@ -7,6 +7,7 @@ import { Check } from "lucide-react";
 import { t } from "../../theme.js";
 import { fetchCallers, postCreateCaller, patchCaller, refreshCallersByCategory } from "../../lib/api.js";
 import { isPhoneLikeName, needlesFromSite, newContactOffer, rankContactMatches } from "../../lib/contactMatch.js";
+import { CALLER_TYPE_OPTIONS, callerCategoryLabel } from "../../lib/callerCategories.js";
 import { Modal } from "../../components/Modal.jsx";
 import { PRIMARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
 
@@ -25,17 +26,26 @@ ModuleRegistry.registerModules([AllCommunityModule]);
    number already in the directory maps that contact instead of creating a
    duplicate (POST /api/callers 409 + existing). The full directory sits below.
 
-   Clients only. The directory is a ~3.3k–4k-row phone-contacts import
-   whose other categories are staff, family and spam; none of those is a
-   site contact. The grid is server-paginated (same pattern as Add people)
-   so opening the modal does not download the whole category. Likely matches
-   use a few targeted `q=` fetches from the site's known names/phones, then
-   rank in-memory. Linked sites are not hydrated here — Contacts directory
-   only.
+   Type filter covers every selectable contact type (client, architect,
+   builder, staff, …) — site contacts are not clients-only. The grid is
+   server-paginated (same pattern as Add people) so opening the modal does
+   not download the whole directory. Likely matches use a few targeted `q=`
+   fetches from the site's known names/phones (any type), then rank
+   in-memory. Linked sites are not hydrated here — Contacts directory only.
    ------------------------------------------------------------------ */
 
 const CONTACT_PAGE_SIZE = 50;
 const SEARCH_DEBOUNCE_MS = 250;
+
+/** "" = all selectable types; otherwise a CALLER_TYPE_OPTIONS value. */
+const TYPE_FILTER_ALL = "";
+
+const TYPE_SELECT_STYLE = {
+  ...TEXT_INPUT_STYLE,
+  minWidth: 160,
+  flex: "0 0 auto",
+  cursor: "pointer",
+};
 
 /** Small candidate set for "Most likely matches" — not the full directory. */
 async function fetchLikelyMatchCandidates(site) {
@@ -49,8 +59,10 @@ async function fetchLikelyMatchCandidates(site) {
     if (token.length >= 2) queries.add(token);
   }
   if (queries.size === 0) return [];
+  /* No category filter — a discovering number may already be typed as
+     architect / builder / staff, and those still belong on the site. */
   const pages = await Promise.all(
-    [...queries].map((q) => fetchCallers({ category: "client", q, limit: CONTACT_PAGE_SIZE }))
+    [...queries].map((q) => fetchCallers({ q, limit: CONTACT_PAGE_SIZE }))
   );
   const byId = new Map();
   for (const page of pages) {
@@ -175,10 +187,11 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
   const gridRef = useRef(null);
   const seededStrong = useRef(false);
   const searchSeq = useRef(0);
-  const [clients, setClients] = useState(null);
-  const [clientsTotal, setClientsTotal] = useState(0);
+  const [contacts, setContacts] = useState(null);
+  const [contactsTotal, setContactsTotal] = useState(0);
   const [matchCandidates, setMatchCandidates] = useState(null);
   const [query, setQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState(TYPE_FILTER_ALL);
   const [selected, setSelected] = useState(() => new Set());
   const [selectedNames, setSelectedNames] = useState(() => ({}));
   const [saving, setSaving] = useState(false);
@@ -188,6 +201,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
   const [addingNew, setAddingNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPhone, setNewPhone] = useState("");
+  const [newCategory, setNewCategory] = useState("client");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
   /* After a successful create/rename, stop offering until the modal reopens. */
@@ -216,25 +230,25 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
     const mySeq = ++searchSeq.current;
     const timer = setTimeout(() => {
       fetchCallers({
-        category: "client",
+        category: typeFilter || undefined,
         q: query.trim() || undefined,
         limit: CONTACT_PAGE_SIZE,
       })
         .then((data) => {
           if (searchSeq.current !== mySeq) return;
-          setClients(data.items ?? []);
-          setClientsTotal(data.total ?? 0);
+          setContacts(data.items ?? []);
+          setContactsTotal(data.total ?? 0);
         })
         .catch((err) => {
-          console.error("[sbm] failed to load clients for site contacts", err);
+          console.error("[sbm] failed to load contacts for site association", err);
           if (searchSeq.current !== mySeq) return;
-          setClients([]);
-          setClientsTotal(0);
-          setError("Couldn't load the client list — try again.");
+          setContacts([]);
+          setContactsTotal(0);
+          setError("Couldn't load the contact list — try again.");
         });
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, typeFilter]);
 
   const likelyMatches = useMemo(() => {
     if (!matchCandidates) return [];
@@ -271,6 +285,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
     if (!offer) return;
     setNewName(offer.identified.suggestedName || "");
     setNewPhone(offer.identified.phoneDisplay || offer.identified.phone || "");
+    setNewCategory(typeFilter || "client");
     setCreateError("");
     setAddingNew(true);
   };
@@ -302,7 +317,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
         saved = await patchCaller(offer.existingCallerId, { name, phone });
       } else {
         try {
-          saved = await postCreateCaller({ name, phone, category: "client" });
+          saved = await postCreateCaller({ name, phone, category: newCategory || "client" });
         } catch (err) {
           // Number already in the directory → map that contact, don't duplicate.
           if (err.status !== 409 || !err.existing) throw err;
@@ -319,7 +334,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
         }
         return [saved, ...list];
       });
-      setClients((current) => {
+      setContacts((current) => {
         const list = current ?? [];
         const idx = list.findIndex((c) => c.id === saved.id);
         if (idx >= 0) {
@@ -338,7 +353,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
       setAddingNew(false);
       setNewContactDone(true);
       /* Keep the Callers Directory screen's cache honest if it's open later. */
-      refreshCallersByCategory("client").catch(() => {});
+      refreshCallersByCategory(saved.category || newCategory || "client").catch(() => {});
     } catch (err) {
       console.error("[sbm] failed to add contact from site association", err);
       setCreateError(err.message || "Couldn't save this contact — try again.");
@@ -365,12 +380,12 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
 
   const rows = useMemo(
     () =>
-      (clients ?? []).map((c) => ({
+      (contacts ?? []).map((c) => ({
         ...c,
         linked: alreadyLinked.has(c.id),
         chosen: alreadyLinked.has(c.id) || selected.has(c.id),
       })),
-    [clients, alreadyLinked, selected]
+    [contacts, alreadyLinked, selected]
   );
 
   const columnDefs = useMemo(
@@ -384,9 +399,17 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
         valueGetter: (p) => p.data?.name ?? "",
       },
       {
+        headerName: "Type",
+        colId: "type",
+        width: 130,
+        suppressSizeToFit: true,
+        cellClass: "sbm-ccol-type",
+        valueGetter: (p) => callerCategoryLabel(p.data?.category) || "—",
+      },
+      {
         headerName: "Phone",
         colId: "phone",
-        width: 150,
+        width: 140,
         suppressSizeToFit: true,
         cellClass: "sbm-ccol-phone",
         valueGetter: (p) => p.data?.phone ?? "",
@@ -532,6 +555,18 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
                       aria-label="New contact phone"
                       style={{ ...TEXT_INPUT_STYLE, flex: 1, minWidth: 140 }}
                     />
+                    <select
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      aria-label="New contact type"
+                      style={TYPE_SELECT_STYLE}
+                    >
+                      {CALLER_TYPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   {createError && <span style={{ fontSize: 12, color: t.signal }}>{createError}</span>}
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -599,7 +634,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "1fr 150px 104px",
+                  gridTemplateColumns: "1fr 120px 140px 104px",
                   gap: 0,
                   padding: "8px 12px",
                   background: "#DCE6FF",
@@ -607,6 +642,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
                 }}
               >
                 <span style={{ ...sectionLabelStyle, color: t.edge }}>Name</span>
+                <span style={{ ...sectionLabelStyle, color: t.edge }}>Type</span>
                 <span style={{ ...sectionLabelStyle, color: t.edge }}>Phone</span>
                 <span style={{ ...sectionLabelStyle, color: t.edge, textAlign: "center" }}>Add</span>
               </div>
@@ -620,7 +656,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
                     role="listitem"
                     style={{
                       display: "grid",
-                      gridTemplateColumns: "1fr 150px 104px",
+                      gridTemplateColumns: "1fr 120px 140px 104px",
                       alignItems: "center",
                       gap: 0,
                       padding: "10px 12px",
@@ -634,6 +670,9 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
                       {phoneOnly ? (
                         <span style={{ marginLeft: 6, fontSize: 11, color: t.edge2 }}>(phone only)</span>
                       ) : null}
+                    </span>
+                    <span style={{ fontSize: 12, color: t.edge2 }}>
+                      {callerCategoryLabel(caller.category) || "—"}
                     </span>
                     <span
                       style={{
@@ -675,12 +714,25 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
             autoFocus={!offer}
             style={{ ...TEXT_INPUT_STYLE, flex: 1, minWidth: 180 }}
           />
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            aria-label="Filter by contact type"
+            style={TYPE_SELECT_STYLE}
+          >
+            <option value={TYPE_FILTER_ALL}>All types</option>
+            {CALLER_TYPE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
           <span style={{ fontSize: 12, color: t.edge2 }}>
-            {clients === null
-              ? "Loading clients…"
-              : clientsTotal > rows.length
-                ? `Showing ${rows.length} of ${clientsTotal}${query.trim() ? " matching" : ""}`
-                : `${clientsTotal} client${clientsTotal === 1 ? "" : "s"}`}
+            {contacts === null
+              ? "Loading contacts…"
+              : contactsTotal > rows.length
+                ? `Showing ${rows.length} of ${contactsTotal}${query.trim() || typeFilter ? " matching" : ""}`
+                : `${contactsTotal} contact${contactsTotal === 1 ? "" : "s"}`}
           </span>
         </div>
 
@@ -696,7 +748,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
             animateRows={false}
             suppressCellFocus
             enableBrowserTooltips={false}
-            overlayNoRowsTemplate={clients === null ? "Loading…" : "No clients match this search."}
+            overlayNoRowsTemplate={contacts === null ? "Loading…" : "No contacts match this search."}
           />
         </div>
       </div>
