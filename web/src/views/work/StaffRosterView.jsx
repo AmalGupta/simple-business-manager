@@ -78,7 +78,7 @@ function CellList({ items, selectedKey, onSelect }) {
   );
 }
 
-function SelectedItemPanel({ item, staffName, onOpenSite, onOpenCall, onClose }) {
+function SelectedItemPanel({ item, staffName, onOpenSite, onOpenCall, onOpenComplaint, onClose }) {
   const urgent = Boolean(item.urgent_at);
   return (
     <Card style={{ marginBottom: "1rem", ...(urgent ? { borderColor: t.signal } : {}) }}>
@@ -92,6 +92,7 @@ function SelectedItemPanel({ item, staffName, onOpenSite, onOpenCall, onClose })
         </button>
       </div>
       <div style={{ fontSize: 12, color: t.edge2, marginTop: 4 }}>
+        {item.kind === "complaint" ? "Complaint · " : ""}
         {staffName}
         {item.site_name ? ` · ${item.site_name}` : ""}
         {item.scheduled_for ? ` · planned ${fmtShort(item.scheduled_for)}` : ""}
@@ -114,6 +115,11 @@ function SelectedItemPanel({ item, staffName, onOpenSite, onOpenCall, onClose })
             Open call
           </button>
         )}
+        {item.kind === "complaint" && onOpenComplaint && (
+          <button type="button" onClick={() => onOpenComplaint(item.id)} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44 }}>
+            Open complaint
+          </button>
+        )}
       </div>
     </Card>
   );
@@ -125,7 +131,7 @@ function SelectedItemPanel({ item, staffName, onOpenSite, onOpenCall, onClose })
    here). Covers a week back and 15 days ahead;
    work planned before that window but not done collects in "Slipped".
    Unplanned work is a count per person. */
-export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall }) {
+export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall, onOpenComplaint }) {
   const today = todayIso();
   const from = addDaysIso(today, -DAYS_BACK);
   const [data, setData] = useState(null);
@@ -210,6 +216,7 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
           staffName={staffName(selected.user_id)}
           onOpenSite={onOpenSite}
           onOpenCall={onOpenCall}
+          onOpenComplaint={onOpenComplaint}
           onClose={() => setSelected(null)}
         />
       )}

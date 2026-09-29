@@ -3,7 +3,16 @@
 // session-cookie-gated (see src/lib/auth.ts header comment: <img>/<video>/
 // <audio> tags can't attach the X-SBM-Key header the rest of /api/* uses).
 
-import { addSiteMedia, getCallById, getSiteMediaById, isCallRecordingAccessibleToUser, listSiteMedia, type SessionWithUser } from "@sbm/core";
+import {
+  addSiteMedia,
+  getCallById,
+  getSiteMediaById,
+  isCallOnComplaintAssignedTo,
+  isCallRecordingAccessibleToUser,
+  isMediaOnComplaintAssignedTo,
+  listSiteMedia,
+  type SessionWithUser,
+} from "@sbm/core";
 import { streamR2Object } from "../lib/r2-stream";
 import { assertSiteMembership } from "../lib/auth";
 import type { Env } from "../index";
@@ -59,7 +68,12 @@ export async function handleGetMedia(
 ): Promise<Response> {
   const media = await getSiteMediaById(env.DB, mediaId);
   if (!media) return new Response("Not found", { status: 404 });
-  if (!(await assertSiteMembership(env, session, media.site_id))) return new Response("Forbidden", { status: 403 });
+  if (
+    !(await assertSiteMembership(env, session, media.site_id)) &&
+    !(await isMediaOnComplaintAssignedTo(env.DB, mediaId, session.user_id)) // SBM-71: the complaint's assignee
+  ) {
+    return new Response("Forbidden", { status: 403 });
+  }
   return streamR2Object(env.RECORDINGS, media.r2_key, media.content_type, request);
 }
 
@@ -77,7 +91,11 @@ export async function handleGetCallRecording(
 ): Promise<Response> {
   const call = await getCallById(env.DB, callId);
   if (!call) return new Response("Not found", { status: 404 });
-  if (session.user_role === "staff" && !(await isCallRecordingAccessibleToUser(env.DB, session.user_id, callId))) {
+  if (
+    session.user_role === "staff" &&
+    !(await isCallRecordingAccessibleToUser(env.DB, session.user_id, callId)) &&
+    !(await isCallOnComplaintAssignedTo(env.DB, callId, session.user_id)) // SBM-71: a complaint's voice note
+  ) {
     return new Response("Forbidden", { status: 403 });
   }
   // Callers Directory (migration 0021): Family/repeat-known-Spam rows

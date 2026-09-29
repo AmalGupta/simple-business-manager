@@ -17,7 +17,7 @@ function describe(e) {
         ? `Moved to ${fmtShort(e.to_value)} (was ${fmtShort(e.from_value)})`
         : `Planned for ${fmtShort(e.to_value)}`;
     case "completed":
-      return "Completed";
+      return e.item_kind === "complaint" ? "Resolved" : "Completed";
     case "reopened":
       return "Reopened";
     case "handed_off":
@@ -30,6 +30,10 @@ function describe(e) {
       return "Marked urgent";
     case "urgent_cleared":
       return "Urgent cleared";
+    case "marked_important":
+      return "Marked important";
+    case "important_cleared":
+      return "Important cleared";
     case "location_changed":
       return `Moved to ${e.to_value === "factory" ? "Factory" : "Office"}`;
     case "due_changed":

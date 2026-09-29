@@ -26,6 +26,9 @@
   --color-danger-bg: #FDECEA;
   /* Unread-activity badge only (the "other side responded" glow) — never used decoratively. */
   --color-unread: #22C55E;
+  /* SBM-71: "Resolved" status label on complaints only — a closed state, never decoration. */
+  --color-ok: #15803D;
+  --color-ok-bg: #E8F5EC;
 
   --font-display: "Space Grotesk", system-ui, sans-serif;
   /* Small section/tile headers (TileLabel) — see docs/DESIGN_LANGUAGE.md. */
@@ -61,6 +64,8 @@
   --color-danger: #B3261E;
   --color-danger-bg: #F6E4E2;
   --color-unread: #22C55E;
+  --color-ok: #2F6B4F;
+  --color-ok-bg: #E4F0EA;
 
   --font-display: "Bricolage Grotesque", system-ui, sans-serif;
   --font-body: "Mukta", system-ui, sans-serif;
