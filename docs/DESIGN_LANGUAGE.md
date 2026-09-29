@@ -28,6 +28,7 @@ Two things change in how color is *used*, not the palette itself:
 
 1. **Tile numerals are accent-blue, not ink-black.** A number is the one thing on a stat tile worth a color signal; everything else on the tile (the label, the rule) stays neutral. Applies to StatCard, StaffTile, WorkflowTilesRow, and the "calls logged"/"recordings" tiles.
 2. **One new token, `--color-ink-emphasis` (`#05070A`)**, for primary list-row text that needs to read a shade heavier than body ink — currently just site names (Sites directory, "Sites needing attention"). Not a replacement for `--color-ink`; a deliberately narrow addition for one recurring pattern, not a blanket darkening.
+3. **`--color-ok` / `--color-ok-bg` (SBM-71, 2026-09-29)** — green, for exactly one thing: the "Resolved" status label on a complaint. A closed state, not a decoration; it never appears on open work. Unresolved complaints use the existing warn amber, and red stays reserved for genuine urgency.
 
 ## Surface
 

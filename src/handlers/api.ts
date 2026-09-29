@@ -8,6 +8,7 @@ import {
   addSiteTeamMember,
   assignComplaint,
   closeEscalation,
+  getComplaintDetail,
   countOpenComplaints,
   createEscalation,
   createSite,
@@ -1039,6 +1040,18 @@ export async function handleGetComplaintsCount(request: Request, env: Env): Prom
   return json({ count: await countOpenComplaints(env.DB, scoped) });
 }
 
+/** GET /api/complaints/:id — SBM-71 detail: voice transcript + attached photos/videos. Staff: only their own. */
+export async function handleGetComplaint(request: Request, env: Env, id: string): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  const detail = await getComplaintDetail(env.DB, id);
+  if (!detail) return json({ error: "not found" }, 404);
+  if (session.user_role === "staff" && detail.assigned_to_user_id !== session.user_id) {
+    return json({ error: "forbidden" }, 403);
+  }
+  return json(detail);
+}
+
 /** Admin assigns a staff-filed complaint to a team member. */
 export async function handlePatchComplaint(request: Request, env: Env, id: string): Promise<Response> {
   const gate = await requireAdmin(request, env);
@@ -1085,7 +1098,7 @@ export async function handlePostEscalation(request: Request, env: Env): Promise<
 export async function handleCloseEscalation(request: Request, env: Env, id: string): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
-  const updated = await closeEscalation(env.DB, id);
+  const updated = await closeEscalation(env.DB, id, gate.user_id);
   if (!updated) return json({ error: "not found" }, 404);
   return json(updated);
 }

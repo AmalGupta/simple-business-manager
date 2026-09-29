@@ -163,6 +163,8 @@ export interface SiteMedia {
   created_at: string;
   /** migration 0016: set when this documents a specific installation checklist row. */
   installation_update_id: string | null;
+  /** migration 0051 (SBM-71): set when attached to a site-level complaint. */
+  escalation_id?: string | null;
 }
 
 export interface SiteEdit {
@@ -200,6 +202,12 @@ export interface Escalation {
   assigned_to_user_id: string | null;
   assigned_by_user_id: string | null;
   assigned_at: string | null;
+  /** migration 0051 (SBM-71) — complaints are work items. */
+  scheduled_for?: string | null;
+  urgent_at?: string | null;
+  important_at?: string | null;
+  resolved_by_user_id?: string | null;
+  voice_call_id?: string | null;
 }
 
 /** migration 0033/0034: an in-app "request/report an issue" form — voice only, filed directly into Jira. */

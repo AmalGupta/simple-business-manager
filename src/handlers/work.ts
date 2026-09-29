@@ -3,7 +3,8 @@
 // teammate, the admin roster grid, and the staff-by-staff audit trail.
 //
 //   GET   /api/work/assigned[?for_user_id=]     staff: own; admin: one staff member
-//   PATCH /api/work/:kind/:id[?for_user_id=]    { scheduled_for } | { status: "done" } | { urgent } | { work_location }
+//   PATCH /api/work/:kind/:id[?for_user_id=]    { scheduled_for } | { status: "done" } | { urgent } | { work_location } | { important }
+//   kind: todo | site_task | complaint (SBM-71). A complaint is resolved (status "done") by an admin only.
 //   POST  /api/work/:kind/:id/handoff[?for_user_id=]   { to_user_id }
 //   GET   /api/work/roster?to=yyyy-mm-dd         admin
 //   GET   /api/work/events?user_id=&before_seq=  admin
@@ -25,6 +26,8 @@ import {
   listTaskAudit,
   getTaskTimeline,
   logWorkEvents,
+  closeEscalation,
+  setComplaintImportant,
   setWorkLocation,
   setWorkScheduledFor,
   setWorkUrgent,
@@ -89,9 +92,25 @@ export async function handlePatchWork(request: Request, env: Env, kindRaw: strin
     return json({ ok: true, urgent: record.urgent === true });
   }
 
+  // Admin-only (SBM-71): important flag on a complaint.
+  if ("important" in record) {
+    if (!isAdmin) return json({ error: "forbidden" }, 403);
+    if (kind !== "complaint") return json({ error: "only complaints can be marked important" }, 400);
+    await setComplaintImportant(env.DB, ref, record.important === true, session.user_id);
+    return json({ ok: true, important: record.important === true });
+  }
+
+  // Admin-only: resolving a complaint (SBM-71) — staff plan and pass it on, but don't close it.
+  if (kind === "complaint" && record.status === "done") {
+    if (!isAdmin) return json({ error: "only an admin can resolve a complaint" }, 403);
+    await closeEscalation(env.DB, id, session.user_id);
+    return json({ ok: true });
+  }
+
   // Admin-only (SBM-67): Office / Factory tab, set while routing.
   if ("work_location" in record) {
     if (!isAdmin) return json({ error: "forbidden" }, 403);
+    if (kind === "complaint") return json({ error: "complaints have no office/factory split" }, 400);
     if (!isWorkLocation(record.work_location)) return json({ error: "work_location must be office or factory" }, 400);
     await setWorkLocation(env.DB, ref, record.work_location, session.user_id);
     return json({ ok: true, work_location: record.work_location });
@@ -162,7 +181,7 @@ export async function handlePostWorkHandoff(request: Request, env: Env, kindRaw:
   const ref = await getWorkItemRef(env.DB, kindRaw, id);
   if (!ref) return json({ error: "not found" }, 404);
   if (!ref.assignee_ids.includes(subject)) return json({ error: "forbidden" }, 403);
-  const openStatus = kindRaw === "todo" ? "open" : "assigned";
+  const openStatus = kindRaw === "site_task" ? "assigned" : "open";
   if (ref.status !== openStatus) return json({ error: "work is no longer open" }, 409);
 
   const target = await getUserById(env.DB, toUserId);

@@ -1026,6 +1026,16 @@ export async function fetchStaffComplaints() {
 }
 
 /** Site-level complaint — voice note required; optional text + photo/video attachments. */
+/** SBM-71 — one complaint with its voice transcript and photos/videos. */
+export async function fetchComplaint(id) {
+  const res = await fetch(`/api/complaints/${id}`, { credentials: "same-origin" });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `GET /api/complaints/${id} → ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function postSiteComplaint(siteId, text, blob, fileName, mediaFiles = []) {
   const fd = new FormData();
   if (text?.trim()) fd.append("text", text.trim());
