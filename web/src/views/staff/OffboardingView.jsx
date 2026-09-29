@@ -433,7 +433,7 @@ export function OffboardingView({ staffId, onBack, onOpenCall, onFinished }) {
             }}
             style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, color: t.edge2 }}
           >
-            {confirming === "cancel" ? "Confirm — they’re staying" : "Cancel offboarding"}
+            {confirming === "cancel" ? "Confirm retain — they’re staying" : "Retain"}
           </button>
         </div>
       )}
