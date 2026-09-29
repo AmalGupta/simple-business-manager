@@ -859,8 +859,11 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
 
   /* Confirming a site from review needs a real contact behind it: at least
      one linked directory contact with a phone number. Otherwise the review
-     screen was saving free-text names that never became mapped contacts. */
-  if (patch.is_confirmed === "Y" && !(await siteHasContactWithPhone(env.DB, id))) {
+     screen was saving free-text names that never became mapped contacts.
+     `skip_contact: true` is the reviewer explicitly choosing "Skip" in the
+     contacts picker — confirm anyway, with no contact mapped. */
+  const skipContact = record.skip_contact === true;
+  if (patch.is_confirmed === "Y" && !skipContact && !(await siteHasContactWithPhone(env.DB, id))) {
     const current = await getSiteConfirmation(env.DB, id);
     if (current && current.is_confirmed !== "Y") {
       return json({ error: "Map a contact with a phone number before confirming this site", code: "contact_required" }, 409);
