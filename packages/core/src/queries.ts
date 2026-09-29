@@ -3958,14 +3958,17 @@ export async function createUser(
   pinSalt: string,
   role: UserRole = "staff",
   phone: string | null = null,
-  pinEncrypted: string | null = null
+  pinEncrypted: string | null = null,
+  /** migration 0050 (SBM-64) — first working day; defaults to today (IST). */
+  joinedOn: string | null = null
 ): Promise<User> {
   const id = crypto.randomUUID();
   await db
     .prepare(
-      `INSERT INTO users (id, name, pin_hash, pin_salt, role, phone, pin_encrypted) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO users (id, name, pin_hash, pin_salt, role, phone, pin_encrypted, joined_on)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     )
-    .bind(id, name, pinHash, pinSalt, role, phone, pinEncrypted)
+    .bind(id, name, pinHash, pinSalt, role, phone, pinEncrypted, joinedOn ?? istTodayIso())
     .run();
   return (await getUserById(db, id))!;
 }
@@ -3985,6 +3988,9 @@ export interface StaffRosterRow {
   phone: string | null;
   /** Contact aliases that resolve to this staff user (via callers.staff_user_id). */
   aliases: string[];
+  /** SBM-64 — set while serving notice, so pickers can say "(leaving 30 Sept)". */
+  last_working_day: string | null;
+  joined_on: string | null;
 }
 
 /**
@@ -4000,11 +4006,19 @@ export interface StaffRosterRow {
  */
 export async function listStaffRoster(db: D1Database): Promise<StaffRosterRow[]> {
   const [{ results }, aliasRows] = await Promise.all([
-    db.prepare(`SELECT id, name, phone FROM users WHERE role = 'staff' ORDER BY name ASC`).all<{
-      id: string;
-      name: string;
-      phone: string | null;
-    }>(),
+    /* SBM-64: former staff (disabled_at) never appear in an assign/pass-on picker. */
+    db
+      .prepare(
+        `SELECT id, name, phone, last_working_day, joined_on FROM users
+         WHERE role = 'staff' AND disabled_at IS NULL ORDER BY name ASC`
+      )
+      .all<{
+        id: string;
+        name: string;
+        phone: string | null;
+        last_working_day: string | null;
+        joined_on: string | null;
+      }>(),
     listOwnerAliasMatches(db),
   ]);
   const aliasesByUser = new Map<string, string[]>();
@@ -5850,6 +5864,8 @@ export type WorkEventType =
   /** Call todo parked (status snoozed) / taken back out of parked. */
   | "parked"
   | "unparked"
+  /** SBM-64 — still held by a leaver after their last working day; moved to the router by the cron sweep. */
+  | "offboard_rerouted"
   /** SBM-67 — Office ↔ Factory changed by an admin; from/to hold the locations. */
   | "location_changed";
 
@@ -6164,6 +6180,25 @@ export async function handOffWork(
   toUserId: string,
   actorUserId: string
 ): Promise<void> {
+  await db.batch(handOffWorkStmts(db, ref, fromUserId, toUserId, actorUserId));
+  if (ref.site_id) await touchSiteActivity(db, ref.site_id, { source: "task", refId: ref.id });
+}
+
+/**
+ * The statements behind handOffWork, so bulk moves (SBM-64 offboarding)
+ * share one rule set: the receiver starts unplanned unless the item is
+ * urgent (then today), and the move is audited on both sides. `fromEvent`
+ * lets the after-last-working-day sweep record 'offboard_rerouted' instead
+ * of an ordinary 'handed_off'. `actorUserId` is null for that cron sweep.
+ */
+export function handOffWorkStmts(
+  db: D1Database,
+  ref: WorkItemRef,
+  fromUserId: string,
+  toUserId: string,
+  actorUserId: string | null,
+  fromEvent: "handed_off" | "offboard_rerouted" = "handed_off"
+): D1PreparedStatement[] {
   const planned = ref.urgent_at ? istTodayIso() : null;
   const stmts: D1PreparedStatement[] =
     ref.kind === "todo"
@@ -6192,7 +6227,7 @@ export async function handOffWork(
       siteId: ref.site_id,
       actorUserId,
       subjectUserId: fromUserId,
-      event: "handed_off",
+      event: fromEvent,
       toValue: toUserId,
     }),
     workEventStmt(db, {
@@ -6205,8 +6240,7 @@ export async function handOffWork(
       fromValue: fromUserId,
     })
   );
-  await db.batch(stmts);
-  if (ref.site_id) await touchSiteActivity(db, ref.site_id, { source: "task", refId: ref.id });
+  return stmts;
 }
 
 export interface RosterWorkItem {
@@ -6223,7 +6257,17 @@ export interface RosterWorkItem {
 }
 
 export interface StaffRosterGrid {
-  staff: { id: string; name: string }[];
+  /** SBM-64 — joined_on / last_working_day drive the "Joins …" / "Leaving …" row labels;
+   *  disabled_at is set only for a former staff member who still holds work. */
+  staff: {
+    id: string;
+    name: string;
+    joined_on: string | null;
+    last_working_day: string | null;
+    disabled_at: string | null;
+    /** Leavers only (else null) — everything still held, same count as the offboarding screen. */
+    held: number | null;
+  }[];
   /** Planned on or before `to` (earlier = overdue plan), plus every urgent item. */
   items: RosterWorkItem[];
   /** Open work per staff member with no planned day yet. */
@@ -6238,8 +6282,25 @@ export interface StaffRosterGrid {
 export async function getStaffRosterGrid(db: D1Database, to: string): Promise<StaffRosterGrid> {
   const [staffRes, todoRes, taskRes, unTodoRes, unTaskRes] = await Promise.all([
     db
-      .prepare(`SELECT id, name FROM users WHERE role = 'staff' AND disabled_at IS NULL ORDER BY name ASC`)
-      .all<{ id: string; name: string }>(),
+      .prepare(
+        `SELECT id, name, joined_on, last_working_day, disabled_at,
+                CASE WHEN last_working_day IS NOT NULL OR disabled_at IS NOT NULL THEN ${HELD_WORK_COUNT_SQL} END AS held
+         FROM users
+         WHERE role = 'staff'
+           AND (disabled_at IS NULL
+                OR EXISTS (SELECT 1 FROM todo_assignees JOIN todos ON todos.id = todo_assignees.todo_id
+                           WHERE todo_assignees.user_id = users.id AND todos.status = 'open')
+                OR EXISTS (SELECT 1 FROM site_tasks WHERE assigned_to_user_id = users.id AND status = 'assigned'))
+         ORDER BY name ASC`
+      )
+      .all<{
+        id: string;
+        name: string;
+        joined_on: string | null;
+        last_working_day: string | null;
+        disabled_at: string | null;
+        held: number | null;
+      }>(),
     db
       .prepare(
         `SELECT 'todo' AS kind, todos.id AS id, todos.text AS title, sites.name AS site_name,
@@ -6715,4 +6776,349 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
     assignees: head?.assignees ? head.assignees.split(", ") : [],
     events: results ?? [],
   };
+}
+
+// ---------------------------------------------------------------------------
+// SBM-64 — staff transitions: joining date + notice-period offboarding
+// (migration 0050). The leaver keeps their open work until an admin moves it
+// (to another staff member, or to themselves); the day after the last
+// working day, finalizeDueOffboardings sends anything left to the router and
+// sets disabled_at — never a delete, so history keeps the leaver's name.
+// ---------------------------------------------------------------------------
+
+export type OffboardItemKind = WorkItemKind | "complaint";
+
+/** Open todos (incl. parked) + assigned stages + open complaints held by `users.id` — one definition
+ *  so the offboarding screen, the Offboard tile and the roster's "N left" never disagree. */
+const HELD_WORK_COUNT_SQL = `(
+  (SELECT COUNT(*) FROM todo_assignees JOIN todos ON todos.id = todo_assignees.todo_id
+     WHERE todo_assignees.user_id = users.id AND todos.status IN ('open', 'snoozed'))
+  + (SELECT COUNT(*) FROM site_tasks WHERE assigned_to_user_id = users.id AND status = 'assigned')
+  + (SELECT COUNT(*) FROM escalations WHERE assigned_to_user_id = users.id AND status = 'open'))`;
+
+export interface OffboardItem {
+  kind: OffboardItemKind;
+  id: string;
+  title: string;
+  site_id: string | null;
+  site_name: string | null;
+  /** Call todos only — the call it came from, for tracing back. */
+  call_id: string | null;
+  client_name: string | null;
+  recorded_at: string | null;
+  context: string | null;
+  /** Site stages only — workflow category. */
+  category: string | null;
+  due_date: string | null;
+  urgent_at: string | null;
+  /** Call todos: 'open' | 'snoozed' (parked). */
+  status: string;
+}
+
+export interface OffboardingDetail {
+  user: {
+    id: string;
+    name: string;
+    phone: string | null;
+    joined_on: string | null;
+    last_working_day: string | null;
+    offboarding_started_at: string | null;
+    disabled_at: string | null;
+  };
+  items: OffboardItem[];
+  site_teams: { site_id: string; site_name: string }[];
+}
+
+export async function startOffboarding(
+  db: D1Database,
+  userId: string,
+  lastWorkingDay: string,
+  actorUserId: string
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE users SET last_working_day = ?, offboarding_started_at = datetime('now'), offboarding_started_by = ?
+       WHERE id = ? AND role = 'staff' AND disabled_at IS NULL`
+    )
+    .bind(lastWorkingDay, actorUserId, userId)
+    .run();
+}
+
+export async function updateLastWorkingDay(db: D1Database, userId: string, lastWorkingDay: string): Promise<void> {
+  await db
+    .prepare(`UPDATE users SET last_working_day = ? WHERE id = ? AND last_working_day IS NOT NULL AND disabled_at IS NULL`)
+    .bind(lastWorkingDay, userId)
+    .run();
+}
+
+export async function cancelOffboarding(db: D1Database, userId: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE users SET last_working_day = NULL, offboarding_started_at = NULL, offboarding_started_by = NULL
+       WHERE id = ? AND disabled_at IS NULL`
+    )
+    .bind(userId)
+    .run();
+}
+
+/** Brings a former staff member back — login works again; moved work stays where it went. */
+export async function reactivateStaffUser(db: D1Database, userId: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE users SET disabled_at = NULL, last_working_day = NULL, offboarding_started_at = NULL,
+                        offboarding_started_by = NULL, failed_attempts = 0, locked_until = NULL
+       WHERE id = ? AND role = 'staff'`
+    )
+    .bind(userId)
+    .run();
+}
+
+/** Staff currently serving notice, with their open-work count — the Offboard tile's list. */
+export async function listOffboardingStaff(
+  db: D1Database
+): Promise<{ id: string; name: string; last_working_day: string; offboarding_started_at: string | null; remaining: number }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT users.id, users.name, users.last_working_day, users.offboarding_started_at,
+              ${HELD_WORK_COUNT_SQL} AS remaining
+       FROM users
+       WHERE role = 'staff' AND last_working_day IS NOT NULL AND disabled_at IS NULL
+       ORDER BY users.last_working_day ASC, users.name ASC`
+    )
+    .all<{ id: string; name: string; last_working_day: string; offboarding_started_at: string | null; remaining: number }>();
+  return results ?? [];
+}
+
+export async function getOffboardingDetail(db: D1Database, userId: string): Promise<OffboardingDetail | null> {
+  const user = await getUserById(db, userId);
+  if (!user) return null;
+  const [todoRes, taskRes, complaintRes, teamRes] = await Promise.all([
+    db
+      .prepare(
+        `SELECT 'todo' AS kind, todos.id AS id, todos.text AS title, todos.site_id AS site_id, sites.name AS site_name,
+                todos.call_id AS call_id,
+                COALESCE(callers.name, recorded_sites.name,
+                         CASE WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'Desk conversation' END,
+                         'Unknown caller') AS client_name,
+                calls.recorded_at AS recorded_at, todos.context AS context, NULL AS category,
+                todos.due_date AS due_date, todos.urgent_at AS urgent_at, todos.status AS status
+         FROM todo_assignees
+         JOIN todos ON todos.id = todo_assignees.todo_id
+         JOIN calls ON calls.id = todos.call_id
+         LEFT JOIN callers ON callers.id = calls.client_id
+         LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
+         LEFT JOIN sites ON sites.id = todos.site_id
+         WHERE todo_assignees.user_id = ? AND todos.status IN ('open', 'snoozed')
+         ORDER BY calls.recorded_at DESC`
+      )
+      .bind(userId)
+      .all<OffboardItem>(),
+    db
+      .prepare(
+        `SELECT 'site_task' AS kind, site_tasks.id AS id, workflow_stages.label AS title, site_tasks.site_id AS site_id,
+                sites.name AS site_name, NULL AS call_id, NULL AS client_name, NULL AS recorded_at, NULL AS context,
+                workflow_stages.category AS category, site_tasks.due_date AS due_date,
+                site_tasks.urgent_at AS urgent_at, site_tasks.status AS status
+         FROM site_tasks
+         JOIN sites ON sites.id = site_tasks.site_id
+         JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
+         WHERE site_tasks.assigned_to_user_id = ? AND site_tasks.status = 'assigned'`
+      )
+      .bind(userId)
+      .all<OffboardItem>(),
+    db
+      .prepare(
+        `SELECT 'complaint' AS kind, escalations.id AS id, escalations.text AS title, escalations.site_id AS site_id,
+                sites.name AS site_name, NULL AS call_id, NULL AS client_name, NULL AS recorded_at, NULL AS context,
+                NULL AS category, NULL AS due_date, NULL AS urgent_at, escalations.status AS status
+         FROM escalations
+         LEFT JOIN sites ON sites.id = escalations.site_id
+         WHERE escalations.assigned_to_user_id = ? AND escalations.status = 'open'
+         ORDER BY escalations.created_at DESC`
+      )
+      .bind(userId)
+      .all<OffboardItem>(),
+    db
+      .prepare(
+        `SELECT DISTINCT site_team_members.site_id AS site_id, sites.name AS site_name
+         FROM site_team_members JOIN sites ON sites.id = site_team_members.site_id
+         WHERE site_team_members.user_id = ?
+         ORDER BY sites.name ASC`
+      )
+      .bind(userId)
+      .all<{ site_id: string; site_name: string }>(),
+  ]);
+  return {
+    user: {
+      id: user.id,
+      name: user.name,
+      phone: user.phone,
+      joined_on: user.joined_on ?? null,
+      last_working_day: user.last_working_day ?? null,
+      offboarding_started_at: user.offboarding_started_at ?? null,
+      disabled_at: user.disabled_at,
+    },
+    items: [...(todoRes.results ?? []), ...(taskRes.results ?? []), ...(complaintRes.results ?? [])],
+    site_teams: teamRes.results ?? [],
+  };
+}
+
+const OFFBOARD_BATCH_ITEMS = 25;
+
+/**
+ * Moves some of a leaver's open work to `toUserId`. Items the leaver no
+ * longer holds (already moved, done, or reassigned elsewhere) are skipped,
+ * so a retry after a partial failure is safe. Returns how many moved.
+ */
+export async function transferWorkItems(
+  db: D1Database,
+  opts: {
+    fromUserId: string;
+    items: { kind: OffboardItemKind; id: string }[];
+    toUserId: string;
+    actorUserId: string | null;
+    fromEvent?: "handed_off" | "offboard_rerouted";
+  }
+): Promise<number> {
+  const { fromUserId, toUserId, actorUserId } = opts;
+  const groups: D1PreparedStatement[][] = [];
+  const sites = new Set<string>();
+  for (const item of opts.items) {
+    if (item.kind === "complaint") {
+      groups.push([
+        db
+          .prepare(
+            `UPDATE escalations SET assigned_to_user_id = ?, assigned_by_user_id = ?, assigned_at = datetime('now')
+             WHERE id = ? AND assigned_to_user_id = ? AND status = 'open'`
+          )
+          .bind(toUserId, actorUserId, item.id, fromUserId),
+      ]);
+      continue;
+    }
+    if (!isWorkItemKind(item.kind)) continue;
+    const ref = await getWorkItemRef(db, item.kind, item.id);
+    if (!ref || !ref.assignee_ids.includes(fromUserId)) continue;
+    if (ref.kind === "todo" ? ref.status === "done" : ref.status !== "assigned") continue;
+    groups.push(handOffWorkStmts(db, ref, fromUserId, toUserId, actorUserId, opts.fromEvent ?? "handed_off"));
+    if (ref.site_id) sites.add(ref.site_id);
+  }
+  for (let i = 0; i < groups.length; i += OFFBOARD_BATCH_ITEMS) {
+    await db.batch(groups.slice(i, i + OFFBOARD_BATCH_ITEMS).flat());
+  }
+  for (const siteId of sites) await touchSiteActivity(db, siteId, { source: "task", refId: null });
+  return groups.length;
+}
+
+/**
+ * Hands one site over: the recipient takes the leaver's slot on the site team
+ * (or the leaver's row is just dropped if the recipient is already on it), and
+ * every open item the leaver holds at that site moves with it.
+ */
+export async function handOverSite(
+  db: D1Database,
+  opts: { fromUserId: string; siteId: string; toUserId: string; actorUserId: string }
+): Promise<{ moved: number }> {
+  const detail = await getOffboardingDetail(db, opts.fromUserId);
+  const recipient = await getUserById(db, opts.toUserId);
+  if (!detail || !recipient) throw new Error("not found");
+  const moved = await transferWorkItems(db, {
+    fromUserId: opts.fromUserId,
+    items: detail.items.filter((i) => i.site_id === opts.siteId),
+    toUserId: opts.toUserId,
+    actorUserId: opts.actorUserId,
+  });
+  const already = await db
+    .prepare(`SELECT 1 FROM site_team_members WHERE site_id = ? AND user_id = ?`)
+    .bind(opts.siteId, opts.toUserId)
+    .first();
+  if (already) {
+    await db
+      .prepare(`DELETE FROM site_team_members WHERE site_id = ? AND user_id = ?`)
+      .bind(opts.siteId, opts.fromUserId)
+      .run();
+  } else {
+    await db
+      .prepare(
+        `UPDATE site_team_members SET user_id = ?, name = ?, contact_number = COALESCE(?, contact_number), added_by = ?
+         WHERE site_id = ? AND user_id = ?`
+      )
+      .bind(opts.toUserId, recipient.name, recipient.phone, opts.actorUserId, opts.siteId, opts.fromUserId)
+      .run();
+  }
+  return { moved };
+}
+
+/**
+ * Ends one offboarding: anything the leaver still holds goes to the router
+ * (the owner's routing queue, migration 0045) as 'offboard_rerouted', their
+ * site-team rows are dropped, and the login is disabled with every session
+ * revoked. With no router configured the leftovers stay under the leaver's
+ * name — the roster keeps showing a disabled staff member who still holds
+ * work, so it can't go unnoticed.
+ */
+export async function finalizeOffboarding(
+  db: D1Database,
+  userId: string,
+  actorUserId: string | null
+): Promise<{ rerouted: number; routerUserId: string | null }> {
+  const detail = await getOffboardingDetail(db, userId);
+  if (!detail) throw new Error("not found");
+  const router = await getTodoRouterUserId(db);
+  let rerouted = 0;
+  if (router && router !== userId && detail.items.length > 0) {
+    rerouted = await transferWorkItems(db, {
+      fromUserId: userId,
+      items: detail.items,
+      toUserId: router,
+      actorUserId,
+      fromEvent: "offboard_rerouted",
+    });
+  }
+  await db.batch([
+    db.prepare(`DELETE FROM site_team_members WHERE user_id = ?`).bind(userId),
+    db
+      .prepare(
+        `UPDATE users SET disabled_at = datetime('now'),
+                          last_working_day = COALESCE(last_working_day, ?)
+         WHERE id = ? AND disabled_at IS NULL`
+      )
+      .bind(istTodayIso(), userId),
+  ]);
+  await revokeAllSessionsForUser(db, userId);
+  return { rerouted, routerUserId: router };
+}
+
+/** Cron sweep — every offboarding whose last working day is behind us (IST). Idempotent. */
+export async function finalizeDueOffboardings(db: D1Database): Promise<{ userId: string; rerouted: number }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id FROM users
+       WHERE role = 'staff' AND disabled_at IS NULL AND last_working_day IS NOT NULL AND last_working_day < ?`
+    )
+    .bind(istTodayIso())
+    .all<{ id: string }>();
+  const done: { userId: string; rerouted: number }[] = [];
+  for (const row of results ?? []) {
+    const { rerouted } = await finalizeOffboarding(db, row.id, null);
+    done.push({ userId: row.id, rerouted });
+  }
+  return done;
+}
+
+/** True if a staff account has any footprint worth keeping — Delete is refused for these (offboard instead). */
+export async function staffUserHasHistory(db: D1Database, userId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT
+         EXISTS(SELECT 1 FROM work_events WHERE subject_user_id = ?1 OR actor_user_id = ?1)
+         OR EXISTS(SELECT 1 FROM todo_assignees WHERE user_id = ?1)
+         OR EXISTS(SELECT 1 FROM site_tasks WHERE assigned_to_user_id = ?1 OR completed_by_user_id = ?1)
+         OR EXISTS(SELECT 1 FROM calls WHERE uploaded_by_user_id = ?1)
+         OR EXISTS(SELECT 1 FROM site_media WHERE uploaded_by = ?1)
+         OR EXISTS(SELECT 1 FROM installation_updates WHERE reported_by_user_id = ?1)
+         OR EXISTS(SELECT 1 FROM escalations WHERE assigned_to_user_id = ?1 OR created_by_user_id = ?1) AS has_history`
+    )
+    .bind(userId)
+    .first<{ has_history: number }>();
+  return Boolean(row?.has_history);
 }

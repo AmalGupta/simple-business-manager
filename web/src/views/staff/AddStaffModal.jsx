@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE } from "../../styles.js";
+import { todayIso } from "../../lib/dates.js";
 
 /* "Add staff" — name + optional phone. The PIN is generated server-side and
    returned once here; it stays viewable afterward from the row's reveal
    toggle (see docs "PIN visibility" decision), so there's no separate
-   one-time-only confirmation screen to build. */
+   one-time-only confirmation screen to build. SBM-64: a joining date
+   (today by default) — the roster shows them from that day and their login
+   opens on it. */
 export function AddStaffModal({ onClose, onCreate }) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [joinedOn, setJoinedOn] = useState(todayIso);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [created, setCreated] = useState(null);
@@ -22,7 +26,7 @@ export function AddStaffModal({ onClose, onCreate }) {
     setSaving(true);
     setError("");
     try {
-      const result = await onCreate(trimmed, phone.trim());
+      const result = await onCreate(trimmed, phone.trim(), joinedOn);
       setCreated(result);
     } catch (err) {
       console.error("[sbm] failed to add staff", err);
@@ -95,6 +99,16 @@ export function AddStaffModal({ onClose, onCreate }) {
               onChange={(e) => setPhone(e.target.value)}
               style={TEXT_INPUT_STYLE}
             />
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: t.edge2 }}>
+              Joining date
+              <input
+                type="date"
+                value={joinedOn}
+                min={todayIso()}
+                onChange={(e) => setJoinedOn(e.target.value)}
+                style={TEXT_INPUT_STYLE}
+              />
+            </label>
             {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
               <button

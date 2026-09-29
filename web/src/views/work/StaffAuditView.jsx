@@ -40,6 +40,8 @@ function describe(e) {
       return "Taken out of parked";
     case "rerouted":
       return `Moved to ${e.to_user_name ?? "the owner"} for routing`;
+    case "offboard_rerouted":
+      return `Left after last working day — moved to ${e.to_user_name ?? "the owner"} for routing`;
     default:
       return e.event;
   }
