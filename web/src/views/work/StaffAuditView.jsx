@@ -30,6 +30,10 @@ function describe(e) {
       return "Marked urgent";
     case "urgent_cleared":
       return "Urgent cleared";
+    case "created":
+      return "Filed complaint";
+    case "site_changed":
+      return "Complaint moved to another site";
     case "marked_important":
       return "Marked important";
     case "important_cleared":

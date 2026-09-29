@@ -13,7 +13,6 @@ import { StaffTile } from "./views/staff/StaffTile.jsx";
 import { WorkflowTilesRow } from "./views/home/WorkflowTilesRow.jsx";
 import { WorkflowCategorySiteList } from "./views/home/WorkflowCategorySiteList.jsx";
 import { SitesAttentionTile } from "./views/home/SitesAttentionTile.jsx";
-import { EscalationsTile } from "./views/home/EscalationsTile.jsx";
 import { StaffHomePanel } from "./views/home/StaffHomePanel.jsx";
 import { AssignedWorkView } from "./views/work/AssignedWorkView.jsx";
 import { StaffRosterView } from "./views/work/StaffRosterView.jsx";
@@ -44,6 +43,7 @@ import { InstallationScreen } from "./views/site-visit/InstallationScreen.jsx";
 import { SiteComplaintForm } from "./views/site-visit/SiteComplaintForm.jsx";
 import { ComplaintsHomeView } from "./views/site-visit/ComplaintsHomeView.jsx";
 import { ComplaintDetailView } from "./views/site-visit/ComplaintDetailView.jsx";
+import { ComplaintSetupView } from "./views/site-visit/ComplaintSetupView.jsx";
 import { ComplaintsTile } from "./views/site-visit/ComplaintsTile.jsx";
 import { MaterialShortagesTile } from "./views/material/MaterialShortagesTile.jsx";
 import { MaterialShortagesView } from "./views/material/MaterialShortagesView.jsx";
@@ -57,11 +57,8 @@ import {
   fetchCallsCalendar,
   fetchDashboardSummary,
   fetchMyOpenTodos,
-  fetchEscalations,
   fetchSites,
   postCreateSite,
-  postEscalation,
-  closeEscalationApi,
   patchTodo,
   fetchMe,
   postLogout,
@@ -90,7 +87,6 @@ export default function SimpleBusinessManager() {
   const [calendarDays, setCalendarDays] = useState({});
   const [calendarMinYear, setCalendarMinYear] = useState(() => today().getFullYear());
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
-  const [escalations, setEscalations] = useState([]);
   const [allSites, setAllSites] = useState([]);
   const [staffRoster, setStaffRoster] = useState([]);
   const [callsCount, setCallsCount] = useState(0);
@@ -177,7 +173,6 @@ export default function SimpleBusinessManager() {
     setCalendarDays({});
     setCalendarMinYear(today().getFullYear());
     setTodoRefreshKey(0);
-    setEscalations([]);
     setAllSites([]);
     setStaffRoster([]);
     setCallsCount(0);
@@ -209,7 +204,6 @@ export default function SimpleBusinessManager() {
       setCallersCount(summary.callers_count ?? 0);
       setCallsNeedingActionCount(summary.calls_needing_action_count ?? 0);
       setResolvedCallsCount(summary.resolved_calls_count ?? 0);
-      setEscalations(summary.escalations ?? []);
       setStaffRoster(summary.staff_roster ?? []);
       setStaffWithOpenTodos(summary.staff_with_open_todos ?? []);
       setUrgentWorkCount(summary.urgent_work_count ?? 0);
@@ -289,21 +283,6 @@ export default function SimpleBusinessManager() {
     },
     [refreshSites]
   );
-
-  const onAddEscalation = useCallback(async (text) => {
-    const created = await postEscalation(text, null);
-    setEscalations((es) => [...es, created]);
-  }, []);
-
-  const onCloseEscalation = useCallback(async (id) => {
-    setEscalations((es) => es.filter((e) => e.id !== id));
-    try {
-      await closeEscalationApi(id);
-    } catch (err) {
-      console.error("[sbm] failed to close escalation", err);
-      fetchEscalations().then(setEscalations).catch(() => {});
-    }
-  }, []);
 
   /* Tiles 1 & 2 — open/closed counts come from dashboard summary (and are
      adjusted locally on todo toggles). Calendar still uses the calls list. */
@@ -1204,8 +1183,9 @@ export default function SimpleBusinessManager() {
         onAddComplaint={() =>
           setView({ name: "complaint-sites", from: view, forUserId: view.forUserId })
         }
-        canAdd={me.role === "staff"}
+        canAdd
         canAssign={me.role !== "staff" && !view.forUserId}
+        selfId={me.role === "staff" ? me.id : view.forUserId || null}
         onOpenComplaint={(id) => setView({ name: "complaint", id, from: view, forUserId: view.forUserId })}
       />
     );
@@ -1217,7 +1197,6 @@ export default function SimpleBusinessManager() {
         key={view.id}
         id={view.id}
         me={me}
-        forUserId={view.forUserId || null}
         staffRoster={staffRoster}
         onAssignComplaint={onAssignComplaint}
         onBack={() => setView(view.from ?? { name: "complaints-home" })}
@@ -1309,13 +1288,29 @@ export default function SimpleBusinessManager() {
             }
           )
         }
-        onSubmitted={() => {
+        onSubmitted={(created) => {
           setComplaintsRefreshKey((k) => k + 1);
-          setView({
-            name: "complaints-home",
-            from: homeView,
-            forUserId: view.forUserId,
-          });
+          const list = { name: "complaints-home", from: homeView, forUserId: view.forUserId };
+          /* SBM-71: an admin gets the set-up step (urgent / site / deadline / route). */
+          if (me.role !== "staff" && created?.id) {
+            setView({ name: "complaint-setup", complaint: created, site: view.site, from: list });
+            return;
+          }
+          setView(list);
+        }}
+      />
+    );
+
+  if (view.name === "complaint-setup")
+    return shell(
+      <ComplaintSetupView
+        complaint={view.complaint}
+        site={view.site}
+        me={me}
+        staffRoster={staffRoster}
+        onDone={(id) => {
+          setComplaintsRefreshKey((k) => k + 1);
+          setView({ name: "complaint", id, from: view.from ?? { name: "complaints-home", from: homeView } });
         }}
       />
     );
@@ -1358,7 +1353,7 @@ export default function SimpleBusinessManager() {
       /* Home tile panel. 2 columns on a phone; auto-widens toward one
           row as space allows. Every tile is fixed to --tile-height (see the
           Card `tile` variant) so the grid stays symmetrical regardless of
-          content — list tiles (EscalationsTile) scroll internally instead
+          content — list tiles (SitesAttentionTile) scroll internally instead
           of growing taller than their neighbours. */
       <div
         style={{
@@ -1397,6 +1392,11 @@ export default function SimpleBusinessManager() {
             onOpen={() => setView({ name: "task-audit", from: { name: "home" } })}
           />
         )}
+        {/* SBM-71: Complaints sit right after Task audit; they replaced the old Escalations tile. */}
+        <ComplaintsTile
+          refreshKey={complaintsRefreshKey}
+          onOpen={() => setView({ name: "complaints-home", from: { name: "home" } })}
+        />
         <button
           onClick={() => setView({ name: "calls" })}
           style={{ all: "unset", cursor: "pointer", display: "block" }}
@@ -1415,12 +1415,6 @@ export default function SimpleBusinessManager() {
           unconfirmedCount={unconfirmedCount}
           confirmedCount={confirmedCount}
         />
-        <EscalationsTile
-          escalations={escalations}
-          onAdd={onAddEscalation}
-          onClose={onCloseEscalation}
-          busyIds={busyIds}
-        />
         {(me.role === "admin" || me.role === "superadmin") && (
           <StaffTile count={staffRoster.length} onOpen={() => setView({ name: "staff-hub" })} />
         )}
@@ -1436,10 +1430,6 @@ export default function SimpleBusinessManager() {
             onOpen={() => setView({ name: "resolved-calls", from: { name: "home" } })}
           />
         )}
-        <ComplaintsTile
-          refreshKey={complaintsRefreshKey}
-          onOpen={() => setView({ name: "complaints-home", from: { name: "home" } })}
-        />
         <WorkflowTilesRow
           tasks={openSiteTasks}
           onOpenCategory={(category) => setView({ name: "workflow-site-list", category, from: { name: "home" } })}

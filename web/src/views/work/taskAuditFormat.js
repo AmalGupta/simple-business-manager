@@ -10,6 +10,8 @@ export function describeTransition(e) {
   switch (e.event) {
     case "assigned":
       if (e.from_user_name) return "Reassigned";
+      /* A new complaint starts with whoever filed it (SBM-71). */
+      if (e.item_kind === "complaint" && e.actor_name && e.actor_name === e.to_user_name) return "Kept by filer";
       return e.actor_role === "admin" || e.actor_role === "superadmin" ? "Admin → Routed" : "Assigned";
     case "handed_off":
       return "Open → Passed";
@@ -29,6 +31,10 @@ export function describeTransition(e) {
       return "Marked urgent";
     case "urgent_cleared":
       return "Urgent cleared";
+    case "created":
+      return "Complaint filed";
+    case "site_changed":
+      return `Moved to site${e.site_name ? `: ${e.site_name}` : ""}`;
     case "marked_important":
       return "Marked important";
     case "important_cleared":

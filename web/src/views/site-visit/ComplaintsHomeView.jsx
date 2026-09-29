@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { AlertTriangle, ChevronRight, Image as ImageIcon, Mic, Plus, Star } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtDate, fmtShort } from "../../lib/dates.js";
-import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { fetchComplaints } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
@@ -12,77 +11,6 @@ export function siteDetailsLine(c) {
   if (c.site_address?.trim()) parts.push(c.site_address.trim());
   if (c.site_poc_name?.trim()) parts.push(`POC: ${c.site_poc_name.trim()}`);
   return parts.length ? parts.join(" · ") : "No address on file";
-}
-
-export function ComplaintAssignControl({ complaint, staffRoster, onAssign }) {
-  const assignee = staffRoster.find((s) => s.id === complaint.assigned_to_user_id) ?? null;
-  const [editing, setEditing] = useState(false);
-  const [staffId, setStaffId] = useState(complaint.assigned_to_user_id ?? "");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    setStaffId(complaint.assigned_to_user_id ?? "");
-  }, [complaint.assigned_to_user_id]);
-
-  const submit = async () => {
-    if (!staffId) {
-      setError("Choose a staff member.");
-      return;
-    }
-    setSaving(true);
-    setError("");
-    try {
-      await onAssign(complaint.id, staffId);
-      setEditing(false);
-    } catch (err) {
-      console.error("[sbm] failed to assign complaint", err);
-      setError(err.message || "Failed to save — try again.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  if (!editing) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 2 }}>
-        <span style={{ fontSize: 12, color: t.edge2 }}>
-          {assignee ? `Assignee: ${assignee.name}` : "Assignee: Unassigned"}
-        </span>
-        <button onClick={() => setEditing(true)} style={SMALL_SECONDARY_BUTTON_STYLE}>
-          {assignee ? "Reassign" : "Assign"}
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 4 }}>
-      <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={{ ...TEXT_INPUT_STYLE, minHeight: 34, fontSize: 13 }}>
-        <option value="" disabled>
-          Choose a staff member…
-        </option>
-        {staffRoster.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name}
-          </option>
-        ))}
-      </select>
-      {error && <span style={{ fontSize: 12, color: t.signal }}>{error}</span>}
-      <div style={{ display: "flex", gap: 6 }}>
-        <button
-          onClick={submit}
-          disabled={saving || staffRoster.length === 0}
-          style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 34, padding: "0 12px", fontSize: 12, opacity: saving || staffRoster.length === 0 ? 0.6 : 1 }}
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-        <button onClick={() => setEditing(false)} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 34 }}>
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
 }
 
 /* Resolved = green, unresolved = amber. Red is kept for genuine urgency
@@ -126,7 +54,9 @@ export function ComplaintFlags({ c }) {
   );
 }
 
-function ComplaintCard({ c, showAssignee, onOpen }) {
+function ComplaintCard({ c, showAssignee, selfId, onOpen }) {
+  /* Staff see complaints they raised too; for those held by someone else, say who. */
+  const raisedNotHeld = selfId && c.assigned_to_user_id !== selfId;
   return (
     <button type="button" onClick={onOpen} style={{ all: "unset", cursor: "pointer", display: "block", minWidth: 0 }} aria-label={`Complaint: ${c.text}`}>
       <Card style={{ height: "100%", minHeight: 150, display: "flex", flexDirection: "column", gap: 8, boxSizing: "border-box" }}>
@@ -165,8 +95,14 @@ function ComplaintCard({ c, showAssignee, onOpen }) {
             )}
           </span>
         )}
-        {showAssignee && (
-          <span style={{ fontSize: 12, color: t.edge2 }}>{c.assignee_name ? `Assignee: ${c.assignee_name}` : "Unassigned"}</span>
+        {c.due_date && c.status === "open" && (
+          <span style={{ fontSize: 12, color: t.edge2 }}>Due {fmtShort(c.due_date)}</span>
+        )}
+        {(showAssignee || raisedNotHeld) && (
+          <span style={{ fontSize: 12, color: t.edge2 }}>
+            {c.assignee_name ? `Assignee: ${c.assignee_name}` : "Not assigned yet"}
+            {raisedNotHeld ? " · raised by you" : ""}
+          </span>
         )}
         <div style={{ marginTop: "auto" }}>
           <ComplaintStatusLabel status={c.status} closedAt={c.closed_at} />
@@ -177,8 +113,8 @@ function ComplaintCard({ c, showAssignee, onOpen }) {
 }
 
 /* SBM-71 — Complaints as a metro grid, grouped by site; each card opens the
-   complaint. Staff see only complaints assigned to them (server-scoped);
-   admin sees all and can add filters later. Staff can still file a new one. */
+   complaint. Staff see complaints assigned to them and ones they raised
+   (server-scoped); admin sees all. Staff can file a new one from here. */
 export function ComplaintsHomeView({
   onBack,
   onAddComplaint,
@@ -187,6 +123,8 @@ export function ComplaintsHomeView({
   canAdd = false,
   canAssign = false,
   forUserId = null,
+  /** Staff viewer (or the staff member an admin is looking at) — marks complaints they raised but don't hold. */
+  selfId = null,
 }) {
   const [complaints, setComplaints] = useState(null);
   const [hideResolved, setHideResolved] = useState(false);
@@ -247,7 +185,7 @@ export function ComplaintsHomeView({
               whiteSpace: "nowrap",
             }}
           >
-            <Plus size={14} /> Add new complaint
+            <Plus size={14} /> Add complaint
           </button>
         )}
       </div>
@@ -285,7 +223,7 @@ export function ComplaintsHomeView({
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
               {g.items.map((c) => (
-                <ComplaintCard key={c.id} c={c} showAssignee={canAssign} onOpen={() => onOpenComplaint(c.id)} />
+                <ComplaintCard key={c.id} c={c} showAssignee={canAssign} selfId={selfId} onOpen={() => onOpenComplaint(c.id)} />
               ))}
             </div>
           </section>
