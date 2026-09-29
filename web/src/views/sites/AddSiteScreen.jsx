@@ -6,6 +6,7 @@ import { patchSite, postSiteMedia, postSiteVoiceNote } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
+import { useT } from "../../lib/i18n.jsx";
 
 const labelStyle = {
   fontFamily: t.label,
@@ -53,6 +54,7 @@ const actionTileStyle = (disabled) => ({
  * appears on the sites page timeline for admin only.
  */
 export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = "" }) {
+  const tr = useT();
   const [houseNo, setHouseNo] = useState("");
   const [sector, setSector] = useState("");
   const [city, setCity] = useState("");
@@ -83,7 +85,7 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
 
   const validate = () => {
     if (!houseNo.trim() && !sector.trim() && !city.trim()) {
-      setError("Enter at least H.No, sector, or city.");
+      setError(tr("enterAddressPart"));
       return false;
     }
     setError("");
@@ -100,7 +102,7 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
       return site;
     } catch (err) {
       console.error("[sbm] failed to create site", err);
-      setError("Failed to create site — try again.");
+      setError(tr("failedCreateSite"));
       return null;
     } finally {
       setSaving(false);
@@ -121,18 +123,18 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
 
   const captureLocation = async () => {
     if (!navigator.geolocation) {
-      setLocationStatus("Location not supported on this device.");
+      setLocationStatus(tr("locationUnsupported"));
       return;
     }
-    setLocationStatus("Getting location…");
+    setLocationStatus(tr("gettingLocation"));
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const loc = `${pos.coords.latitude.toFixed(6)},${pos.coords.longitude.toFixed(6)}`;
         await applyLocation(loc);
-        setLocationStatus("Location captured.");
+        setLocationStatus(tr("locationCaptured"));
         await ensureSite();
       },
-      () => setLocationStatus("Could not get location — check permissions."),
+      () => setLocationStatus(tr("locationFailed")),
       { enableHighAccuracy: true, timeout: 15000 }
     );
   };
@@ -141,36 +143,36 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
 
   return (
     <div>
-      <BackLink onClick={onBack}>Back</BackLink>
+      <BackLink onClick={onBack}>{tr("back")}</BackLink>
       <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
-        Add new site
+        {tr("addNewSite")}
       </h1>
 
       <Card style={{ padding: "1rem", marginBottom: "1.25rem" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <FieldRow label="H.No">
-            <input placeholder="House / plot number" value={houseNo} onChange={(e) => setHouseNo(e.target.value)} style={TEXT_INPUT_STYLE} />
+          <FieldRow label={tr("fieldHouseNo")}>
+            <input placeholder={tr("phHouseNo")} value={houseNo} onChange={(e) => setHouseNo(e.target.value)} style={TEXT_INPUT_STYLE} />
           </FieldRow>
-          <FieldRow label="Sector">
-            <input placeholder="Sector or locality" value={sector} onChange={(e) => setSector(e.target.value)} style={TEXT_INPUT_STYLE} />
+          <FieldRow label={tr("fieldSector")}>
+            <input placeholder={tr("phSector")} value={sector} onChange={(e) => setSector(e.target.value)} style={TEXT_INPUT_STYLE} />
           </FieldRow>
-          <FieldRow label="City">
-            <input placeholder="City" value={city} onChange={(e) => setCity(e.target.value)} style={TEXT_INPUT_STYLE} />
+          <FieldRow label={tr("fieldCity")}>
+            <input placeholder={tr("fieldCity")} value={city} onChange={(e) => setCity(e.target.value)} style={TEXT_INPUT_STYLE} />
           </FieldRow>
-          <FieldRow label="Contact person">
-            <input placeholder="Name" value={pocName} onChange={(e) => setPocName(e.target.value)} style={TEXT_INPUT_STYLE} />
+          <FieldRow label={tr("fieldContactPerson")}>
+            <input placeholder={tr("phName")} value={pocName} onChange={(e) => setPocName(e.target.value)} style={TEXT_INPUT_STYLE} />
           </FieldRow>
-          <FieldRow label="Contact number">
-            <input placeholder="Phone number" value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} style={TEXT_INPUT_STYLE} />
+          <FieldRow label={tr("fieldContactNumber")}>
+            <input placeholder={tr("phPhone")} value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} style={TEXT_INPUT_STYLE} />
           </FieldRow>
-          <FieldRow label="Assigned by">
-            <input placeholder="Who assigned this site" value={assignedBy} onChange={(e) => setAssignedBy(e.target.value)} style={TEXT_INPUT_STYLE} />
+          <FieldRow label={tr("fieldAssignedBy")}>
+            <input placeholder={tr("phAssignedBy")} value={assignedBy} onChange={(e) => setAssignedBy(e.target.value)} style={TEXT_INPUT_STYLE} />
           </FieldRow>
-          <FieldRow label="Referred by">
-            <input placeholder="Referral source" value={referredBy} onChange={(e) => setReferredBy(e.target.value)} style={TEXT_INPUT_STYLE} />
+          <FieldRow label={tr("fieldReferredBy")}>
+            <input placeholder={tr("phReferredBy")} value={referredBy} onChange={(e) => setReferredBy(e.target.value)} style={TEXT_INPUT_STYLE} />
           </FieldRow>
           {siteLocation && (
-            <FieldRow label="Location">
+            <FieldRow label={tr("fieldLocation")}>
               <span style={{ fontSize: 13, color: t.edge2 }}>{siteLocation}</span>
             </FieldRow>
           )}
@@ -193,7 +195,7 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
             if (site) await postSiteMedia(site.id, file);
           } catch (err) {
             console.error("[sbm] photo upload failed", err);
-            setError("Photo upload failed.");
+            setError(tr("photoUploadFailed"));
           } finally {
             setBusyAction(false);
           }
@@ -214,7 +216,7 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
             if (site) await postSiteMedia(site.id, file, "Measurements");
           } catch (err) {
             console.error("[sbm] measurement upload failed", err);
-            setError("Measurement upload failed.");
+            setError(tr("measurementUploadFailed"));
           } finally {
             setBusyAction(false);
           }
@@ -232,7 +234,7 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
           style={actionTileStyle(actionsDisabled)}
         >
           <Image size={20} />
-          Site photos
+          {tr("sitePhotos")}
         </button>
         <button
           type="button"
@@ -244,11 +246,11 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
           style={actionTileStyle(actionsDisabled)}
         >
           <Mic size={20} />
-          Site voice notes
+          {tr("siteVoiceNotes")}
         </button>
         <button type="button" disabled={actionsDisabled} onClick={captureLocation} style={actionTileStyle(actionsDisabled)}>
           <MapPin size={20} />
-          Site location
+          {tr("siteLocation")}
         </button>
         <button
           type="button"
@@ -260,20 +262,20 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
           style={actionTileStyle(actionsDisabled)}
         >
           <Ruler size={20} />
-          Upload measurements
+          {tr("uploadMeasurements")}
         </button>
       </div>
 
       {locationStatus && <p style={{ fontSize: 12, color: t.edge2, margin: "0 0 12px" }}>{locationStatus}</p>}
       {createdSite && (
         <p style={{ fontSize: 13, color: t.edge2, margin: "0 0 12px" }}>
-          Site saved as <strong style={{ color: t.edge }}>{createdSite.name}</strong>. Add photos or notes above, then tap Done.
+          {tr("siteSavedAs", { name: createdSite.name })}
         </p>
       )}
       {error && <p style={{ fontSize: 12, color: t.signal, margin: "0 0 12px" }}>{error}</p>}
 
       <button type="button" onClick={saveSite} disabled={saving} style={{ ...PRIMARY_BUTTON_STYLE, width: "100%", opacity: saving ? 0.6 : 1 }}>
-        {saving ? "Saving…" : createdSite ? "Done" : "Save site"}
+        {saving ? tr("saving") : createdSite ? tr("done") : tr("saveSite")}
       </button>
 
       {showVoiceModal && (
@@ -289,7 +291,7 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
               }
             } catch (err) {
               console.error("[sbm] voice note failed", err);
-              setError("Voice note upload failed.");
+              setError(tr("voiceUploadFailed"));
             } finally {
               setBusyAction(false);
             }

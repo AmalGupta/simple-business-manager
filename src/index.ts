@@ -75,6 +75,8 @@ import {
   handleUpdateStaffPhone,
   handleStaffDeletePreview,
   handleDeleteStaff,
+  handleGetStaffLanguage,
+  handlePatchStaffLanguage,
 } from "./handlers/auth";
 import {
   handleCancelOffboarding,
@@ -578,6 +580,11 @@ export default {
       if (action === "handover-site") return handleOffboardingHandoverSite(request, env, staffId);
       return handleOffboardingFinishNow(request, env, staffId);
     }
+    // SBM-72 — a staff member's display language (hi | en | pa), set by an admin.
+    const staffLanguageMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/language$/);
+    if (staffLanguageMatch && request.method === "GET") return handleGetStaffLanguage(request, env, staffLanguageMatch[1]);
+    if (staffLanguageMatch && request.method === "PATCH") return handlePatchStaffLanguage(request, env, staffLanguageMatch[1]);
+
     const reactivateMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/reactivate$/);
     if (reactivateMatch && request.method === "POST") {
       return handleReactivateStaff(request, env, reactivateMatch[1]);

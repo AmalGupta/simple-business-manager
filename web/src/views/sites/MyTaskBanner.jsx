@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { t } from "../../theme.js";
-import { fmtShort, isTaskDueDateUrgent } from "../../lib/dates.js";
+import { fmtShortLang, stageLabel, useLang, useT } from "../../lib/i18n.jsx";
+import { isTaskDueDateUrgent } from "../../lib/dates.js";
 import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { patchSiteTask, fetchUnassignedSiteTasks, fetchStaffRoster } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
@@ -13,6 +14,8 @@ import { TileLabel } from "../../components/TileLabel.jsx";
    isUserActiveOnSiteTasks). Stages carry no order, so the handoff picker
    lists every unassigned stage, not a system-computed "next" one. */
 export function MyTaskBanner({ siteId, myTasks, onChanged }) {
+  const tr = useT();
+  const lang = useLang();
   const [completingId, setCompletingId] = useState(null);
   const [handoffFor, setHandoffFor] = useState(null); // the just-completed task, while picking a handoff
   const [unassigned, setUnassigned] = useState(null);
@@ -68,14 +71,14 @@ export function MyTaskBanner({ siteId, myTasks, onChanged }) {
     <>
       {hasTasks && (
       <Card style={{ marginBottom: 12, borderColor: t.accent }}>
-        <TileLabel>Your task{myTasks.length > 1 ? "s" : ""} here</TileLabel>
+        <TileLabel>{tr("yourTasksHere")}</TileLabel>
         {myTasks.map((task) => (
           <div key={task.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", ...TILE_ROW_STYLE }}>
             <div>
-              <div style={{ fontSize: 14, color: t.edge }}>{task.stage_label}</div>
+              <div style={{ fontSize: 14, color: t.edge }}>{stageLabel(lang, task.stage_id, task.stage_label)}</div>
               {task.due_date && (
                 <div style={{ fontSize: 12, color: isTaskDueDateUrgent(task.due_date) ? t.signal : t.edge2, marginTop: 2 }}>
-                  Due {fmtShort(task.due_date)}
+                  {tr("dueDate", { date: fmtShortLang(lang, task.due_date) })}
                 </div>
               )}
             </div>
@@ -84,7 +87,7 @@ export function MyTaskBanner({ siteId, myTasks, onChanged }) {
               disabled={completingId === task.id}
               style={{ ...PRIMARY_BUTTON_STYLE, opacity: completingId === task.id ? 0.6 : 1, minHeight: 34, padding: "0 12px" }}
             >
-              {completingId === task.id ? "Saving…" : "Mark done"}
+              {completingId === task.id ? tr("saving") : tr("markDone")}
             </button>
           </div>
         ))}
@@ -122,18 +125,18 @@ export function MyTaskBanner({ siteId, myTasks, onChanged }) {
             }}
           >
             <span style={{ fontFamily: t.display, fontSize: 16, fontWeight: 500, color: t.edge }}>
-              {handoffFor.stage_label} — done. Hand off the next stage?
+              {tr("handOffNext", { stage: stageLabel(lang, handoffFor.stage_id, handoffFor.stage_label) })}
             </span>
             <select value={pickedStageId} onChange={(e) => setPickedStageId(e.target.value)} style={TEXT_INPUT_STYLE}>
               {unassigned.map((s) => (
                 <option key={s.id} value={s.id}>
-                  {s.stage_label}
+                  {stageLabel(lang, s.stage_id, s.stage_label)}
                 </option>
               ))}
             </select>
             <select value={staffId} onChange={(e) => setStaffId(e.target.value)} style={TEXT_INPUT_STYLE}>
               <option value="" disabled>
-                Choose a staff member…
+                {tr("chooseStaff")}
               </option>
               {(staff ?? []).map((s) => (
                 <option key={s.id} value={s.id}>
@@ -143,14 +146,14 @@ export function MyTaskBanner({ siteId, myTasks, onChanged }) {
             </select>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
               <button onClick={() => setHandoffFor(null)} style={SMALL_SECONDARY_BUTTON_STYLE}>
-                Skip
+                {tr("skip")}
               </button>
               <button
                 onClick={submitHandoff}
                 disabled={saving || !staffId}
                 style={{ ...PRIMARY_BUTTON_STYLE, opacity: saving || !staffId ? 0.6 : 1 }}
               >
-                {saving ? "Assigning…" : "Assign"}
+                {saving ? tr("assigning") : tr("assign")}
               </button>
             </div>
           </div>

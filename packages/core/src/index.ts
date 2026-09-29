@@ -7,3 +7,4 @@ export * from "./site-contact-backfill";
 export * from "./site-match";
 export * from "./work-location";
 export * from "./staff-transition";
+export * from "./display-language";

@@ -1003,6 +1003,27 @@ export async function fetchStaffComplaints() {
 }
 
 /** Site-level complaint — voice note required; optional text + photo/video attachments. */
+/** SBM-72 — a staff member's display language (hi | en | pa); admin only. */
+export async function fetchStaffLanguage(id) {
+  const res = await fetch(`/api/staff/${id}/language`, { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`GET /api/staff/${id}/language → ${res.status}`);
+  return res.json();
+}
+
+export async function patchStaffLanguage(id, displayLanguage) {
+  const res = await fetch(`/api/staff/${id}/language`, {
+    method: "PATCH",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ display_language: displayLanguage }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `PATCH /api/staff/${id}/language → ${res.status}`);
+  }
+  return res.json();
+}
+
 /** SBM-71 — admin sets any of { assigned_to_user_id, site_id, due_date } on a complaint; returns the detail. */
 export async function patchComplaintFields(id, patch) {
   const res = await fetch(`/api/complaints/${id}`, {

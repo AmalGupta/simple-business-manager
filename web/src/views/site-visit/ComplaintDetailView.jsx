@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, ArrowRightLeft, Check, MapPin } from "lucide-react";
 import { t } from "../../theme.js";
-import { fmtDate, fmtShort, todayIso } from "../../lib/dates.js";
+import { todayIso } from "../../lib/dates.js";
+import { fmtDateLang, fmtShortLang, fmtTimeLeftLang, useLang, useT } from "../../lib/i18n.jsx";
 import { SMALL_SECONDARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
 import { fetchComplaint, fetchStaffRoster, patchComplaintFields, patchWork, postWorkHandoff } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
-import { PassOnPicker } from "../work/AssignedWorkView.jsx";
-import { urgentDeadline, fmtTimeLeft } from "../work/workDates.js";
+import { PassOnPicker } from "../../components/work/PassOnPicker.jsx";
+import { urgentDeadline } from "../work/workDates.js";
 import { ComplaintFlags, ComplaintStatusLabel, siteDetailsLine } from "./ComplaintsHomeView.jsx";
 
 const sectionLabel = {
@@ -26,6 +27,9 @@ const sectionLabel = {
    like any task; an admin also assigns, flags urgent, and resolves.
    Urgent work is pinned to today and staff can't move it. */
 export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplaint, onBack, onOpenSite, onChanged }) {
+  /* SBM-72: staff read this in their display language; admin-only controls stay English. */
+  const tr = useT();
+  const lang = useLang();
   const [c, setC] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -41,7 +45,7 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
         .then(setC)
         .catch((err) => {
           console.error("[sbm] failed to load complaint", err);
-          setError(err.message || "Couldn’t load this complaint.");
+          setError(err.message || tr("couldntLoadComplaint"));
         }),
     [id]
   );
@@ -71,8 +75,8 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
   if (!c) {
     return (
       <div>
-        <BackLink onClick={onBack}>Complaints</BackLink>
-        <p style={{ fontSize: 14, color: t.edge2 }}>{error || "Loading…"}</p>
+        <BackLink onClick={onBack}>{tr("complaints")}</BackLink>
+        <p style={{ fontSize: 14, color: t.edge2 }}>{error || tr("loading")}</p>
       </div>
     );
   }
@@ -86,34 +90,35 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
 
   return (
     <div>
-      <BackLink onClick={onBack}>Complaints</BackLink>
+      <BackLink onClick={onBack}>{tr("complaints")}</BackLink>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: "1rem" }}>
         <ComplaintFlags c={c} />
         <h1 style={{ fontFamily: t.display, fontSize: 20, fontWeight: 500, color: t.edge, margin: 0, lineHeight: 1.35 }}>{c.text}</h1>
         <span style={{ fontSize: 13, color: t.edge2 }}>
-          Raised {fmtDate(c.created_at)}
-          {c.created_by_name ? ` by ${c.created_by_name}` : ""}
+          {c.created_by_name
+            ? tr("raisedOnBy", { date: fmtDateLang(lang, c.created_at), name: c.created_by_name })
+            : tr("raisedOn", { date: fmtDateLang(lang, c.created_at) })}
           {c.installation_label ? ` · ${c.installation_label}` : ""}
         </span>
         <ComplaintStatusLabel status={c.status} closedAt={c.closed_at} />
         {c.due_date && open && (
           <span style={{ fontSize: 13, fontWeight: 600, color: c.due_date < today ? t.putty : t.edge }}>
-            Deadline {fmtShort(c.due_date)}
-            {c.due_date < today ? " — passed" : ""}
+            {tr("deadline", { date: fmtShortLang(lang, c.due_date) })}
+            {c.due_date < today ? ` — ${tr("overdue")}` : ""}
           </span>
         )}
-        {!open && c.resolved_by_name && <span style={{ fontSize: 12, color: t.edge2 }}>Resolved by {c.resolved_by_name}</span>}
+        {!open && c.resolved_by_name && <span style={{ fontSize: 12, color: t.edge2 }}>{tr("resolvedBy", { name: c.resolved_by_name })}</span>}
         {urgent && (
           <span style={{ fontSize: 12, fontWeight: 700, color: t.signal, display: "flex", alignItems: "center", gap: 4 }}>
-            <AlertTriangle size={13} /> {fmtTimeLeft(urgentDeadline(c.urgent_at))} — finish today, can’t be moved
+            <AlertTriangle size={13} /> {fmtTimeLeftLang(lang, urgentDeadline(c.urgent_at))} — {tr("urgentFinishToday")}
           </span>
         )}
       </div>
 
       {error && <p style={{ fontSize: 13, color: t.signal, margin: "0 0 1rem" }}>{error}</p>}
 
-      <p style={sectionLabel}>Site</p>
+      <p style={sectionLabel}>{tr("site")}</p>
       <Card style={{ marginBottom: "1.25rem", display: "flex", flexDirection: "column", gap: 4 }}>
         {c.site_name && onOpenSite ? (
           <button
@@ -124,18 +129,18 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
             <MapPin size={14} /> {c.site_name}
           </button>
         ) : (
-          <span style={{ fontSize: 15, fontWeight: 600, color: t.edge }}>{c.site_name ?? "No site"}</span>
+          <span style={{ fontSize: 15, fontWeight: 600, color: t.edge }}>{c.site_name ?? tr("noSite")}</span>
         )}
-        <span style={{ fontSize: 13, color: t.edge2 }}>{siteDetailsLine(c)}</span>
+        <span style={{ fontSize: 13, color: t.edge2 }}>{siteDetailsLine(c, lang)}</span>
       </Card>
 
       {c.voice_call_id && (
         <>
-          <p style={sectionLabel}>Voice note</p>
+          <p style={sectionLabel}>{tr("voiceNote")}</p>
           <Card style={{ marginBottom: "1.25rem" }}>
             <AudioPlayer src={`/api/calls/${c.voice_call_id}/recording`} preload="none" />
             <p style={{ fontSize: 14, color: c.voice_transcript ? t.edge : t.edge2, lineHeight: 1.55, margin: "8px 0 0", whiteSpace: "pre-wrap" }}>
-              {c.voice_transcript || "Transcript not ready yet."}
+              {c.voice_transcript || tr("transcriptNotReady")}
             </p>
           </Card>
         </>
@@ -143,7 +148,7 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
 
       {c.media.length > 0 && (
         <>
-          <p style={sectionLabel}>Photos & videos ({c.media.length})</p>
+          <p style={sectionLabel}>{tr("photosVideos", { n: c.media.length })}</p>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, marginBottom: "1.25rem" }}>
             {c.media.map((m) =>
               m.media_type === "video" ? (
@@ -163,19 +168,19 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
         </>
       )}
 
-      <p style={sectionLabel}>Handling</p>
+      <p style={sectionLabel}>{tr("handling")}</p>
       <Card style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         <span style={{ fontSize: 13, color: t.edge2 }}>
-          {c.assignee_name ? `Assigned to ${c.assignee_name}` : "Not assigned yet"}
-          {!isAdmin && c.assigned_to_user_id !== me.id && c.created_by_user_id === me.id ? " · raised by you" : ""}
+          {c.assignee_name ? tr("assignedTo", { name: c.assignee_name }) : tr("notAssignedYet")}
+          {!isAdmin && c.assigned_to_user_id !== me.id && c.created_by_user_id === me.id ? ` · ${tr("raisedByYou")}` : ""}
         </span>
 
         {canWork && !(urgent && !isAdmin) && (
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: t.edge2 }}>
-            Plan for
+            {tr("planFor")}
             <input
               type="date"
-              aria-label="Plan for date"
+              aria-label={tr("planForDate")}
               value={c.scheduled_for ?? ""}
               min={isAdmin ? undefined : today}
               disabled={busy}
@@ -185,7 +190,7 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
           </label>
         )}
         {canWork && c.scheduled_for && c.scheduled_for < today && !urgent && (
-          <span style={{ fontSize: 12, fontWeight: 700, color: t.putty }}>Planned {fmtShort(c.scheduled_for)}, not done</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: t.putty }}>{tr("plannedNotDone", { date: fmtShortLang(lang, c.scheduled_for) })}</span>
         )}
 
         {isAdmin && open && (
@@ -211,7 +216,7 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
             onClick={() => setPassing((p) => !p)}
             style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
           >
-            <ArrowRightLeft size={14} /> {isAdmin ? "Route to staff" : "Pass on"}
+            <ArrowRightLeft size={14} /> {isAdmin ? "Route to staff" : tr("passOn")}
           </button>
         )}
         {passing && (
@@ -219,8 +224,8 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
             roster={isAdmin ? staffRoster : roster}
             selfId={c.assigned_to_user_id}
             busy={busy}
-            placeholder={isAdmin ? "Route to…" : "Pass on to…"}
-            actionLabel={isAdmin ? "Route" : "Pass on"}
+            placeholder={isAdmin ? "Route to…" : tr("passOnTo")}
+            actionLabel={isAdmin ? "Route" : tr("passOn")}
             onCancel={() => setPassing(false)}
             onPick={async (to) => {
               setBusy(true);
@@ -238,7 +243,7 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
                 await load();
               } catch (err) {
                 console.error("[sbm] route / pass on failed", err);
-                setError(err.message || "Couldn’t move it — try again.");
+                setError(err.message || tr("failedTryAgain"));
               } finally {
                 setBusy(false);
               }
