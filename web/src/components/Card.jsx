@@ -5,7 +5,7 @@ import { t } from "../theme.js";
    `tile` no longer changes the skin; it only fixes the card to
    --tile-height and lays it out as a column flexbox, so the home-grid
    tiles stay symmetrical regardless of content — a tile with a
-   variable-length list (SitesAttentionTile, EscalationsTile) scrolls
+   variable-length list (SitesAttentionTile) scrolls
    internally rather than growing taller than its neighbours. See those
    components for the `flex: 1; overflowY: auto` content wrapper that
    makes that scrolling work. */

@@ -3740,13 +3740,13 @@ export async function listOpenEscalations(db: D1Database): Promise<EscalationRow
   return results;
 }
 
-/** Staff-filed complaints — admin: all; with `forUserId` (SBM-71): only those assigned to that person. */
+/** Staff-filed complaints — admin: all; with `forUserId` (SBM-71): those assigned to that person or raised by them. */
 export async function listComplaints(db: D1Database, forUserId?: string | null): Promise<ComplaintRow[]> {
   let sql = COMPLAINT_LIST_SELECT;
   const binds: string[] = [];
   if (forUserId) {
-    sql += ` AND escalations.assigned_to_user_id = ?`;
-    binds.push(forUserId);
+    sql += ` AND (escalations.assigned_to_user_id = ? OR escalations.created_by_user_id = ?)`;
+    binds.push(forUserId, forUserId);
   }
   sql += ` ${COMPLAINT_ORDER}`;
   const stmt = db.prepare(sql);
@@ -3755,14 +3755,14 @@ export async function listComplaints(db: D1Database, forUserId?: string | null):
   return results;
 }
 
-/** Open staff-filed complaints count — home tile. */
+/** Open staff-filed complaints count — home tile (staff: assigned to them or raised by them). */
 export async function countOpenComplaints(db: D1Database, forUserId?: string | null): Promise<number> {
   let sql = `SELECT COUNT(*) AS n FROM escalations
              WHERE source = 'staff_field' AND status = 'open'`;
   const binds: string[] = [];
   if (forUserId) {
-    sql += ` AND assigned_to_user_id = ?`;
-    binds.push(forUserId);
+    sql += ` AND (assigned_to_user_id = ? OR created_by_user_id = ?)`;
+    binds.push(forUserId, forUserId);
   }
   const stmt = db.prepare(sql);
   const bound = binds.length ? stmt.bind(...binds) : stmt;
@@ -7336,6 +7336,7 @@ export async function staffUserHasHistory(db: D1Database, userId: string): Promi
 // ---------------------------------------------------------------------------
 
 export interface ComplaintDetail extends ComplaintRow {
+  created_by_user_id: string | null;
   installation_label: string | null;
   voice_transcript: string | null;
   media: { id: string; media_type: string; content_type: string; created_at: string }[];
@@ -7369,8 +7370,13 @@ export async function getComplaintDetail(db: D1Database, id: string): Promise<Co
       .bind(id)
       .all<{ id: string; media_type: string; content_type: string; created_at: string }>(),
   ]);
+  const creator = await db
+    .prepare(`SELECT created_by_user_id FROM escalations WHERE id = ?`)
+    .bind(id)
+    .first<{ created_by_user_id: string | null }>();
   return {
     ...row,
+    created_by_user_id: creator?.created_by_user_id ?? null,
     installation_label: extra?.installation_label ?? null,
     voice_transcript: extra?.voice_transcript ?? null,
     media: media.results ?? [],
@@ -7405,10 +7411,12 @@ export async function setComplaintImportant(
   ]);
 }
 
-/** A staff member may stream a complaint's voice note / media when the complaint is assigned to them. */
+/** A staff member may stream a complaint's voice note / media when it's assigned to them or they raised it. */
 export async function isCallOnComplaintAssignedTo(db: D1Database, callId: string, userId: string): Promise<boolean> {
   const row = await db
-    .prepare(`SELECT 1 FROM escalations WHERE voice_call_id = ? AND assigned_to_user_id = ? LIMIT 1`)
+    .prepare(
+      `SELECT 1 FROM escalations WHERE voice_call_id = ?1 AND (assigned_to_user_id = ?2 OR created_by_user_id = ?2) LIMIT 1`
+    )
     .bind(callId, userId)
     .first();
   return row !== null;
@@ -7418,7 +7426,7 @@ export async function isMediaOnComplaintAssignedTo(db: D1Database, mediaId: stri
   const row = await db
     .prepare(
       `SELECT 1 FROM site_media JOIN escalations ON escalations.id = site_media.escalation_id
-       WHERE site_media.id = ? AND escalations.assigned_to_user_id = ? LIMIT 1`
+       WHERE site_media.id = ?1 AND (escalations.assigned_to_user_id = ?2 OR escalations.created_by_user_id = ?2) LIMIT 1`
     )
     .bind(mediaId, userId)
     .first();

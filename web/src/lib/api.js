@@ -194,10 +194,6 @@ export async function fetchCall(id) {
   return fetchJSON(`/api/calls/${id}`);
 }
 
-export async function fetchEscalations() {
-  return fetchJSON("/api/escalations");
-}
-
 export async function fetchSitesAttention() {
   return fetchJSON("/api/sites/attention");
 }
@@ -321,25 +317,6 @@ export async function postSitesBackfill() {
     body: JSON.stringify({}),
   });
   if (!res.ok) throw new Error(`POST /api/sites/backfill → ${res.status}`);
-  return res.json();
-}
-
-export async function postEscalation(text, siteId) {
-  const res = await fetch("/api/escalations", {
-    method: "POST",
-    headers: { "content-type": "application/json", "X-SBM-Key": SBM_KEY },
-    body: JSON.stringify({ text, site_id: siteId || null }),
-  });
-  if (!res.ok) throw new Error(`POST /api/escalations → ${res.status}`);
-  return res.json();
-}
-
-export async function closeEscalationApi(id) {
-  const res = await fetch(`/api/escalations/${id}`, {
-    method: "PATCH",
-    headers: { "X-SBM-Key": SBM_KEY },
-  });
-  if (!res.ok) throw new Error(`PATCH /api/escalations/${id} → ${res.status}`);
   return res.json();
 }
 
