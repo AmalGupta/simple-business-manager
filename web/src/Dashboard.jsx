@@ -108,7 +108,7 @@ export default function SimpleBusinessManager() {
   /** Home tile count — from summary (read-only); list loads on My call tasks. */
   const [myOpenTodosCount, setMyOpenTodosCount] = useState(0);
   const [urgentWorkCount, setUrgentWorkCount] = useState(0);
-  /** Admin home bookmark tabs — staff with ≥1 open call todo. */
+  /** Admin home bookmark tabs — staff holding ≥1 open call todo, site stage, or complaint. */
   const [staffWithOpenTodos, setStaffWithOpenTodos] = useState([]);
   /** Selected admin-home tab: "admin" or a staff user id. */
   const [homeTab, setHomeTab] = useState("admin");

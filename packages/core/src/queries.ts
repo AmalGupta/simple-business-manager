@@ -4664,16 +4664,19 @@ export async function listSiteTasks(db: D1Database, siteId: string): Promise<Sit
  * that person's own assignments (staff home tiles); omitted/null → every
  * open assignment business-wide (admin home tiles). Same query backs both,
  * per docs — the dashboard groups the flat list into category tiles client-side.
+ *
+ * SBM-68: a staff member's own assignments include staff-hidden categories
+ * (Admin & Intake). If an admin gave them the stage it is theirs to do; only
+ * the category heading stays hidden in the staff UI. Browsing *unassigned*
+ * stages (listUnassignedSiteTasksForSite) still excludes them.
  */
 export async function listOpenSiteTasks(db: D1Database, forUserId?: string | null): Promise<SiteTaskRow[]> {
   const scoped = forUserId ? `AND site_tasks.assigned_to_user_id = ?` : "";
-  const hidden = forUserId ? staffHiddenCategorySql() : { clause: "", binds: [] as string[] };
   const stmt = db.prepare(
-    `${SITE_TASK_ROW_SELECT} WHERE site_tasks.status = 'assigned' ${scoped} ${hidden.clause}
+    `${SITE_TASK_ROW_SELECT} WHERE site_tasks.status = 'assigned' ${scoped}
      ORDER BY (site_tasks.due_date IS NULL) ASC, site_tasks.due_date ASC`
   );
-  const binds = forUserId ? [forUserId, ...hidden.binds] : hidden.binds;
-  const bound = binds.length ? stmt.bind(...binds) : stmt;
+  const bound = forUserId ? stmt.bind(forUserId) : stmt;
   const { results } = await bound.all<SiteTaskRow>();
   return results;
 }
@@ -4998,8 +5001,8 @@ export interface DashboardSummary {
   /** Resolved Calls tile — admin ack count; 0 on the staff-scoped summary. */
   resolved_calls_count: number;
   /**
-   * Admin home bookmark tabs — staff who currently have ≥1 open call todo.
-   * Empty on staff-scoped summaries.
+   * Admin home bookmark tabs — staff who currently hold ≥1 piece of open work
+   * (call todo, site stage, or complaint). Empty on staff-scoped summaries.
    */
   staff_with_open_todos: StaffWithOpenTodosRow[];
   /** Staff-scoped summaries only (migration 0044) — open urgent work for that person. */
@@ -5009,12 +5012,16 @@ export interface DashboardSummary {
 export interface StaffWithOpenTodosRow {
   id: string;
   name: string;
+  /** Everything open they hold — call todos + site stages + complaints (name kept for API compat). */
   open_todo_count: number;
 }
 
 /**
- * Staff with ≥1 open call todo via assignee, owner-name, or contact alias.
- * UNION of three indexed paths — avoids users × open-todos Cartesian JOIN.
+ * Staff with ≥1 piece of open work — the admin home bookmark tabs. Call todos
+ * come via assignee, owner-name, or contact alias (UNION of indexed paths —
+ * avoids a users × open-todos Cartesian JOIN). Assigned site stages and open
+ * complaints count too: a staff member whose only work is a stage or a
+ * complaint used to get no tab at all.
  */
 export async function listStaffWithOpenCallTodos(db: D1Database): Promise<StaffWithOpenTodosRow[]> {
   /* Router set (migration 0045): explicit assignment only — the name/alias
@@ -5070,11 +5077,34 @@ export async function listStaffWithOpenCallTodos(db: D1Database): Promise<StaffW
        ORDER BY users.name ASC`
     )
     .all<StaffWithOpenTodosRow>();
-  return (results ?? []).map((r) => ({
-    id: r.id,
-    name: r.name,
-    open_todo_count: Number(r.open_todo_count) || 0,
-  }));
+
+  /* Stages + complaints in their own query: D1 caps a compound SELECT at a
+     handful of terms, and the todo CTE above already uses four. Neither
+     overlaps a todo, so the counts simply add. */
+  const { results: otherWork } = await db
+    .prepare(
+      `SELECT users.id AS id, users.name AS name, COUNT(*) AS open_todo_count
+       FROM (
+         SELECT site_tasks.assigned_to_user_id AS user_id
+         FROM site_tasks
+         WHERE site_tasks.status = 'assigned'
+         UNION ALL
+         SELECT escalations.assigned_to_user_id AS user_id
+         FROM escalations
+         WHERE escalations.status = 'open' AND escalations.assigned_to_user_id IS NOT NULL
+       ) AS held
+       JOIN users ON users.id = held.user_id AND users.role = 'staff'
+       GROUP BY users.id, users.name`
+    )
+    .all<StaffWithOpenTodosRow>();
+
+  const byId = new Map<string, StaffWithOpenTodosRow>();
+  for (const r of [...(results ?? []), ...(otherWork ?? [])]) {
+    const prev = byId.get(r.id);
+    const n = Number(r.open_todo_count) || 0;
+    byId.set(r.id, { id: r.id, name: r.name, open_todo_count: (prev?.open_todo_count ?? 0) + n });
+  }
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 export interface AssignedTodoRow {
