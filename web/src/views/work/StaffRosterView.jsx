@@ -240,6 +240,12 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
               <tbody>
                 {data.staff.map((s) => {
                   const row = cells.get(s.id);
+                  /* SBM-64: days outside someone's working span (before joining,
+                     after the last working day) are shaded, and the name cell
+                     says why — "Joins 5 Oct" / "Leaving 30 Sept · 4 left". */
+                  const outside = (d) => (s.joined_on && d < s.joined_on) || (s.last_working_day && d > s.last_working_day);
+                  const held = s.held ?? 0;
+                  const leaving = s.disabled_at || s.last_working_day;
                   return (
                     <tr key={s.id}>
                       <td style={{ ...cellStyle, ...stickyCol }}>
@@ -250,6 +256,23 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
                         >
                           {s.name}
                         </button>
+                        {s.joined_on && s.joined_on > today && (
+                          <span style={{ display: "block", fontSize: 11, color: t.edge2, marginTop: 2 }}>Joins {fmtShort(s.joined_on)}</span>
+                        )}
+                        {leaving && (
+                          <span
+                            style={{
+                              display: "block",
+                              fontSize: 11,
+                              marginTop: 2,
+                              fontWeight: 700,
+                              /* Red only when work is still held and the last day is at hand or gone. */
+                              color: held > 0 && (s.disabled_at || s.last_working_day <= today) ? t.signal : t.putty,
+                            }}
+                          >
+                            {s.disabled_at ? "Left" : `Leaving ${fmtShort(s.last_working_day)}`} · {held} left
+                          </span>
+                        )}
                       </td>
                       {showSlipped && (
                         <td style={cellStyle}>
@@ -257,7 +280,14 @@ export function StaffRosterView({ onBack, onOpenStaff, onOpenSite, onOpenCall })
                         </td>
                       )}
                       {days.map((d) => (
-                        <td key={d} style={{ ...cellStyle, ...(d === today ? { background: t.frostSoft } : {}) }}>
+                        <td
+                          key={d}
+                          style={{
+                            ...cellStyle,
+                            ...(d === today ? { background: t.frostSoft } : {}),
+                            ...(outside(d) ? { background: t.pane } : {}),
+                          }}
+                        >
                           <CellList
                             items={row.byDay.get(d) ?? []}
                             selectedKey={selected && itemKey(selected)}
