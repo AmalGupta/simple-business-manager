@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowRightLeft, Check, ChevronRight, MapPin, Phone, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtDate, fmtShort, todayIso } from "../../lib/dates.js";
-import { WORKFLOW_CATEGORY_LABEL, WORK_LOCATIONS } from "../../lib/constants.js";
+import { STAFF_HIDDEN_WORKFLOW_CATEGORIES, WORKFLOW_CATEGORY_LABEL, WORK_LOCATIONS } from "../../lib/constants.js";
 import { fetchAssignedWork, fetchStaffRoster, patchWork, postWorkHandoff } from "../../lib/api.js";
 import { SMALL_SECONDARY_BUTTON_STYLE, TEXT_INPUT_STYLE, TILE_ROW_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
@@ -126,8 +126,15 @@ function WorkRow({ item, first, today, canAdmin, roster, selfId, busy, hideSite,
   const urgent = Boolean(item.urgent_at);
   const deadline = urgent ? urgentDeadline(item.urgent_at) : null;
   const overdue = !urgent && item.scheduled_for && item.scheduled_for < today;
+  /* SBM-68: staff do see an Admin & Intake stage assigned to them, but not
+     its category heading — that category stays admin-only. */
+  const hideCategory = !canAdmin && STAFF_HIDDEN_WORKFLOW_CATEGORIES.includes(item.category);
   const context =
-    item.kind === "site_task" ? WORKFLOW_CATEGORY_LABEL[item.category] ?? item.category : item.client_name;
+    item.kind === "site_task"
+      ? hideCategory
+        ? null
+        : WORKFLOW_CATEGORY_LABEL[item.category] ?? item.category
+      : item.client_name;
 
   return (
     <div
