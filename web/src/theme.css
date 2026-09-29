@@ -41,7 +41,7 @@
   --radius-badge: 6px;
   --radius-button: 8px;
 
-  /* Every tile (StatCard, SitesAttentionTile, EscalationsTile, StaffTile,
+  /* Every tile (StatCard, SitesAttentionTile, StaffTile,
      WorkflowTilesRow, "calls logged"/"recordings") is fixed to this height
      via Card's `tile` prop, regardless of content — a stat tile and a list
      tile sit in the same grid and must read as the same shape. List tiles

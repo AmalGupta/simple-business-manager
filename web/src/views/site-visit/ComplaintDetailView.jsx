@@ -3,13 +3,13 @@ import { AlertTriangle, ArrowRightLeft, Check, MapPin, Star } from "lucide-react
 import { t } from "../../theme.js";
 import { fmtDate, fmtShort, todayIso } from "../../lib/dates.js";
 import { SMALL_SECONDARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
-import { fetchComplaint, fetchStaffRoster, patchWork, postWorkHandoff } from "../../lib/api.js";
+import { fetchComplaint, fetchStaffRoster, patchComplaintFields, patchWork, postWorkHandoff } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 import { PassOnPicker } from "../work/AssignedWorkView.jsx";
 import { urgentDeadline, fmtTimeLeft } from "../work/workDates.js";
-import { ComplaintAssignControl, ComplaintFlags, ComplaintStatusLabel, siteDetailsLine } from "./ComplaintsHomeView.jsx";
+import { ComplaintFlags, ComplaintStatusLabel, siteDetailsLine } from "./ComplaintsHomeView.jsx";
 
 const sectionLabel = {
   fontFamily: t.label,
@@ -25,7 +25,7 @@ const sectionLabel = {
    videos, and who holds it. The assignee plans it onto a day or passes it on,
    like any task; an admin also assigns, flags urgent/important, and resolves.
    Urgent work is pinned to today and staff can't move it. */
-export function ComplaintDetailView({ id, me, forUserId = null, staffRoster = [], onAssignComplaint, onBack, onOpenSite, onChanged }) {
+export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplaint, onBack, onOpenSite, onChanged }) {
   const [c, setC] = useState(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -80,7 +80,7 @@ export function ComplaintDetailView({ id, me, forUserId = null, staffRoster = []
   const open = c.status === "open";
   const urgent = Boolean(c.urgent_at) && open;
   /* Plan / pass on act on the assignee's share: staff = themselves; admin = whoever holds it. */
-  const holder = forUserId ?? (isAdmin ? c.assigned_to_user_id : me.id);
+  const holder = isAdmin ? c.assigned_to_user_id : me.id;
   const canWork = open && Boolean(holder) && (isAdmin || c.assigned_to_user_id === me.id);
   const workOpts = isAdmin && holder ? { forUserId: holder } : {};
 
@@ -97,6 +97,12 @@ export function ComplaintDetailView({ id, me, forUserId = null, staffRoster = []
           {c.installation_label ? ` · ${c.installation_label}` : ""}
         </span>
         <ComplaintStatusLabel status={c.status} closedAt={c.closed_at} />
+        {c.due_date && open && (
+          <span style={{ fontSize: 13, fontWeight: 600, color: c.due_date < today ? t.putty : t.edge }}>
+            Deadline {fmtShort(c.due_date)}
+            {c.due_date < today ? " — passed" : ""}
+          </span>
+        )}
         {!open && c.resolved_by_name && <span style={{ fontSize: 12, color: t.edge2 }}>Resolved by {c.resolved_by_name}</span>}
         {urgent && (
           <span style={{ fontSize: 12, fontWeight: 700, color: t.signal, display: "flex", alignItems: "center", gap: 4 }}>
@@ -159,73 +165,85 @@ export function ComplaintDetailView({ id, me, forUserId = null, staffRoster = []
 
       <p style={sectionLabel}>Handling</p>
       <Card style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {isAdmin && open ? (
-          <ComplaintAssignControl
-            complaint={c}
-            staffRoster={staffRoster}
-            onAssign={async (cid, staffId) => {
-              await onAssignComplaint(cid, staffId);
-              await load();
-              onChanged?.();
-            }}
-          />
-        ) : (
-          <span style={{ fontSize: 13, color: t.edge2 }}>{c.assignee_name ? `Assigned to ${c.assignee_name}` : "Unassigned"}</span>
+        <span style={{ fontSize: 13, color: t.edge2 }}>
+          {c.assignee_name ? `Assigned to ${c.assignee_name}` : "Not assigned yet"}
+          {!isAdmin && c.assigned_to_user_id !== me.id && c.created_by_user_id === me.id ? " · raised by you" : ""}
+        </span>
+
+        {canWork && !(urgent && !isAdmin) && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: t.edge2 }}>
+            Plan for
+            <input
+              type="date"
+              aria-label="Plan for date"
+              value={c.scheduled_for ?? ""}
+              min={isAdmin ? undefined : today}
+              disabled={busy}
+              onChange={(e) => act(() => patchWork("complaint", c.id, { scheduled_for: e.target.value || null }, workOpts))}
+              style={{ ...TEXT_INPUT_STYLE, minHeight: 44, flex: 1, minWidth: 0 }}
+            />
+          </label>
+        )}
+        {canWork && c.scheduled_for && c.scheduled_for < today && !urgent && (
+          <span style={{ fontSize: 12, fontWeight: 700, color: t.putty }}>Planned {fmtShort(c.scheduled_for)}, not done</span>
         )}
 
-        {canWork && (
-          <>
-            {urgent && !isAdmin ? null : (
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: t.edge2 }}>
-                Plan for
-                <input
-                  type="date"
-                  aria-label="Plan for date"
-                  value={c.scheduled_for ?? ""}
-                  min={isAdmin ? undefined : today}
-                  disabled={busy}
-                  onChange={(e) => act(() => patchWork("complaint", c.id, { scheduled_for: e.target.value || null }, workOpts))}
-                  style={{ ...TEXT_INPUT_STYLE, minHeight: 44, flex: 1, minWidth: 0 }}
-                />
-              </label>
-            )}
-            {c.scheduled_for && c.scheduled_for < today && !urgent && (
-              <span style={{ fontSize: 12, fontWeight: 700, color: t.putty }}>Planned {fmtShort(c.scheduled_for)}, not done</span>
-            )}
-            <button
-              type="button"
+        {isAdmin && open && (
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: t.edge2 }}>
+            Deadline
+            <input
+              type="date"
+              aria-label="Deadline"
+              value={c.due_date ?? ""}
               disabled={busy}
-              onClick={() => setPassing((p) => !p)}
-              style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
-            >
-              <ArrowRightLeft size={14} /> Pass on
-            </button>
-            {passing && (
-              <PassOnPicker
-                roster={roster}
-                selfId={holder}
-                busy={busy}
-                onCancel={() => setPassing(false)}
-                onPick={async (to) => {
-                  setBusy(true);
-                  setError("");
-                  try {
-                    await postWorkHandoff("complaint", c.id, to, workOpts);
-                    setPassing(false);
-                    onChanged?.();
-                    /* Staff lose sight of a complaint once it's someone else's — back to their list. */
-                    if (!isAdmin) return onBack();
-                    await load();
-                  } catch (err) {
-                    console.error("[sbm] pass on failed", err);
-                    setError(err.message || "Couldn’t pass it on — try again.");
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-              />
-            )}
-          </>
+              onChange={(e) => act(() => patchComplaintFields(c.id, { due_date: e.target.value || null }))}
+              style={{ ...TEXT_INPUT_STYLE, minHeight: 44, flex: 1, minWidth: 0 }}
+            />
+          </label>
+        )}
+
+        {/* Admin routes (assigns or reassigns) — works whether or not anyone holds it yet.
+            Staff who hold it pass it on to a teammate. */}
+        {open && (isAdmin || c.assigned_to_user_id === me.id) && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => setPassing((p) => !p)}
+            style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
+          >
+            <ArrowRightLeft size={14} /> {isAdmin ? "Route to staff" : "Pass on"}
+          </button>
+        )}
+        {passing && (
+          <PassOnPicker
+            roster={isAdmin ? staffRoster : roster}
+            selfId={c.assigned_to_user_id}
+            busy={busy}
+            placeholder={isAdmin ? "Route to…" : "Pass on to…"}
+            actionLabel={isAdmin ? "Route" : "Pass on"}
+            onCancel={() => setPassing(false)}
+            onPick={async (to) => {
+              setBusy(true);
+              setError("");
+              try {
+                if (isAdmin) {
+                  await onAssignComplaint(c.id, to);
+                } else {
+                  await postWorkHandoff("complaint", c.id, to, workOpts);
+                }
+                setPassing(false);
+                onChanged?.();
+                /* Staff lose the actions once it's someone else's — back to their list. */
+                if (!isAdmin) return onBack();
+                await load();
+              } catch (err) {
+                console.error("[sbm] route / pass on failed", err);
+                setError(err.message || "Couldn’t move it — try again.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          />
         )}
 
         {isAdmin && open && (

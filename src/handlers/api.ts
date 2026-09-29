@@ -9,6 +9,9 @@ import {
   assignComplaint,
   closeEscalation,
   getComplaintDetail,
+  getSiteName,
+  isIsoDate,
+  updateComplaintDetails,
   countOpenComplaints,
   createEscalation,
   createSite,
@@ -1040,19 +1043,28 @@ export async function handleGetComplaintsCount(request: Request, env: Env): Prom
   return json({ count: await countOpenComplaints(env.DB, scoped) });
 }
 
-/** GET /api/complaints/:id — SBM-71 detail: voice transcript + attached photos/videos. Staff: only their own. */
+/** GET /api/complaints/:id — SBM-71 detail: voice transcript + attached photos/videos. Staff: assigned to them or raised by them. */
 export async function handleGetComplaint(request: Request, env: Env, id: string): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
   const detail = await getComplaintDetail(env.DB, id);
   if (!detail) return json({ error: "not found" }, 404);
-  if (session.user_role === "staff" && detail.assigned_to_user_id !== session.user_id) {
+  if (
+    session.user_role === "staff" &&
+    detail.assigned_to_user_id !== session.user_id &&
+    detail.created_by_user_id !== session.user_id
+  ) {
     return json({ error: "forbidden" }, 403);
   }
   return json(detail);
 }
 
-/** Admin assigns a staff-filed complaint to a team member. */
+/**
+ * PATCH /api/complaints/:id — admin. Any of:
+ *   assigned_to_user_id — route to a staff member (lands on their roster today)
+ *   site_id             — move the complaint to another site (SBM-71)
+ *   due_date            — yyyy-mm-dd deadline, or null to clear (SBM-71)
+ */
 export async function handlePatchComplaint(request: Request, env: Env, id: string): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
@@ -1064,13 +1076,38 @@ export async function handlePatchComplaint(request: Request, env: Env, id: strin
     return json({ error: "invalid JSON body" }, 400);
   }
   const record = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+
+  const changes: { siteId?: string | null; dueDate?: string | null } = {};
+  if ("site_id" in record) {
+    const siteId = typeof record.site_id === "string" && record.site_id ? record.site_id : null;
+    if (!siteId) return json({ error: "site_id is required" }, 400);
+    if (!(await getSiteName(env.DB, siteId))) return json({ error: "unknown site" }, 400);
+    changes.siteId = siteId;
+  }
+  if ("due_date" in record) {
+    const due = record.due_date;
+    if (due !== null && due !== "" && !isIsoDate(due)) return json({ error: "due_date must be yyyy-mm-dd" }, 400);
+    changes.dueDate = due ? (due as string) : null;
+  }
   const assignedToUserId = typeof record.assigned_to_user_id === "string" ? record.assigned_to_user_id : "";
-  if (!assignedToUserId) return json({ error: "assigned_to_user_id is required" }, 400);
+  if (!assignedToUserId && changes.siteId === undefined && changes.dueDate === undefined) {
+    return json({ error: "nothing to change" }, 400);
+  }
 
-  const assignee = await getUserById(env.DB, assignedToUserId);
-  if (!assignee || assignee.role !== "staff") return json({ error: "invalid assignee" }, 400);
-
-  const updated = await assignComplaint(env.DB, id, assignedToUserId, gate.user_id);
+  if (changes.siteId !== undefined || changes.dueDate !== undefined) {
+    const ok = await updateComplaintDetails(env.DB, id, changes, gate.user_id);
+    if (!ok) return json({ error: "not found" }, 404);
+  }
+  if (assignedToUserId) {
+    const assignee = await getUserById(env.DB, assignedToUserId);
+    const isSelf = assignedToUserId === gate.user_id;
+    if (!assignee || assignee.disabled_at || (assignee.role !== "staff" && !isSelf)) {
+      return json({ error: "invalid assignee" }, 400);
+    }
+    const routed = await assignComplaint(env.DB, id, assignedToUserId, gate.user_id);
+    if (!routed) return json({ error: "not found" }, 404);
+  }
+  const updated = await getComplaintDetail(env.DB, id);
   if (!updated) return json({ error: "not found" }, 404);
   return json(updated);
 }

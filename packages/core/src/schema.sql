@@ -234,7 +234,9 @@ CREATE TABLE escalations (
   important_at           TEXT,
   important_by_user_id   TEXT REFERENCES users(id),
   resolved_by_user_id    TEXT REFERENCES users(id),
-  voice_call_id          TEXT REFERENCES calls(id)
+  voice_call_id          TEXT REFERENCES calls(id),
+  -- migration 0052: admin-set deadline.
+  due_date               TEXT
 );
 CREATE INDEX idx_escalations_assignee ON escalations(assigned_to_user_id, status);
 
@@ -470,6 +472,10 @@ CREATE INDEX idx_todo_assignees_scheduled ON todo_assignees(user_id, scheduled_f
 --          location_changed (migration 0049, SBM-67 — Office ↔ Factory)
 --          offboard_rerouted (migration 0050, SBM-64 — left after the
 --          leaver's last working day, moved to the router)
+--          item_kind 'complaint' (migration 0051/0052, SBM-71): created |
+--          assigned | scheduled | handed_off | received | marked_urgent |
+--          urgent_cleared | marked_important | important_cleared |
+--          due_changed | site_changed | completed (= resolved)
 CREATE TABLE work_events (
   id              TEXT PRIMARY KEY,
   item_kind       TEXT NOT NULL,

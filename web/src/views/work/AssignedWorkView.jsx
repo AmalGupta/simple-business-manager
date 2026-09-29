@@ -88,18 +88,18 @@ function groupItems(items, today) {
   return { urgent, overdue, days, unplanned };
 }
 
-export function PassOnPicker({ roster, selfId, busy, onPick, onCancel }) {
+export function PassOnPicker({ roster, selfId, busy, onPick, onCancel, placeholder = "Pass on to…", actionLabel = "Pass on" }) {
   const [to, setTo] = useState("");
   const options = roster.filter((s) => s.id !== selfId);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
       <select
-        aria-label="Pass on to"
+        aria-label={placeholder}
         value={to}
         onChange={(e) => setTo(e.target.value)}
         style={{ ...TEXT_INPUT_STYLE, gridColumn: "1 / -1", minHeight: 44 }}
       >
-        <option value="">Pass on to…</option>
+        <option value="">{placeholder}</option>
         {options.map((s) => (
           <option key={s.id} value={s.id}>
             {s.name}
@@ -112,7 +112,7 @@ export function PassOnPicker({ roster, selfId, busy, onPick, onCancel }) {
         onClick={() => onPick(to)}
         style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, background: t.accent, color: t.white, border: "none", opacity: !to || busy ? 0.5 : 1 }}
       >
-        Pass on
+        {actionLabel}
       </button>
       <button type="button" onClick={onCancel} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44 }}>
         Cancel
