@@ -1040,13 +1040,17 @@ export async function handleGetComplaintsCount(request: Request, env: Env): Prom
   return json({ count: await countOpenComplaints(env.DB, scoped) });
 }
 
-/** GET /api/complaints/:id — SBM-71 detail: voice transcript + attached photos/videos. Staff: only their own. */
+/** GET /api/complaints/:id — SBM-71 detail: voice transcript + attached photos/videos. Staff: assigned to them or raised by them. */
 export async function handleGetComplaint(request: Request, env: Env, id: string): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
   const detail = await getComplaintDetail(env.DB, id);
   if (!detail) return json({ error: "not found" }, 404);
-  if (session.user_role === "staff" && detail.assigned_to_user_id !== session.user_id) {
+  if (
+    session.user_role === "staff" &&
+    detail.assigned_to_user_id !== session.user_id &&
+    detail.created_by_user_id !== session.user_id
+  ) {
     return json({ error: "forbidden" }, 403);
   }
   return json(detail);
