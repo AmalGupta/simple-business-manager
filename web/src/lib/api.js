@@ -1162,6 +1162,11 @@ function forUserQuery(forUserId) {
   return forUserId ? `?for_user_id=${encodeURIComponent(forUserId)}` : "";
 }
 
+/** Read receipts — marks these todos seen for the signed-in user only. */
+export function postTodosSeen(todoIds) {
+  return workFetch(`/api/todos/seen`, { method: "POST", body: JSON.stringify({ todo_ids: todoIds }) });
+}
+
 export function fetchAssignedWork({ forUserId } = {}) {
   return workFetch(`/api/work/assigned${forUserQuery(forUserId)}`);
 }

@@ -1682,18 +1682,53 @@ function toTodoRow(t: RawTodoRow): TodoRow {
  *  usage elsewhere, e.g. getSitesNeedingAttention). */
 export async function getAssigneesByTodoIds(db: D1Database, todoIds: string[]): Promise<Map<string, TodoAssignee[]>> {
   if (todoIds.length === 0) return new Map();
-  const rows = await queryAllByIdChunks<{ todo_id: string; id: string; name: string }>(db, todoIds, (ph) =>
-    `SELECT todo_assignees.todo_id AS todo_id, users.id AS id, users.name AS name
+  const rows = await queryAllByIdChunks<{
+    todo_id: string;
+    id: string;
+    name: string;
+    assigned_at: string | null;
+    seen_at: string | null;
+    assigned_by_name: string | null;
+  }>(db, todoIds, (ph) =>
+    `SELECT todo_assignees.todo_id AS todo_id, users.id AS id, users.name AS name,
+            todo_assignees.assigned_at AS assigned_at, todo_assignees.seen_at AS seen_at,
+            assigner.name AS assigned_by_name
      FROM todo_assignees JOIN users ON users.id = todo_assignees.user_id
+     LEFT JOIN users assigner ON assigner.id = todo_assignees.assigned_by_user_id
      WHERE todo_assignees.todo_id IN (${ph})`
   );
   const out = new Map<string, TodoAssignee[]>();
   for (const r of rows) {
     const list = out.get(r.todo_id) ?? [];
-    list.push({ id: r.id, name: r.name });
+    list.push({
+      id: r.id,
+      name: r.name,
+      assigned_at: r.assigned_at,
+      seen_at: r.seen_at,
+      assigned_by_name: r.assigned_by_name,
+    });
     out.set(r.todo_id, list);
   }
   return out;
+}
+
+/** Read receipts — stamps seen_at on this user's own assignment rows only,
+ *  first view wins. Returns how many rows flipped to seen. */
+export async function markTodosSeen(db: D1Database, userId: string, todoIds: string[]): Promise<number> {
+  const ids = [...new Set(todoIds)];
+  let changed = 0;
+  for (let i = 0; i < ids.length; i += 90) {
+    const chunk = ids.slice(i, i + 90);
+    const res = await db
+      .prepare(
+        `UPDATE todo_assignees SET seen_at = datetime('now')
+         WHERE user_id = ? AND seen_at IS NULL AND todo_id IN (${chunk.map(() => "?").join(", ")})`
+      )
+      .bind(userId, ...chunk)
+      .run();
+    changed += res.meta?.changes ?? 0;
+  }
+  return changed;
 }
 
 /** Mutates each TodoRow in place, attaching its assignees. Not baked into
