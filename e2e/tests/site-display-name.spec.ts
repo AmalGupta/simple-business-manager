@@ -28,7 +28,7 @@ test.describe("Site display name", () => {
     await expect(page.getByText("Simple Business Manager")).toBeVisible();
 
     // --- Sites directory ---------------------------------------------
-    await page.getByRole("button", { name: /^\d+ confirmed sites?/ }).click();
+    await page.getByRole("button", { name: /^Confirmed Sites/ }).click();
     await expect(page.getByRole("heading", { name: "Sites", exact: true })).toBeVisible();
 
     /* Filter by the stored name first: it isolates this run's row whatever
@@ -42,7 +42,9 @@ test.describe("Site display name", () => {
 
     // --- Review grid --------------------------------------------------
     await page.getByRole("button", { name: /Back|Home/ }).first().click();
-    await page.getByRole("button", { name: /Show unconfirmed sites/ }).click();
+    await page.getByRole("button", { name: /^Unconfirmed Sites/ }).click();
+    // Review sites opens on "Undecided"; a POST /api/sites site is already confirmed.
+    await page.getByRole("tab", { name: /^Active sites/ }).click();
     await page.getByPlaceholder("Search name…").fill(storedName);
     await expect(page.locator(".ag-row")).toHaveCount(1);
     await expect(page.locator(".ag-row").first()).toContainText(COMPOSED);
@@ -114,7 +116,7 @@ test.describe("Site display name", () => {
 
     await page.reload();
     await expect(page.getByText("Simple Business Manager")).toBeVisible();
-    await page.getByRole("button", { name: /^\d+ confirmed sites?/ }).click();
+    await page.getByRole("button", { name: /^Confirmed Sites/ }).click();
     await page.getByPlaceholder("Search name…").fill(storedName);
     await expect(page.locator(".ag-row")).toHaveCount(1);
     await expect(page.locator(".ag-row").first()).toContainText(expected);
@@ -145,7 +147,7 @@ test.describe("Site display name", () => {
     expect(site.site_name_being_used).toBeNull();
 
     await page.reload();
-    await page.getByRole("button", { name: /^\d+ confirmed sites?/ }).click();
+    await page.getByRole("button", { name: /^Confirmed Sites/ }).click();
     await page.getByPlaceholder("Search name…").fill(storedName);
     await expect(page.locator(".ag-row").first()).toContainText(storedName);
     await expect(page.locator(".ag-row").first()).not.toContainText("CL.");
