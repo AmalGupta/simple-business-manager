@@ -3002,6 +3002,61 @@ export async function listSites(db: D1Database, forUserId?: string | null): Prom
   return results;
 }
 
+export interface SiteSearchRow {
+  id: string;
+  name: string;
+  site_name_being_used: string | null;
+  city: string | null;
+  /** 1 if `userId` is already on the team (or holds a stage there), else 0. */
+  is_member: number;
+}
+
+/**
+ * SBM-95 — search every confirmed site by name / display name / sector / city,
+ * not just the caller's own, so staff on "Add new site" can pick an existing
+ * site instead of creating a duplicate. Returns only what a picker needs.
+ */
+export async function searchConfirmedSites(
+  db: D1Database,
+  query: string,
+  userId: string,
+  limit = 20
+): Promise<SiteSearchRow[]> {
+  const like = `%${query.trim().replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+  const { results } = await db
+    .prepare(
+      `SELECT sites.id AS id, sites.name AS name, sites.site_name_being_used AS site_name_being_used, sites.city AS city,
+              CASE WHEN EXISTS (SELECT 1 FROM site_team_members m WHERE m.site_id = sites.id AND m.user_id = ?1)
+                     OR EXISTS (SELECT 1 FROM site_tasks st WHERE st.site_id = sites.id AND st.assigned_to_user_id = ?1)
+                   THEN 1 ELSE 0 END AS is_member
+       FROM sites
+       WHERE sites.is_confirmed = 'Y'
+         AND (sites.name LIKE ?2 ESCAPE '\\' OR sites.site_name_being_used LIKE ?2 ESCAPE '\\'
+              OR sites.sector LIKE ?2 ESCAPE '\\' OR sites.city LIKE ?2 ESCAPE '\\')
+       ORDER BY is_member DESC, sites.name ASC
+       LIMIT ?3`
+    )
+    .bind(userId, like, limit)
+    .all<SiteSearchRow>();
+  return results ?? [];
+}
+
+/**
+ * SBM-95 — picking an existing confirmed site from search. `joinUserId` (a
+ * staff member) is added to its team, idempotently, the same way creating a
+ * site adds its creator. Returns the site row, or null if it isn't a
+ * confirmed site.
+ */
+export async function pickExistingSite(db: D1Database, siteId: string, joinUserId: string | null): Promise<SiteRow | null> {
+  const site = await db
+    .prepare(`${SITE_ROW_SELECT} WHERE sites.id = ? AND sites.is_confirmed = 'Y'`)
+    .bind(siteId)
+    .first<SiteRow>();
+  if (!site) return null;
+  if (joinUserId) await addSiteTeamMembers(db, siteId, [joinUserId], joinUserId);
+  return site;
+}
+
 /** Confirmed sites only (`is_confirmed = 'Y'`) — site–contact maintenance backfill. */
 export async function listConfirmedSites(db: D1Database): Promise<SiteRow[]> {
   const { results } = await db

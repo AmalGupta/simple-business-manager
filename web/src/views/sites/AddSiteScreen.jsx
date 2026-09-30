@@ -8,6 +8,7 @@ import { BackLink } from "../../components/BackLink.jsx";
 import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
 import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
 import { SiteContactField } from "./SiteContactField.jsx";
+import { ExistingSiteSearch } from "./ExistingSiteSearch.jsx";
 import { useT } from "../../lib/i18n.jsx";
 
 const labelStyle = {
@@ -62,7 +63,15 @@ const actionTileStyle = (disabled) => ({
  * fields are hidden and an admin fills them later from Review sites or
  * the site page.
  */
-export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = null, canPickContacts = false }) {
+export function AddSiteScreen({
+  onBack,
+  onCreate,
+  onDone,
+  /* SBM-95 — pick an existing site instead (resolves to the site row). */
+  onPickExisting,
+  defaultAssignedBy = null,
+  canPickContacts = false,
+}) {
   const tr = useT();
   const [houseNo, setHouseNo] = useState("");
   const [sector, setSector] = useState("");
@@ -151,12 +160,33 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = nu
 
   const actionsDisabled = saving || busyAction;
 
+  const pickExisting = async (site) => {
+    setSaving(true);
+    setError("");
+    try {
+      const picked = await onPickExisting(site);
+      onDone?.(picked);
+    } catch (err) {
+      console.error("[sbm] failed to pick existing site", err);
+      setError(tr("failedPickSite"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div>
       <BackLink onClick={onBack}>{tr("back")}</BackLink>
       <h1 style={{ fontFamily: t.display, fontSize: 22, fontWeight: 500, color: t.edge, margin: "0 0 1.25rem" }}>
         {tr("addNewSite")}
       </h1>
+
+      {onPickExisting && !createdSite && (
+        <>
+          <ExistingSiteSearch onPick={pickExisting} disabled={saving} />
+          <p style={{ ...labelStyle, margin: "0 0 8px" }}>{tr("orAddNewSite")}</p>
+        </>
+      )}
 
       <Card style={{ padding: "1rem", marginBottom: "1.25rem" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>

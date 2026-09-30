@@ -5,6 +5,8 @@
 // home page", the site confirmation workflow, and site details/team.
 
 import {
+  pickExistingSite,
+  searchConfirmedSites,
   addSiteTeamMember,
   assignComplaint,
   closeEscalation,
@@ -740,6 +742,24 @@ export async function handlePostSite(request: Request, env: Env): Promise<Respon
     if (err instanceof SiteContactRefError) return json({ error: err.message }, 400);
     throw err;
   }
+}
+
+/** SBM-95 — GET /api/sites/search?q= — any logged-in role; all confirmed sites, not just the caller's. */
+export async function handleSearchSites(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  const q = new URL(request.url).searchParams.get("q")?.trim() ?? "";
+  if (q.length < 2) return json([]);
+  return json(await searchConfirmedSites(env.DB, q, session.user_id));
+}
+
+/** SBM-95 — POST /api/sites/:id/pick — a staff member picking an existing site joins its team. */
+export async function handlePickSite(request: Request, env: Env, siteId: string): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  const site = await pickExistingSite(env.DB, siteId, session.user_role === "staff" ? session.user_id : null);
+  if (!site) return json({ error: "no such site" }, 404);
+  return json(site);
 }
 
 export async function handleGetSitesAttention(request: Request, env: Env): Promise<Response> {
