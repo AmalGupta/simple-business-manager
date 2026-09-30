@@ -6,6 +6,7 @@ import { Card } from "../../components/Card.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
 import { fmtDateTime } from "./workDates.js";
 import { assignedToName, describeTransition } from "./taskAuditFormat.js";
+import { TaskContacts, taskContacts } from "./TaskContacts.jsx";
 
 const STATUS_LABEL = { open: "Open", done: "Done", snoozed: "Parked", assigned: "Open", unassigned: "Unassigned" };
 
@@ -43,6 +44,7 @@ export function TaskTimelineCard({ kind, id, onOpenSite }) {
             {data.assignees.length ? ` · with ${data.assignees.join(", ")}` : " · unassigned"}
             {data.site_name ? ` · ${data.site_name}` : ""}
           </div>
+          <TaskContacts contacts={taskContacts(data)} style={{ fontSize: 12, marginTop: 6 }} />
           {data.site_name && onOpenSite && (
             <button
               type="button"

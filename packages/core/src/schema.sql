@@ -282,6 +282,9 @@ CREATE TABLE todos (
   -- migration 0053 (SBM-82): set when an admin routes it (saves assignees).
   -- A todo can't be marked done while NULL.
   routed_at         TEXT,
+  -- migration 0056 (SBM-92): the client contact this todo is for, set by
+  -- saveExtraction — the caller on a phone call, else the todo site's sole contact.
+  client_caller_id  TEXT REFERENCES callers(id) ON DELETE SET NULL,
 
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 
@@ -631,7 +634,7 @@ CREATE TABLE app_requests (
   created_by_user_id TEXT NOT NULL REFERENCES users(id),
   created_by_name    TEXT NOT NULL,
   created_by_role    TEXT NOT NULL DEFAULT 'staff',     -- snapshot at submit time — titles the Jira issue [Staff-Request]/[Admin-Request]
-  status             TEXT NOT NULL DEFAULT 'pending',   -- pending | transcribing | submitted | failed
+  status             TEXT NOT NULL DEFAULT 'pending',   -- pending | transcribing | filing | submitted | failed
   r2_key             TEXT,                              -- VOICE_NOTES object holding the spoken request
   stt_job_id         TEXT,                              -- Sarvam batch job id — webhook dispatch key
   speaker_name       TEXT,                              -- Claude-extracted (defaults to created_by_name)
