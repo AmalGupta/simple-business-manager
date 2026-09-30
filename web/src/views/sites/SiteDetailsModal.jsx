@@ -2,6 +2,8 @@ import { useState } from "react";
 import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { Modal } from "../../components/Modal.jsx";
+import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
+import { SiteContactField, siteContactValue } from "./SiteContactField.jsx";
 
 /* ------------------------------------------------------------------
    Site details form, in a dialog.
@@ -27,6 +29,10 @@ const FIELDS = [
   { key: "sector", label: "Sector", placeholder: "Sector or locality" },
   { key: "city", label: "City", placeholder: "City" },
   { key: "address", label: "Address", placeholder: "Full address" },
+];
+
+/* SBM-83 — directory contacts, not free text (see SiteContactField). */
+const CONTACT_FIELDS = [
   { key: "assigned_by", label: "Assigned by", placeholder: "Who assigned this site" },
   { key: "referred_by", label: "Referred by", placeholder: "Who referred it" },
 ];
@@ -72,6 +78,10 @@ export function SiteDetailsModal({
     for (const f of FIELDS) initial[f.key] = site?.[f.key] ?? "";
     return initial;
   });
+  const [contactValues, setContactValues] = useState(() =>
+    Object.fromEntries(CONTACT_FIELDS.map((f) => [f.key, siteContactValue(site, f.key)]))
+  );
+  const [pickingField, setPickingField] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -111,6 +121,18 @@ export function SiteDetailsModal({
       const current = (site?.[f.key] ?? "").trim();
       if (next !== current) patch[f.key] = next || null;
     }
+    /* Only the link is sent; the server writes the name. An untouched
+       legacy text value (no caller_id) is left as it is. */
+    for (const f of CONTACT_FIELDS) {
+      const next = contactValues[f.key];
+      const currentId = site?.[`${f.key}_caller_id`] || null;
+      const hadValue = Boolean(currentId || site?.[f.key]?.trim());
+      if (!next) {
+        if (hadValue) patch[`${f.key}_caller_id`] = null;
+      } else if (next.caller_id && next.caller_id !== currentId) {
+        patch[`${f.key}_caller_id`] = next.caller_id;
+      }
+    }
     const nextDate = values.target_closure_date || "";
     const currentDate = site?.target_closure_date ?? "";
     if (nextDate !== currentDate) patch.target_closure_date = nextDate || null;
@@ -132,6 +154,26 @@ export function SiteDetailsModal({
       setSaving(false);
     }
   };
+
+  if (pickingField) {
+    const field = CONTACT_FIELDS.find((f) => f.key === pickingField);
+    return (
+      <AssociateContactsModal
+        site={site}
+        pick={{
+          title: `${field.label} — choose a contact`,
+          onPick: (caller) => {
+            setContactValues((current) => ({
+              ...current,
+              [pickingField]: { caller_id: caller.id, name: caller.name, phone: caller.phone || null },
+            }));
+            setPickingField(null);
+          },
+        }}
+        onClose={() => setPickingField(null)}
+      />
+    );
+  }
 
   return (
     <Modal label="Site details" title={title} onClose={onClose} width={420} scroll>
@@ -156,6 +198,17 @@ export function SiteDetailsModal({
               style={TEXT_INPUT_STYLE}
             />
           </FieldRow>
+        ))}
+        {CONTACT_FIELDS.map((f) => (
+          <div key={f.key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={labelStyle}>{f.label}</span>
+            <SiteContactField
+              value={contactValues[f.key]}
+              placeholder={f.placeholder}
+              onChoose={() => setPickingField(f.key)}
+              onClear={() => setContactValues((current) => ({ ...current, [f.key]: null }))}
+            />
+          </div>
         ))}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
