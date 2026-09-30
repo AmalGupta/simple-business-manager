@@ -220,6 +220,23 @@ export function refreshConfirmedSites() {
   return confirmedSitesCache.refresh(CONFIRMED_SITES_KEY);
 }
 
+/* SBM-95 — search every confirmed site (not just the caller's), and pick one;
+   a staff member picking a site they aren't on joins its team. */
+export async function searchSites(q) {
+  return fetchJSON(`/api/sites/search?q=${encodeURIComponent(q)}`);
+}
+
+export async function postPickSite(siteId) {
+  const res = await fetch(`/api/sites/${encodeURIComponent(siteId)}/pick`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "X-SBM-Key": SBM_KEY },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `POST /api/sites/${siteId}/pick → ${res.status}`);
+  return body;
+}
+
 export async function postCreateSite(details) {
   const res = await fetch("/api/sites", {
     method: "POST",

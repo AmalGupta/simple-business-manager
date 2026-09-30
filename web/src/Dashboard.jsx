@@ -64,6 +64,7 @@ import {
   fetchMyOpenTodos,
   fetchSites,
   postCreateSite,
+  postPickSite,
   patchTodo,
   fetchMe,
   setViewAsUserId,
@@ -296,6 +297,16 @@ export default function SimpleBusinessManager() {
       const site = await postCreateSite(details);
       await refreshSites();
       return site;
+    },
+    [refreshSites]
+  );
+
+  /* SBM-95 — "Add new site" → picked an existing site instead. Staff join its team. */
+  const pickSiteAndRefresh = useCallback(
+    async (site) => {
+      const picked = await postPickSite(site.id);
+      await refreshSites();
+      return picked;
     },
     [refreshSites]
   );
@@ -995,6 +1006,7 @@ export default function SimpleBusinessManager() {
         }
         onBack={() => setView(view.from ?? homeView)}
         onCreate={createSiteAndRefresh}
+        onPickExisting={pickSiteAndRefresh}
         onDone={(site) => {
           const scopeId = view.forUserId || null;
           const next = view.afterCreate?.name;

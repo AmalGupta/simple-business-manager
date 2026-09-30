@@ -31,6 +31,8 @@ import {
   handleGetSites,
   handlePostSite,
   handleGetConfirmedSites,
+  handleSearchSites,
+  handlePickSite,
   handleGetSitesAttention,
   handleGetSiteTeam,
   handleGetSiteContacts,
@@ -382,6 +384,17 @@ export default {
     if (url.pathname === "/api/sites/confirmed" && request.method === "GET") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleGetConfirmedSites(request, env);
+    }
+
+    // SBM-95 — search all confirmed sites / pick one (staff joins its team).
+    if (url.pathname === "/api/sites/search" && request.method === "GET") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handleSearchSites(request, env);
+    }
+    const sitePickMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/pick$/);
+    if (sitePickMatch && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePickSite(request, env, sitePickMatch[1]);
     }
 
     if (url.pathname === "/api/sites/backfill" && request.method === "POST") {
