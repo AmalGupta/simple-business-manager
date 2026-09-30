@@ -2,11 +2,12 @@ import { Phone } from "lucide-react";
 import { t } from "../../theme.js";
 
 /* The client contact behind a task, shown with its site on Task audit and
-   the task timeline: the caller for a call todo, then every directory
-   contact linked to the site (caller_sites, any type). Numbers are tel:
-   links so the admin can ring them straight from the audit. */
+   the task timeline: the todo's linked client (todos.client_caller_id, set
+   by the STT webhook), then every directory contact linked to the site
+   (caller_sites, any type). Numbers are tel: links so the admin can ring
+   them straight from the audit. */
 
-/** Caller first, then site contacts, without repeating one person. */
+/** Linked client first, then site contacts, without repeating one person. */
 export function taskContacts({ client_id, client_name, client_phone, site_contacts }) {
   const out = [];
   const seen = new Set();

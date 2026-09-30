@@ -1296,6 +1296,26 @@ export async function saveExtraction(
     return null;
   };
 
+  /* SBM-92 — the client each todo is for. A phone/Drive call's caller (not a
+     staff contact); for desk/site memos, the todo site's contact when it has
+     exactly one. */
+  const isPhoneCall = !assignedByUserId && !recordedForSiteId;
+  const callCaller = isPhoneCall && call?.client_id ? await getCallerById(db, call.client_id) : null;
+  const callClientId = callCaller && !isStaffCategory(callCaller.category) && !callCaller.staff_user_id ? callCaller.id : null;
+  const soleContactBySite = new Map<string, string | null>();
+  const resolveTodoClientId = async (siteId: string | null): Promise<string | null> => {
+    if (callClientId) return callClientId;
+    if (!siteId) return null;
+    if (!soleContactBySite.has(siteId)) {
+      const { results } = await db
+        .prepare(`SELECT caller_id FROM caller_sites WHERE site_id = ? LIMIT 2`)
+        .bind(siteId)
+        .all<{ caller_id: string }>();
+      soleContactBySite.set(siteId, results?.length === 1 ? results[0].caller_id : null);
+    }
+    return soleContactBySite.get(siteId) ?? null;
+  };
+
   const routerUserId = await getTodoRouterUserId(db);
   for (const todo of extraction.todos) {
     const matched = matchStaffByOwner(todo.owner, staff, aliasRows);
@@ -1310,13 +1330,14 @@ export async function saveExtraction(
     const assigneeId = routerUserId ?? matched?.id ?? selfAssigneeId;
     const todoId = crypto.randomUUID();
     const todoSiteId = await resolveTodoSiteId(todo.site, todo.text);
+    const todoClientId = await resolveTodoClientId(todoSiteId);
     statements.push(
       db
         .prepare(
-          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id, context)
-           VALUES (?, ?, ?, ?, ?, 'llm', ?, ?)`
+          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id, context, client_caller_id)
+           VALUES (?, ?, ?, ?, ?, 'llm', ?, ?, ?)`
         )
-        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null, todoSiteId, todo.context || null)
+        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null, todoSiteId, todo.context || null, todoClientId)
     );
     if (assigneeId) {
       statements.push(
@@ -6900,6 +6921,7 @@ export async function mergeCallers(
     db.prepare(`DELETE FROM caller_sites WHERE caller_id = ?`).bind(merged.id),
     db.prepare(`UPDATE sites SET assigned_by_caller_id = ? WHERE assigned_by_caller_id = ?`).bind(survivor.id, merged.id),
     db.prepare(`UPDATE sites SET referred_by_caller_id = ? WHERE referred_by_caller_id = ?`).bind(survivor.id, merged.id),
+    db.prepare(`UPDATE todos SET client_caller_id = ? WHERE client_caller_id = ?`).bind(survivor.id, merged.id),
     db.prepare(`UPDATE OR IGNORE caller_aliases SET caller_id = ? WHERE caller_id = ?`).bind(survivor.id, merged.id),
     db.prepare(`DELETE FROM caller_aliases WHERE caller_id = ?`).bind(merged.id),
     db.prepare(`UPDATE caller_phones SET caller_id = ? WHERE caller_id = ?`).bind(survivor.id, merged.id),
@@ -7062,12 +7084,13 @@ const TASK_AUDIT_SELECT = `
               WHEN calls.recorded_for_site_id IS NOT NULL THEN 'site_memo'
               WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'desk'
               ELSE 'call' END AS call_kind,
-         callers.name AS client_name, callers.id AS client_id, callers.phone AS client_phone,
+         task_client.name AS client_name, task_client.id AS client_id, task_client.phone AS client_phone,
          work_events.site_id AS site_id
   FROM work_events
   LEFT JOIN todos ON work_events.item_kind = 'todo' AND todos.id = work_events.item_id
   LEFT JOIN calls ON calls.id = todos.call_id
   LEFT JOIN callers ON callers.id = calls.client_id
+  LEFT JOIN callers AS task_client ON task_client.id = todos.client_caller_id
   LEFT JOIN site_tasks ON work_events.item_kind = 'site_task' AND site_tasks.id = work_events.item_id
   LEFT JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
   LEFT JOIN escalations AS complaint ON work_events.item_kind = 'complaint' AND complaint.id = work_events.item_id
@@ -7131,7 +7154,7 @@ export interface TaskTimeline {
   call_id: string | null;
   urgent: boolean;
   assignees: string[];
-  /** Call todos: the caller. Every task: the contacts linked to its site. */
+  /** Todos: the linked client (todos.client_caller_id). Every task: the contacts linked to its site. */
   client_name: string | null;
   client_phone: string | null;
   site_contacts: SiteContactRow[];
@@ -7160,12 +7183,10 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
                     todos.call_id AS call_id, todos.urgent_at IS NOT NULL AS urgent,
                     (SELECT group_concat(users.name, ', ') FROM todo_assignees JOIN users ON users.id = todo_assignees.user_id
                      WHERE todo_assignees.todo_id = todos.id) AS assignees,
-                    CASE WHEN calls.recorded_for_site_id IS NULL AND calls.uploaded_by_user_id IS NULL THEN callers.name END AS client_name,
-                    CASE WHEN calls.recorded_for_site_id IS NULL AND calls.uploaded_by_user_id IS NULL THEN callers.phone END AS client_phone
+                    callers.name AS client_name, callers.phone AS client_phone
              FROM todos
              LEFT JOIN sites ON sites.id = todos.site_id
-             LEFT JOIN calls ON calls.id = todos.call_id
-             LEFT JOIN callers ON callers.id = calls.client_id
+             LEFT JOIN callers ON callers.id = todos.client_caller_id
              WHERE todos.id = ?`
           )
           .bind(id)
