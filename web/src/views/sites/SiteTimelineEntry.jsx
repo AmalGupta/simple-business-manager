@@ -1,8 +1,20 @@
 import { Mic, FileText, Video, Image, Users } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtDate } from "../../lib/dates.js";
+import { parseSqliteUtc } from "../work/workDates.js";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 import { VoiceMemoDetail } from "./VoiceMemoDetail.jsx";
+
+/* SBM-97 — date and time. Entries mix ISO timestamps (calls.recorded_at) and
+   SQLite UTC "yyyy-mm-dd hh:mm:ss" (media/team/edits), so parse as UTC; a
+   bare date (no time recorded) stays date-only rather than showing 5:30 am. */
+function fmtEntryWhen(ts) {
+  if (!ts) return "";
+  if (String(ts).length <= 10) return fmtDate(ts);
+  const d = parseSqliteUtc(ts);
+  if (!d) return "";
+  return d.toLocaleString("en-IN", { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
 
 /* ------------------------------------------------------------------
    Site timeline — unified activity feed (calls incl. voice notes, media
@@ -74,7 +86,7 @@ export function SiteTimelineEntry({ entry, onOpenCall, canManage, staffRoster = 
       />
       <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: t.edge2, marginBottom: 3 }}>
         {timelineEntryIcon(entry)}
-        <span>{fmtDate(entry.created_at)}</span>
+        <span>{fmtEntryWhen(entry.created_at)}</span>
         {entry.actor_name && <span>· {entry.actor_name}</span>}
       </div>
       {content()}
