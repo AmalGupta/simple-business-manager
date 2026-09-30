@@ -118,6 +118,14 @@
   gap: 8px 12px;
 }
 
+.sbm-open-todo-card__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .sbm-open-todo-card__call {
   all: unset;
   cursor: pointer;
