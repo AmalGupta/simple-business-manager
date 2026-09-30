@@ -5389,6 +5389,11 @@ export interface AssignedTodoRow {
   assignees: TodoAssignee[];
   /** Present on Blocked bookmark rows — call-level unresolved that put the card here. */
   unresolved?: UnresolvedRow[];
+  /** SBM-92 — todos.client_caller_id, and the contacts linked to site_id (admin Open tasks). */
+  client_contact_id?: string | null;
+  client_contact_name?: string | null;
+  client_contact_phone?: string | null;
+  site_contacts?: SiteContactRow[];
 }
 
 /** Open call todos for one site — confirmed-sites Open-count popup. */
@@ -5652,10 +5657,14 @@ export async function listOpenTodosByAssigneeBucket(
               todos.created_at AS created_at,
               todos.site_id AS site_id,
               todo_sites.name AS site_name,
-              calls.unresolved AS unresolved_json
+              calls.unresolved AS unresolved_json,
+              todo_client.id AS client_contact_id,
+              todo_client.name AS client_contact_name,
+              todo_client.phone AS client_contact_phone
        FROM todos
        JOIN calls ON calls.id = todos.call_id
        LEFT JOIN callers ON callers.id = calls.client_id
+       LEFT JOIN callers AS todo_client ON todo_client.id = todos.client_caller_id
        LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
        LEFT JOIN sites AS todo_sites ON todo_sites.id = todos.site_id
        WHERE ${whereSql}
@@ -5703,7 +5712,7 @@ export async function listOpenTodosByAssigneeBucket(
       unresolved: parseUnresolvedArray(unresolved_json),
     };
   });
-  return { items, total, limit, offset };
+  return { items: await attachSiteContacts(db, items), total, limit, offset };
 }
 
 /** Tab badge counts for admin Open tasks (same partition + date window as the list). */
