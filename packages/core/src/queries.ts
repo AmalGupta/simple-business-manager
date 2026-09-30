@@ -250,6 +250,21 @@ export async function linkStaffUserContact(db: D1Database, userId: string): Prom
     .run();
 }
 
+/** A login's own directory contact — linked by staff_user_id, else by its phone. */
+export async function findCallerForUser(
+  db: D1Database,
+  userId: string,
+  phone: string | null | undefined
+): Promise<{ id: string; name: string; phone: string | null } | null> {
+  const linked = await db
+    .prepare(`SELECT id, name, phone FROM callers WHERE staff_user_id = ? LIMIT 1`)
+    .bind(userId)
+    .first<{ id: string; name: string; phone: string | null }>();
+  if (linked) return linked;
+  const byPhone = await findCallerByPhone(db, phone);
+  return byPhone ? { id: byPhone.id, name: byPhone.name, phone: byPhone.phone } : null;
+}
+
 export async function getCallerById(db: D1Database, id: string): Promise<Caller | null> {
   const row = await db.prepare(`SELECT * FROM callers WHERE id = ?`).bind(id).first<Caller>();
   return row ?? null;
@@ -2608,8 +2623,13 @@ export interface SiteRow {
   sector: string | null;
   city: string | null;
   poc_contact_number: string | null;
+  /** The linked contact's current name when set (migration 0054), else the legacy text. */
   assigned_by: string | null;
   referred_by: string | null;
+  assigned_by_caller_id: string | null;
+  assigned_by_phone: string | null;
+  referred_by_caller_id: string | null;
+  referred_by_phone: string | null;
   site_location: string | null;
   target_closure_date: string | null;
   /** migration 0028 — the call this name came from, NULL for seeds and manual adds. */
@@ -2631,8 +2651,9 @@ export interface SiteIntakeDetails {
   address?: string | null;
   poc_name?: string | null;
   poc_contact_number?: string | null;
-  assigned_by?: string | null;
-  referred_by?: string | null;
+  /** SBM-83 — Callers Directory ids; the text columns are resolved from them. */
+  assigned_by_caller_id?: string | null;
+  referred_by_caller_id?: string | null;
   site_location?: string | null;
 }
 
@@ -2652,7 +2673,11 @@ export interface SiteIntakeDetails {
  * from being re-read in local time and landing on the wrong day.
  */
 const SITE_ROW_SELECT = `SELECT sites.id, sites.name, sites.site_name_being_used, sites.is_confirmed, sites.address, sites.poc_name,
-  sites.house_no, sites.sector, sites.city, sites.poc_contact_number, sites.assigned_by, sites.referred_by,
+  sites.house_no, sites.sector, sites.city, sites.poc_contact_number,
+  COALESCE(assigned_c.name, sites.assigned_by) AS assigned_by,
+  COALESCE(referred_c.name, sites.referred_by) AS referred_by,
+  sites.assigned_by_caller_id, assigned_c.phone AS assigned_by_phone,
+  sites.referred_by_caller_id, referred_c.phone AS referred_by_phone,
   sites.site_location, sites.target_closure_date, sites.discovered_from_call_id,
   callers.id AS discovered_from_caller_id,
   callers.name AS discovered_from_caller_name,
@@ -2660,7 +2685,9 @@ const SITE_ROW_SELECT = `SELECT sites.id, sites.name, sites.site_name_being_used
   substr(COALESCE(calls.recording_date, calls.recorded_at), 1, 10) AS discovered_from_call_date
   FROM sites
   LEFT JOIN calls ON calls.id = sites.discovered_from_call_id
-  LEFT JOIN callers ON callers.id = calls.client_id`;
+  LEFT JOIN callers ON callers.id = calls.client_id
+  LEFT JOIN callers assigned_c ON assigned_c.id = sites.assigned_by_caller_id
+  LEFT JOIN callers referred_c ON referred_c.id = sites.referred_by_caller_id`;
 
 /** The " | CL. " that separates the address half from the client half. */
 export const SITE_CLIENT_SEPARATOR = " | CL. ";
@@ -2778,10 +2805,42 @@ function normalizeIntake(details: SiteIntakeDetails) {
     address: composeSiteAddress(details),
     poc_name: trim(details.poc_name),
     poc_contact_number: trim(details.poc_contact_number),
-    assigned_by: trim(details.assigned_by),
-    referred_by: trim(details.referred_by),
+    assigned_by_caller_id: trim(details.assigned_by_caller_id),
+    referred_by_caller_id: trim(details.referred_by_caller_id),
     site_location: trim(details.site_location),
   };
+}
+
+export class SiteContactRefError extends Error {}
+
+const SITE_CONTACT_REFS = [
+  ["assigned_by_caller_id", "assigned_by"],
+  ["referred_by_caller_id", "referred_by"],
+] as const;
+
+/**
+ * SBM-83 — Assigned by / Referred by are directory contacts. For each
+ * `*_caller_id` present in `patch`, writes the matching text column from
+ * the contact's name (or clears it with the id). An unknown id throws
+ * SiteContactRefError so the handler can 400 instead of storing a dangling
+ * link.
+ */
+async function resolveSiteContactRefs(
+  db: D1Database,
+  patch: Partial<Record<SitePatchField, string | null>>
+): Promise<void> {
+  for (const [idKey, textKey] of SITE_CONTACT_REFS) {
+    if (!(idKey in patch)) continue;
+    const callerId = patch[idKey];
+    if (!callerId) {
+      patch[idKey] = null;
+      patch[textKey] = null;
+      continue;
+    }
+    const caller = await db.prepare(`SELECT name FROM callers WHERE id = ?`).bind(callerId).first<{ name: string }>();
+    if (!caller) throw new SiteContactRefError(`${textKey.replace("_", " ")}: contact not found`);
+    patch[textKey] = caller.name;
+  }
 }
 
 /** All sites regardless of confirmation state — the review screen needs to see everything. */
@@ -2830,7 +2889,10 @@ const SITE_PATCH_FIELDS = [
   "sector",
   "city",
   "poc_contact_number",
+  /* Callers write the ids; the text columns are filled by resolveSiteContactRefs. */
+  "assigned_by_caller_id",
   "assigned_by",
+  "referred_by_caller_id",
   "referred_by",
   "site_location",
   "target_closure_date",
@@ -2867,6 +2929,8 @@ export async function updateSite(
   patch: Partial<Record<SitePatchField, string | null>>,
   actorUserId?: string | null
 ): Promise<SiteRow | null> {
+  patch = { ...patch };
+  await resolveSiteContactRefs(db, patch);
   const fields = SITE_PATCH_FIELDS.filter((f) => f in patch);
   if (fields.length > 0) {
     /* Read before the UPDATE lands: the rename summary below is the only
@@ -2997,21 +3061,27 @@ export async function createSite(
         sector: intake.sector,
         city: intake.city,
         poc_contact_number: intake.poc_contact_number,
-        assigned_by: intake.assigned_by,
-        referred_by: intake.referred_by,
+        /* Only when picked — staff adds send neither and must not wipe an admin's pick. */
+        ...(intake.assigned_by_caller_id ? { assigned_by_caller_id: intake.assigned_by_caller_id } : {}),
+        ...(intake.referred_by_caller_id ? { referred_by_caller_id: intake.referred_by_caller_id } : {}),
         site_location: intake.site_location,
       },
       actorUserId ?? null
     );
     site = updated ?? existing;
   } else {
+    const refs: Partial<Record<SitePatchField, string | null>> = {
+      assigned_by_caller_id: intake.assigned_by_caller_id,
+      referred_by_caller_id: intake.referred_by_caller_id,
+    };
+    await resolveSiteContactRefs(db, refs);
     const id = crypto.randomUUID();
     await db.batch([
       db
         .prepare(
           `INSERT INTO sites (id, name, site_name_being_used, is_confirmed, address, poc_name, house_no, sector, city,
-           poc_contact_number, assigned_by, referred_by, site_location)
-           VALUES (?, ?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           poc_contact_number, assigned_by_caller_id, assigned_by, referred_by_caller_id, referred_by, site_location)
+           VALUES (?, ?, ?, 'Y', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           id,
@@ -3023,8 +3093,10 @@ export async function createSite(
           intake.sector,
           intake.city,
           intake.poc_contact_number,
-          intake.assigned_by,
-          intake.referred_by,
+          refs.assigned_by_caller_id ?? null,
+          refs.assigned_by ?? null,
+          refs.referred_by_caller_id ?? null,
+          refs.referred_by ?? null,
           intake.site_location
         ),
       db
@@ -6773,6 +6845,8 @@ export async function mergeCallers(
       .prepare(`INSERT OR IGNORE INTO caller_sites (caller_id, site_id) SELECT ?, site_id FROM caller_sites WHERE caller_id = ?`)
       .bind(survivor.id, merged.id),
     db.prepare(`DELETE FROM caller_sites WHERE caller_id = ?`).bind(merged.id),
+    db.prepare(`UPDATE sites SET assigned_by_caller_id = ? WHERE assigned_by_caller_id = ?`).bind(survivor.id, merged.id),
+    db.prepare(`UPDATE sites SET referred_by_caller_id = ? WHERE referred_by_caller_id = ?`).bind(survivor.id, merged.id),
     db.prepare(`UPDATE OR IGNORE caller_aliases SET caller_id = ? WHERE caller_id = ?`).bind(survivor.id, merged.id),
     db.prepare(`DELETE FROM caller_aliases WHERE caller_id = ?`).bind(merged.id),
     db.prepare(`UPDATE caller_phones SET caller_id = ? WHERE caller_id = ?`).bind(survivor.id, merged.id),

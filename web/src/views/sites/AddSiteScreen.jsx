@@ -6,6 +6,8 @@ import { patchSite, postSiteMedia, postSiteVoiceNote } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
+import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
+import { SiteContactField } from "./SiteContactField.jsx";
 import { useT } from "../../lib/i18n.jsx";
 
 const labelStyle = {
@@ -52,16 +54,24 @@ const actionTileStyle = (disabled) => ({
  * post-create photo, voice note, GPS pin, and measurement upload actions.
  * Voice notes use the same calls/STT pipeline as SiteView; transcript
  * appears on the sites page timeline for admin only.
+ *
+ * Assigned by / Referred by are directory contacts (SBM-83), picked with
+ * AssociateContactsModal; `defaultAssignedBy` is the signed-in user's own
+ * contact (`{ caller_id, name, phone }`) when they have one. The Contacts
+ * directory is admin-only, so for staff (`canPickContacts` false) both
+ * fields are hidden and an admin fills them later from Review sites or
+ * the site page.
  */
-export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = "" }) {
+export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = null, canPickContacts = false }) {
   const tr = useT();
   const [houseNo, setHouseNo] = useState("");
   const [sector, setSector] = useState("");
   const [city, setCity] = useState("");
   const [pocName, setPocName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
-  const [assignedBy, setAssignedBy] = useState(defaultAssignedBy);
-  const [referredBy, setReferredBy] = useState("");
+  const [assignedBy, setAssignedBy] = useState(canPickContacts ? defaultAssignedBy : null);
+  const [referredBy, setReferredBy] = useState(null);
+  const [pickingField, setPickingField] = useState(null);
   const [siteLocation, setSiteLocation] = useState("");
   const [createdSite, setCreatedSite] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -78,8 +88,8 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
     city: city.trim() || null,
     poc_name: pocName.trim() || null,
     poc_contact_number: contactNumber.trim() || null,
-    assigned_by: assignedBy.trim() || null,
-    referred_by: referredBy.trim() || null,
+    assigned_by_caller_id: assignedBy?.caller_id || null,
+    referred_by_caller_id: referredBy?.caller_id || null,
     site_location: siteLocation.trim() || null,
   });
 
@@ -165,12 +175,26 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
           <FieldRow label={tr("fieldContactNumber")}>
             <input placeholder={tr("phPhone")} value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} style={TEXT_INPUT_STYLE} />
           </FieldRow>
-          <FieldRow label={tr("fieldAssignedBy")}>
-            <input placeholder={tr("phAssignedBy")} value={assignedBy} onChange={(e) => setAssignedBy(e.target.value)} style={TEXT_INPUT_STYLE} />
-          </FieldRow>
-          <FieldRow label={tr("fieldReferredBy")}>
-            <input placeholder={tr("phReferredBy")} value={referredBy} onChange={(e) => setReferredBy(e.target.value)} style={TEXT_INPUT_STYLE} />
-          </FieldRow>
+          {canPickContacts && (
+            <>
+              <FieldRow label={tr("fieldAssignedBy")}>
+                <SiteContactField
+                  value={assignedBy}
+                  placeholder={tr("phAssignedBy")}
+                  onChoose={() => setPickingField("assigned_by")}
+                  onClear={() => setAssignedBy(null)}
+                />
+              </FieldRow>
+              <FieldRow label={tr("fieldReferredBy")}>
+                <SiteContactField
+                  value={referredBy}
+                  placeholder={tr("phReferredBy")}
+                  onChoose={() => setPickingField("referred_by")}
+                  onClear={() => setReferredBy(null)}
+                />
+              </FieldRow>
+            </>
+          )}
           {siteLocation && (
             <FieldRow label={tr("fieldLocation")}>
               <span style={{ fontSize: 13, color: t.edge2 }}>{siteLocation}</span>
@@ -278,6 +302,20 @@ export function AddSiteScreen({ onBack, onCreate, onDone, defaultAssignedBy = ""
         {saving ? tr("saving") : createdSite ? tr("done") : tr("saveSite")}
       </button>
 
+      {pickingField && (
+        <AssociateContactsModal
+          site={null}
+          pick={{
+            title: `${tr(pickingField === "assigned_by" ? "fieldAssignedBy" : "fieldReferredBy")} — ${tr("chooseContact")}`,
+            onPick: (caller) => {
+              const value = { caller_id: caller.id, name: caller.name, phone: caller.phone || null };
+              (pickingField === "assigned_by" ? setAssignedBy : setReferredBy)(value);
+              setPickingField(null);
+            },
+          }}
+          onClose={() => setPickingField(null)}
+        />
+      )}
       {showVoiceModal && (
         <VoiceNoteModal
           onClose={() => setShowVoiceModal(false)}
