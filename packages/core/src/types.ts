@@ -268,6 +268,10 @@ export interface Todo {
 export interface TodoAssignee {
   id: string;
   name: string;
+  /** Read receipts (migration 0055): delivered = assigned_at, seen = seen_at. */
+  assigned_at?: string | null;
+  seen_at?: string | null;
+  assigned_by_name?: string | null;
 }
 
 export interface TodoAssigneeRow {

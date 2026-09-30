@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { todayIso } from "../../lib/dates.js";
-import { fetchAssignedWork, fetchStaffRoster, patchWork, postWorkHandoff } from "../../lib/api.js";
+import { fetchAssignedWork, fetchStaffRoster, patchWork, postTodosSeen, postWorkHandoff } from "../../lib/api.js";
 import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
@@ -163,6 +163,29 @@ export function AssignedWorkView({
     [items, filter]
   );
   const groups = useMemo(() => groupBySite(visible, today), [visible, today]);
+
+  /* Read receipts: the todos on screen right now count as seen — only on the
+     staff member's own screen (an admin's bookmark view passes forUserId),
+     and only while the tab is actually visible. */
+  const reportedSeen = useRef(new Set());
+  useEffect(() => {
+    if (forUserId) return undefined;
+    const report = () => {
+      if (document.visibilityState !== "visible") return;
+      const ids = visible
+        .filter((i) => i.kind === "todo" && !reportedSeen.current.has(i.id))
+        .map((i) => i.id);
+      if (ids.length === 0) return;
+      for (const id of ids) reportedSeen.current.add(id);
+      postTodosSeen(ids).catch((err) => {
+        for (const id of ids) reportedSeen.current.delete(id);
+        console.error("[sbm] failed to mark todos seen", err);
+      });
+    };
+    report();
+    document.addEventListener("visibilitychange", report);
+    return () => document.removeEventListener("visibilitychange", report);
+  }, [visible, forUserId]);
 
   return (
     <div>
