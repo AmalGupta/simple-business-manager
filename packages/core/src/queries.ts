@@ -2886,7 +2886,11 @@ export function composeSiteNameBeingUsed(site: {
   const city = clean(site.city);
   const client = clean(site.poc_name);
   const phone = clean(site.poc_contact_number);
-  const freeform = clean(site.address);
+  /* Structured fields win. For an intake site `address` is derived from them
+     (composeSiteAddress: "H.No 244, Sector IAS, PCS"), so reading it here
+     would smuggle a lone house number back in ("name | H.No H.NO 244"). Only
+     a legacy row with nothing but free-text address falls back to it. */
+  const freeform = houseNo || sector || city ? null : clean(site.address);
   const locality = sector && city ? `${sector}-${city}` : (sector ?? city);
   const fullAddress = houseNo && locality ? `#${houseNo}, ${locality}` : null;
   /* Partial address from details — never a lone house number (that drops
