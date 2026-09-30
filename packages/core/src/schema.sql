@@ -301,6 +301,9 @@ CREATE TABLE todo_assignees (
   assigned_at         TEXT NOT NULL DEFAULT (datetime('now')),
   -- migration 0044: the day this assignee plans to do it (staff roster).
   scheduled_for       TEXT,
+  -- migration 0055: first time the assignee's Assigned work showed it
+  -- (read receipt — assigned_at is "delivered").
+  seen_at             TEXT,
   PRIMARY KEY (todo_id, user_id)
 );
 

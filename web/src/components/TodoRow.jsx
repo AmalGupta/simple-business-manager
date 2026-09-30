@@ -6,6 +6,7 @@ import { useT } from "../lib/i18n.jsx";
 import { useTodoPermissions } from "../lib/todoPermissions.jsx";
 import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../styles.js";
 import { TodoContext } from "./TodoContext.jsx";
+import { useTodoReceipt } from "./TodoReceipt.jsx";
 
 /* Sentence-format rendering of a structured todo — same {owner, text,
    due_date} the extraction pipeline already produces via forced tool-use
@@ -73,11 +74,13 @@ function ConfirmDone({ busy, onConfirm, onCancel }) {
 /**
  * Checklist row — text + optional due on the right.
  * `embedded` = OpenTodoCard / Studio card body (no CallCard frost borders).
+ * `showReceipt={false}` when the parent places the read receipt itself.
  */
-export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = false }) {
+export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = false, showReceipt = true }) {
   const parked = todo.status === "snoozed";
   const urgent = isUrgent(todo);
   const { done, showCheck, checkEnabled, onCheck, confirming, confirm, cancel } = useDoneControl(todo, onToggle, readOnly);
+  const receipt = useTodoReceipt(showReceipt ? todo : null);
   const Icon = done ? Check : parked ? Clock : Circle;
   const label = done ? `Reopen: ${todo.text}` : `Mark done: ${todo.text}`;
 
@@ -89,6 +92,7 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = fal
     return (
       <div
         className={`sbm-todo-row${done ? " is-done" : ""}${busy ? " is-busy" : ""}`}
+        onContextMenu={receipt.onContextMenu}
       >
         {showCheck ? (
           <button
@@ -114,12 +118,15 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = fal
               {fmtShort(todo.due_date)}
             </span>
           ) : null)}
+        {receipt.ticks}
+        {receipt.overlay}
       </div>
     );
   }
 
   return (
     <div
+      onContextMenu={receipt.onContextMenu}
       style={{
         display: "flex",
         alignItems: "center",
@@ -185,6 +192,8 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = fal
             {fmtShort(todo.due_date)}
           </span>
         ))}
+      {receipt.ticks}
+      {receipt.overlay}
     </div>
   );
 }

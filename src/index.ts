@@ -24,6 +24,7 @@ import {
   handleGetCallTranscripts,
   handleGetDashboardSummary,
   handleGetMyOpenTodos,
+  handlePostTodosSeen,
   handleGetOpenTodos,
   handleGetOpenTodosCounts,
   handleGetEscalations,
@@ -341,6 +342,11 @@ export default {
     if (url.pathname === "/api/todos/auto-assign" && request.method === "POST") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
       return handleAutoAssignTodos(request, env);
+    }
+
+    if (url.pathname === "/api/todos/seen" && request.method === "POST") {
+      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
+      return handlePostTodosSeen(request, env);
     }
 
     if (url.pathname === "/api/sites" && request.method === "GET") {
