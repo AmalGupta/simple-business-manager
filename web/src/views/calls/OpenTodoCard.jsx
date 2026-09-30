@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { fmtShort, isUrgent } from "../../lib/dates.js";
 import { TodoRow } from "../../components/TodoRow.jsx";
+import { TodoReceiptArea } from "../../components/TodoReceipt.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
 import { TodoAssigneeMeta, TodoCallExtractionMeta } from "./TodoFacts.jsx";
 import { TodoContext } from "../../components/TodoContext.jsx";
@@ -193,7 +194,7 @@ export function OpenTodoCard({
                 ) : null;
 
               return (
-                <div key={td.id} className="sbm-open-todo-card__todo">
+                <TodoReceiptArea key={td.id} todo={td} className="sbm-open-todo-card__todo">
                   {onToggle || readOnly ? (
                     <TodoRow
                       todo={td}
@@ -201,6 +202,7 @@ export function OpenTodoCard({
                       busy={isBusy(td)}
                       readOnly={readOnly || !onToggle}
                       embedded
+                      showReceipt={false}
                     />
                   ) : (
                     <p className="sbm-open-todo-card__text">
@@ -229,7 +231,7 @@ export function OpenTodoCard({
                       </div>
                     ) : null}
                   </div>
-                </div>
+                </TodoReceiptArea>
               );
             })}
           </div>

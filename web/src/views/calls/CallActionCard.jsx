@@ -8,6 +8,7 @@ import { TodoVoiceNoteButton } from "../../components/TodoVoiceNoteButton.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
 import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
 import { TodoContext } from "../../components/TodoContext.jsx";
+import { TodoReceiptArea } from "../../components/TodoReceipt.jsx";
 import "./CallActionCard.css";
 
 /* One card in the Calls Needing Action carousel — see
@@ -93,7 +94,7 @@ export function CallActionCard({
           <p className="cna-card__empty">No todos on this call.</p>
         ) : (
           todos.map((todo) => (
-            <div key={todo.id} className="cna-card__todo-row">
+            <TodoReceiptArea key={todo.id} todo={todo} className="cna-card__todo-row">
               <p className="cna-card__todo-text">
                 {todo.text}
                 <TodoContext text={todo.context} />
@@ -130,7 +131,7 @@ export function CallActionCard({
                   </div>
                 ) : null}
               </div>
-            </div>
+            </TodoReceiptArea>
           ))
         )}
       </div>

@@ -69,6 +69,7 @@ import {
   setCallSubmitted,
   setTodoAssignees,
   updateSite,
+  markTodosSeen,
   SiteContactRefError,
   updateTodo,
   type SessionWithUser,
@@ -370,6 +371,28 @@ export async function handleGetDashboardSummary(request: Request, env: Env): Pro
  * matches and backfills site_id — deliberately not on the home summary path.
  * Admin may pass ?for_user_id= when viewing a staff bookmark.
  */
+/**
+ * Read receipts — the caller's own Assigned work screen reports the todos it
+ * just showed. Only ever stamps the session user's own assignment rows, so
+ * an admin viewing a staff bookmark can't mark anything seen for them.
+ */
+export async function handlePostTodosSeen(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const raw = (body as { todo_ids?: unknown })?.todo_ids;
+  if (!Array.isArray(raw) || raw.length > 500 || raw.some((id) => typeof id !== "string" || !id)) {
+    return json({ error: "todo_ids must be an array of up to 500 ids" }, 400);
+  }
+  const marked = await markTodosSeen(env.DB, session.user_id, raw as string[]);
+  return json({ marked });
+}
+
 export async function handleGetMyOpenTodos(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
