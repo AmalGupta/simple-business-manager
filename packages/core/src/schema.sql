@@ -282,6 +282,9 @@ CREATE TABLE todos (
   -- migration 0053 (SBM-82): set when an admin routes it (saves assignees).
   -- A todo can't be marked done while NULL.
   routed_at         TEXT,
+  -- migration 0056 (SBM-92): the client contact this todo is for, set by
+  -- saveExtraction — the caller on a phone call, else the todo site's sole contact.
+  client_caller_id  TEXT REFERENCES callers(id) ON DELETE SET NULL,
 
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 

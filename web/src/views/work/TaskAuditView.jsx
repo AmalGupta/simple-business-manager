@@ -58,10 +58,7 @@ function TaskLink({ e, onOpenTask }) {
           {e.site_name ? ` · ${e.site_name}` : ""}
         </span>
       </button>
-      <TaskContacts
-        contacts={taskContacts(e.call_kind === "call" ? e : { site_contacts: e.site_contacts })}
-        style={{ marginTop: 2 }}
-      />
+      <TaskContacts contacts={taskContacts(e)} style={{ marginTop: 2 }} />
     </div>
   );
 }
