@@ -5,6 +5,7 @@ import { CALLER_CATEGORIES, canonicalPhoneKey, isStaffCategory, normalizeCallerP
 import { isUnsavedPhoneContact, SQL_CALLER_UNSAVED_CONTACT } from "./caller-name";
 import { pickExistingSiteId, type SiteMatchCandidate } from "./site-match";
 import { effectiveWorkLocation, type WorkLocation } from "./work-location";
+import { resolveAllScopes, type ScopeLevel } from "./scopes";
 import type {
   AppRequest,
   Call,
@@ -822,6 +823,84 @@ export async function setUserSetting(db: D1Database, userId: string, key: string
     )
     .bind(userId, key, value)
     .run();
+}
+
+// ---------------------------------------------------------------------------
+// SBM-81 — view-as scopes (see packages/core/src/scopes.ts)
+// ---------------------------------------------------------------------------
+
+export async function listScopeRoleGrants(db: D1Database): Promise<{ role: string; scope_key: string; level: string }[]> {
+  const { results } = await db
+    .prepare(`SELECT role, scope_key, level FROM scope_role_grants`)
+    .all<{ role: string; scope_key: string; level: string }>();
+  return results ?? [];
+}
+
+export async function listScopeUserOverrides(
+  db: D1Database,
+  userId?: string
+): Promise<{ user_id: string; scope_key: string; level: string }[]> {
+  const stmt = userId
+    ? db.prepare(`SELECT user_id, scope_key, level FROM scope_user_overrides WHERE user_id = ?`).bind(userId)
+    : db.prepare(`SELECT user_id, scope_key, level FROM scope_user_overrides`);
+  const { results } = await stmt.all<{ user_id: string; scope_key: string; level: string }>();
+  return results ?? [];
+}
+
+export async function upsertScopeRoleGrant(
+  db: D1Database,
+  role: string,
+  scopeKey: string,
+  level: string,
+  updatedBy: string
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO scope_role_grants (role, scope_key, level, updated_by, updated_at) VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(role, scope_key) DO UPDATE SET level = excluded.level, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+    )
+    .bind(role, scopeKey, level, updatedBy)
+    .run();
+}
+
+export async function deleteScopeRoleGrant(db: D1Database, role: string, scopeKey: string): Promise<void> {
+  await db.prepare(`DELETE FROM scope_role_grants WHERE role = ? AND scope_key = ?`).bind(role, scopeKey).run();
+}
+
+export async function upsertScopeUserOverride(
+  db: D1Database,
+  userId: string,
+  scopeKey: string,
+  level: string,
+  updatedBy: string
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO scope_user_overrides (user_id, scope_key, level, updated_by, updated_at) VALUES (?, ?, ?, ?, datetime('now'))
+       ON CONFLICT(user_id, scope_key) DO UPDATE SET level = excluded.level, updated_by = excluded.updated_by, updated_at = excluded.updated_at`
+    )
+    .bind(userId, scopeKey, level, updatedBy)
+    .run();
+}
+
+export async function deleteScopeUserOverride(db: D1Database, userId: string, scopeKey: string): Promise<void> {
+  await db.prepare(`DELETE FROM scope_user_overrides WHERE user_id = ? AND scope_key = ?`).bind(userId, scopeKey).run();
+}
+
+/** Active admins/superadmins — the people a per-user scope override can target. */
+export async function listScopeSubjects(db: D1Database): Promise<{ id: string; name: string; role: string }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, name, role FROM users WHERE role IN ('admin','superadmin') AND disabled_at IS NULL ORDER BY name ASC`
+    )
+    .all<{ id: string; name: string; role: string }>();
+  return results ?? [];
+}
+
+/** Resolved view-as scopes for an admin/superadmin (registry + role grants + their own overrides). */
+export async function getEffectiveScopes(db: D1Database, userId: string, role: string): Promise<Record<string, ScopeLevel>> {
+  const [grants, overrides] = await Promise.all([listScopeRoleGrants(db), listScopeUserOverrides(db, userId)]);
+  return resolveAllScopes(role, grants, overrides);
 }
 
 export function parseDrivePollProgress(raw: string | null): DrivePollProgress | null {

@@ -1,11 +1,15 @@
 import { AssignedWorkTile } from "../work/AssignedWorkTile.jsx";
 import { SiteVisitTile } from "../site-visit/SiteVisitTile.jsx";
 import { ComplaintsTile } from "../site-visit/ComplaintsTile.jsx";
+import { ScopeGate, useViewAsReadOnly } from "../../lib/scopes.jsx";
+import { t } from "../../theme.js";
 
 /* Staff home tile grid — used for staff login and when an admin opens a
    staff bookmark on home. Data is already scoped to that staff member.
    Tiles only (staff roster, migration 0044): Assigned work (call todos +
-   site tasks, planned per day), Site visit, Complaints. */
+   site tasks, planned per day), Site visit, Complaints.
+   SBM-81: when an admin views this, each tile is gated by its page scope
+   (Manage scopes); a "View only" chip shows while anything is read-only. */
 export function StaffHomePanel({
   openSiteTasks,
   myOpenTodosCount,
@@ -19,26 +23,52 @@ export function StaffHomePanel({
   onOpenComplaints,
 }) {
   const confirmedSites = (sites ?? []).filter((s) => s.is_confirmed !== "N");
+  const readOnly = useViewAsReadOnly();
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-        gap: 12,
-        marginBottom: "1.5rem",
-      }}
-    >
-      <AssignedWorkTile
-        count={(myOpenTodosCount ?? 0) + openSiteTasks.length}
-        urgentCount={urgentWorkCount}
-        complaintsCount={assignedComplaintsCount}
-        onOpen={onOpenAssignedWork}
-      />
+    <>
+      {readOnly && (
+        <p
+          data-testid="view-only-chip"
+          style={{
+            display: "inline-block",
+            margin: "0 0 12px",
+            padding: "2px 8px",
+            fontSize: 12,
+            fontWeight: 700,
+            color: t.edge2,
+            border: `1px solid ${t.frost}`,
+            borderRadius: 6,
+          }}
+        >
+          View only
+        </p>
+      )}
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          gap: 12,
+          marginBottom: "1.5rem",
+        }}
+      >
+        <ScopeGate scope="staff.assigned_work">
+          <AssignedWorkTile
+            count={(myOpenTodosCount ?? 0) + openSiteTasks.length}
+            urgentCount={urgentWorkCount}
+            complaintsCount={assignedComplaintsCount}
+            onOpen={onOpenAssignedWork}
+          />
+        </ScopeGate>
 
-      <SiteVisitTile count={confirmedSites.length} onOpen={onOpenSiteVisit} />
+        <ScopeGate scope="staff.site_visit">
+          <SiteVisitTile count={confirmedSites.length} onOpen={onOpenSiteVisit} />
+        </ScopeGate>
 
-      <ComplaintsTile refreshKey={complaintsRefreshKey} forUserId={forUserId} onOpen={onOpenComplaints} />
-    </div>
+        <ScopeGate scope="staff.complaints">
+          <ComplaintsTile refreshKey={complaintsRefreshKey} forUserId={forUserId} onOpen={onOpenComplaints} />
+        </ScopeGate>
+      </div>
+    </>
   );
 }
