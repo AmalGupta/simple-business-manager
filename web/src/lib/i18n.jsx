@@ -340,6 +340,8 @@ const STRINGS = {
   yourTasksHere: { en: "Your tasks here", hi: "यहाँ आपके काम", pa: "ਇੱਥੇ ਤੁਹਾਡੇ ਕੰਮ" },
   dueDate: { en: "Due {date}", hi: "{date} तक", pa: "{date} ਤੱਕ" },
   markDone: { en: "Mark done", hi: "हो गया", pa: "ਹੋ ਗਿਆ" },
+  confirmMarkDone: { en: "Mark this done?", hi: "क्या यह काम हो गया?", pa: "ਕੀ ਇਹ ਕੰਮ ਹੋ ਗਿਆ?" },
+  yesDone: { en: "Yes, done", hi: "हाँ, हो गया", pa: "ਹਾਂ, ਹੋ ਗਿਆ" },
   handOffNext: { en: "{stage} — done. Hand off the next stage?", hi: "{stage} — हो गया। अगला काम किसी को दें?", pa: "{stage} — ਹੋ ਗਿਆ। ਅਗਲਾ ਕੰਮ ਕਿਸੇ ਨੂੰ ਦੇਣਾ?" },
   chooseStaff: { en: "Choose a staff member…", hi: "किसे दें चुनें…", pa: "ਕਿਸਨੂੰ ਦੇਣਾ ਚੁਣੋ…" },
   skip: { en: "Skip", hi: "छोड़ें", pa: "ਛੱਡੋ" },

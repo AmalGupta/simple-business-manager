@@ -37,6 +37,7 @@ import {
   getLatestVoiceNotesByTodoIds,
   getSitesNeedingAttention,
   getTodoById,
+  isTodoAwaitingRouting,
   getTodoRowWithAssignees,
   getUnreadActivityCounts,
   getUserById,
@@ -539,6 +540,12 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
     const existing = await getTodoById(env.DB, id);
     if (!existing) return json({ error: "not found" }, 404);
     if (!(await isTodoAssignee(env.DB, id, session.user_id))) return json({ error: "forbidden" }, 403);
+    if (existing.status === "done" && "status" in record && record.status !== "done") {
+      return json({ error: "only an admin can reopen a done todo" }, 403);
+    }
+    if (record.status === "done" && existing.status !== "done" && (await isTodoAwaitingRouting(env.DB, existing))) {
+      return json({ error: "route this todo before marking it done" }, 409);
+    }
     const patch: Partial<Record<(typeof TODO_PATCH_KEYS)[number], string | null>> = {};
     for (const key of TODO_PATCH_KEYS) {
       if (key in record) patch[key] = record[key] as string | null;
@@ -582,6 +589,14 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
   }
 
   const existing = await getTodoById(env.DB, id);
+  if (
+    existing &&
+    record.status === "done" &&
+    existing.status !== "done" &&
+    (await isTodoAwaitingRouting(env.DB, existing))
+  ) {
+    return json({ error: "route this todo before marking it done" }, 409);
+  }
   const updated = await updateTodo(env.DB, id, patch);
   if (!updated) return json({ error: "not found" }, 404);
   if (existing) {
