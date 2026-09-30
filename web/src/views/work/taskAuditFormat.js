@@ -72,6 +72,7 @@ export function auditDayKey(e) {
 export function callKindLabel(e) {
   if (e.call_kind === "desk") return "Desk conversation";
   if (e.call_kind === "site_memo") return "Site voice note";
-  if (e.call_kind === "call") return e.client_name ? `Call · ${e.client_name}` : "Call";
+  /* The caller is listed with the site's contacts (TaskContacts). */
+  if (e.call_kind === "call") return "Call";
   return e.item_kind === "site_task" ? "Site task" : "";
 }

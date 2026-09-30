@@ -8,6 +8,7 @@ import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { fmtDateTime, parseSqliteUtc } from "./workDates.js";
 import { assignedToName, auditDayKey, callKindLabel, describeTransition } from "./taskAuditFormat.js";
+import { TaskContacts, taskContacts } from "./TaskContacts.jsx";
 
 const PAGE = 300;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -39,21 +40,29 @@ const fmtTime = (e) => {
 };
 
 /* The task name, clickable: opens the task's timeline together with the
-   call / desk conversation it came from (site tasks: timeline + site). */
+   call / desk conversation it came from (site tasks: timeline + site).
+   The client contacts sit under it, outside the button so their tel:
+   links stay valid HTML. */
 function TaskLink({ e, onOpenTask }) {
+  const kind = callKindLabel(e);
   return (
-    <button
-      type="button"
-      onClick={() => onOpenTask(e)}
-      style={{ all: "unset", cursor: "pointer", display: "block", marginTop: 2 }}
-    >
-      <span style={{ fontSize: 12, color: t.accent, fontWeight: 600 }}>{e.item_title ?? "(deleted task)"}</span>
-      <span style={{ fontSize: 11, color: t.edge2 }}>
-        {" "}
-        · {callKindLabel(e)}
-        {e.site_name ? ` · ${e.site_name}` : ""}
-      </span>
-    </button>
+    <div style={{ marginTop: 2 }}>
+      <button
+        type="button"
+        onClick={() => onOpenTask(e)}
+        style={{ all: "unset", cursor: "pointer", display: "block" }}
+      >
+        <span style={{ fontSize: 12, color: t.accent, fontWeight: 600 }}>{e.item_title ?? "(deleted task)"}</span>
+        <span style={{ fontSize: 11, color: t.edge2 }}>
+          {kind ? ` · ${kind}` : ""}
+          {e.site_name ? ` · ${e.site_name}` : ""}
+        </span>
+      </button>
+      <TaskContacts
+        contacts={taskContacts(e.call_kind === "call" ? e : { site_contacts: e.site_contacts })}
+        style={{ marginTop: 2 }}
+      />
+    </div>
   );
 }
 

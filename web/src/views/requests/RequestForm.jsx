@@ -17,8 +17,11 @@ const STATUS_META = {
   submitted: { bg: t.frostSoft, fg: t.accent, label: "Filed" },
   pending: { bg: t.frost, fg: t.edge2, label: "Uploading…" },
   transcribing: { bg: t.frost, fg: t.edge2, label: "Processing…" },
+  filing: { bg: t.frost, fg: t.edge2, label: "Processing…" },
   failed: { bg: t.signalBg, fg: t.signal, label: "Failed" },
 };
+
+const IN_FLIGHT = new Set(["pending", "transcribing", "filing"]);
 
 const REQUESTS_GRID_CSS = `
 .sbm-requests-grid.ag-theme-quartz {
@@ -133,7 +136,7 @@ export function RequestForm({ onBack }) {
   useEffect(refresh, [refresh]);
 
   useEffect(() => {
-    const inFlight = requests?.some((r) => r.status === "pending" || r.status === "transcribing");
+    const inFlight = requests?.some((r) => IN_FLIGHT.has(r.status));
     if (!inFlight) return;
     const id = setInterval(refresh, 4000);
     return () => clearInterval(id);
@@ -191,7 +194,7 @@ export function RequestForm({ onBack }) {
         minWidth: 160,
         valueGetter: (p) => {
           if (p.data?.title) return p.data.title;
-          if (p.data?.status === "pending" || p.data?.status === "transcribing") return "Processing…";
+          if (IN_FLIGHT.has(p.data?.status)) return "Processing…";
           if (p.data?.status === "failed") return "Failed to file";
           return "—";
         },
