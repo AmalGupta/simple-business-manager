@@ -1396,6 +1396,9 @@ export async function saveExtraction(
   };
 
   const routerUserId = await getTodoRouterUserId(db);
+  /* Desk conversation: recorded in-app (uploaded_by) with no site — only
+     POST /api/desk-voice-note (admin-only) writes that shape. */
+  const isDeskConversation = Boolean(assignedByUserId) && !recordedForSiteId;
   for (const todo of extraction.todos) {
     const matched = matchStaffByOwner(todo.owner, staff, aliasRows);
     /* Desk/site memos: owner "self" → claim for the recorder so My call tasks
@@ -1405,18 +1408,33 @@ export async function saveExtraction(
       !matched && assignedByUserId && normalizeOwnerName(todo.owner ?? "") === "self"
         ? assignedByUserId
         : null;
-    // Router set (migration 0045): the owner routes every todo himself.
-    const assigneeId = routerUserId ?? matched?.id ?? selfAssigneeId;
+    /* SBM-96 — a desk conversation is recorded by an admin, so the owner said
+       in it is already the admin's routing decision: assign straight to that
+       person and mark it routed. Only an owner we can't match falls back to
+       the router. */
+    const deskAssigneeId = isDeskConversation ? (matched?.id ?? selfAssigneeId) : null;
+    // Router set (migration 0045): the owner routes every other todo himself.
+    const assigneeId = deskAssigneeId ?? routerUserId ?? matched?.id ?? selfAssigneeId;
     const todoId = crypto.randomUUID();
     const todoSiteId = await resolveTodoSiteId(todo.site, todo.text);
     const todoClientId = await resolveTodoClientId(todoSiteId);
     statements.push(
       db
         .prepare(
-          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id, context, client_caller_id)
-           VALUES (?, ?, ?, ?, ?, 'llm', ?, ?, ?)`
+          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id, context, client_caller_id, routed_at)
+           VALUES (?, ?, ?, ?, ?, 'llm', ?, ?, ?, CASE WHEN ? THEN datetime('now') END)`
         )
-        .bind(todoId, callId, todo.owner, todo.text, todo.due_date || null, todoSiteId, todo.context || null, todoClientId)
+        .bind(
+          todoId,
+          callId,
+          todo.owner,
+          todo.text,
+          todo.due_date || null,
+          todoSiteId,
+          todo.context || null,
+          todoClientId,
+          deskAssigneeId ? 1 : 0
+        )
     );
     if (assigneeId) {
       statements.push(
