@@ -622,6 +622,52 @@ export async function postConfirmCallerStaffPromotion(callerId, { login_name, pi
   return res.json();
 }
 
+/* SBM-81 — view-as. While an admin is on a staff-bookmark tab, every same-origin
+   /api request carries X-SBM-View-As so the server can apply that admin's
+   read-only scopes (src/lib/scopes.ts). Installed once, at module load, so it
+   covers the many direct fetch() calls without touching each one. */
+let viewAsUserId = null;
+export function setViewAsUserId(id) {
+  viewAsUserId = id || null;
+}
+if (typeof window !== "undefined" && !window.__sbmViewAsFetch) {
+  window.__sbmViewAsFetch = true;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init) => {
+    if (viewAsUserId) {
+      const url = typeof input === "string" ? input : input?.url ?? "";
+      if (url.startsWith("/api/")) {
+        const headers = new Headers(init?.headers ?? (typeof input !== "string" ? input.headers : undefined));
+        headers.set("X-SBM-View-As", viewAsUserId);
+        return nativeFetch(input, { ...init, headers });
+      }
+    }
+    return nativeFetch(input, init);
+  };
+}
+
+/* SBM-81 — Maintenance → Manage scopes (admin/superadmin). */
+async function scopesRequest(path, method, level) {
+  const res = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: level ? JSON.stringify({ level }) : undefined,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `${method} ${path} → ${res.status}`);
+  return body;
+}
+export const fetchScopes = () => scopesRequest("/api/maintenance/scopes", "GET");
+export const putScopeRoleGrant = (role, key, level) =>
+  scopesRequest(`/api/maintenance/scopes/roles/${encodeURIComponent(role)}/${encodeURIComponent(key)}`, "PUT", level);
+export const deleteScopeRoleGrant = (role, key) =>
+  scopesRequest(`/api/maintenance/scopes/roles/${encodeURIComponent(role)}/${encodeURIComponent(key)}`, "DELETE");
+export const putScopeUserOverride = (userId, key, level) =>
+  scopesRequest(`/api/maintenance/scopes/users/${encodeURIComponent(userId)}/${encodeURIComponent(key)}`, "PUT", level);
+export const deleteScopeUserOverride = (userId, key) =>
+  scopesRequest(`/api/maintenance/scopes/users/${encodeURIComponent(userId)}/${encodeURIComponent(key)}`, "DELETE");
+
 /* Maintenance — session-cookie only, admin/superadmin. */
 export async function fetchSiteContactProposals() {
   const res = await fetch("/api/maintenance/site-contact-proposals", { credentials: "same-origin" });

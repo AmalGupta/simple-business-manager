@@ -103,7 +103,16 @@ import {
   handleMergeCallers,
   handleListSameNameCallers,
 } from "./handlers/callers";
-import { handleGetSiteContactProposals, handlePostSiteContactMappings } from "./handlers/maintenance";
+import {
+  handleDeleteScopeRoleGrant,
+  handleDeleteScopeUserOverride,
+  handleGetScopes,
+  handleGetSiteContactProposals,
+  handlePostSiteContactMappings,
+  handlePutScopeRoleGrant,
+  handlePutScopeUserOverride,
+} from "./handlers/maintenance";
+import { enforceViewAsScope } from "./lib/scopes";
 import { handlePostSiteVoiceNote } from "./handlers/site-voice-note";
 import { handlePostDeskVoiceNote } from "./handlers/desk-voice-note";
 import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
@@ -221,6 +230,12 @@ export default {
 
     if (url.pathname === "/webhooks/sarvam" && request.method === "POST") {
       return handleSarvamWebhook(request, env, ctx);
+    }
+
+    // SBM-81 — admin acting from a staff-bookmark tab: read-only unless scoped up.
+    if (url.pathname.startsWith("/api/")) {
+      const blocked = await enforceViewAsScope(request, env, url.pathname);
+      if (blocked) return blocked;
     }
 
     if (url.pathname === "/api/calls" && request.method === "GET") {
@@ -656,6 +671,25 @@ export default {
     }
     if (url.pathname === "/api/maintenance/site-contact-mappings" && request.method === "POST") {
       return handlePostSiteContactMappings(request, env);
+    }
+
+    // SBM-81 — Manage scopes (admin/superadmin session).
+    if (url.pathname === "/api/maintenance/scopes" && request.method === "GET") {
+      return handleGetScopes(request, env);
+    }
+    const scopeRoleMatch = url.pathname.match(/^\/api\/maintenance\/scopes\/roles\/([^/]+)\/([^/]+)$/);
+    if (scopeRoleMatch && request.method === "PUT") {
+      return handlePutScopeRoleGrant(request, env, scopeRoleMatch[1], scopeRoleMatch[2]);
+    }
+    if (scopeRoleMatch && request.method === "DELETE") {
+      return handleDeleteScopeRoleGrant(request, env, scopeRoleMatch[1], scopeRoleMatch[2]);
+    }
+    const scopeUserMatch = url.pathname.match(/^\/api\/maintenance\/scopes\/users\/([^/]+)\/([^/]+)$/);
+    if (scopeUserMatch && request.method === "PUT") {
+      return handlePutScopeUserOverride(request, env, scopeUserMatch[1], scopeUserMatch[2]);
+    }
+    if (scopeUserMatch && request.method === "DELETE") {
+      return handleDeleteScopeUserOverride(request, env, scopeUserMatch[1], scopeUserMatch[2]);
     }
 
     // --- Site media, voice notes, and the unified timeline — session-cookie

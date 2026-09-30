@@ -649,3 +649,22 @@ CREATE TABLE app_requests (
 CREATE INDEX idx_app_requests_created_by ON app_requests(created_by_user_id, created_at);
 CREATE INDEX idx_app_requests_stt_job_id ON app_requests(stt_job_id);
 
+
+-- migration 0057 (SBM-81): view-as read-only scopes
+CREATE TABLE scope_role_grants (
+  role       TEXT NOT NULL,                 -- admin | superadmin
+  scope_key  TEXT NOT NULL,
+  level      TEXT NOT NULL,                 -- none | read | write
+  updated_by TEXT REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (role, scope_key)
+);
+
+CREATE TABLE scope_user_overrides (
+  user_id    TEXT NOT NULL REFERENCES users(id),
+  scope_key  TEXT NOT NULL,
+  level      TEXT NOT NULL,
+  updated_by TEXT REFERENCES users(id),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, scope_key)
+);

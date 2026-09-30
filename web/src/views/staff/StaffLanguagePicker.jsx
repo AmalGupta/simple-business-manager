@@ -4,12 +4,15 @@ import { t } from "../../theme.js";
 import { TEXT_INPUT_STYLE } from "../../styles.js";
 import { fetchStaffLanguage, patchStaffLanguage } from "../../lib/api.js";
 import { LANGUAGES } from "../../lib/i18n.jsx";
+import { useScope } from "../../lib/scopes.jsx";
 
 /* SBM-72 — admin, on a staff member's tab of the admin home: the language
    that person's screens are shown in. Hindi by default; saved on change. */
 export function StaffLanguagePicker({ staffId, staffName }) {
   const [lang, setLang] = useState(null);
   const [status, setStatus] = useState("");
+  /* SBM-81: read-only for an admin without write on this component. */
+  const { canRead, canWrite } = useScope("staff.language");
 
   useEffect(() => {
     let cancelled = false;
@@ -40,13 +43,15 @@ export function StaffLanguagePicker({ staffId, staffName }) {
     }
   };
 
+  if (!canRead) return null;
+
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13, color: t.edge2, marginBottom: "1rem" }}>
       <Languages size={15} />
       Display language{staffName ? ` for ${staffName}` : ""}
       <select
         value={lang ?? ""}
-        disabled={lang === null}
+        disabled={lang === null || !canWrite}
         onChange={(e) => change(e.target.value)}
         style={{ ...TEXT_INPUT_STYLE, minHeight: 40 }}
         aria-label={`Display language${staffName ? ` for ${staffName}` : ""}`}
