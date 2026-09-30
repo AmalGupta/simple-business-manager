@@ -30,6 +30,8 @@ import { StaffDirectoryView } from "./views/staff/StaffDirectoryView.jsx";
 import { CallerTile } from "./views/callers/CallerTile.jsx";
 import { CallersDirectoryView } from "./views/callers/CallersDirectoryView.jsx";
 import { MaintenanceSiteContactView } from "./views/maintenance/MaintenanceSiteContactView.jsx";
+import { MaintenanceScopesView } from "./views/maintenance/MaintenanceScopesView.jsx";
+import { ScopesProvider } from "./lib/scopes.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
 import { StaffLanguagePicker } from "./views/staff/StaffLanguagePicker.jsx";
@@ -64,6 +66,7 @@ import {
   postCreateSite,
   patchTodo,
   fetchMe,
+  setViewAsUserId,
   postLogout,
   postResetPin,
   postUpdateMyPhone,
@@ -633,8 +636,15 @@ export default function SimpleBusinessManager() {
      staff member's bookmark. */
   const displayLang = me?.role === "staff" ? me.display_language ?? "hi" : "en";
 
+  /* SBM-81 — which staff member an admin is currently viewing (drill-in views
+     carry forUserId; on the home view it's the selected bookmark tab). Set
+     synchronously so child effects' fetches already carry X-SBM-View-As. */
+  const viewAsUserId = view.forUserId || (view.name === "home" && homeTab !== "admin" ? homeTab : null);
+  setViewAsUserId(me?.role === "staff" ? null : viewAsUserId);
+
   const shell = (children, { wide = false, fillViewport = false } = {}) => (
     <LanguageProvider lang={displayLang}>
+    <ScopesProvider me={me} viewAsUserId={viewAsUserId}>
     <TodoPermissionsProvider me={me}>
     <div
       className={fillViewport ? "sbm-fill-viewport" : undefined}
@@ -741,6 +751,7 @@ export default function SimpleBusinessManager() {
       </main>
     </div>
     </TodoPermissionsProvider>
+    </ScopesProvider>
     </LanguageProvider>
   );
 
@@ -768,6 +779,7 @@ export default function SimpleBusinessManager() {
       onOpenMaintenanceSiteContact={() =>
         setView({ name: "maintenance-site-contact", from: { name: "home" } })
       }
+      onOpenMaintenanceScopes={() => setView({ name: "maintenance-scopes", from: { name: "home" } })}
       right={
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <DeskConversationMic />
@@ -1045,6 +1057,9 @@ export default function SimpleBusinessManager() {
       <MaintenanceSiteContactView onBack={() => setView(view.from ?? homeView)} innerScrolls={innerScrolls} />,
       { wide: true, fillViewport: innerScrolls }
     );
+
+  if (view.name === "maintenance-scopes")
+    return shell(<MaintenanceScopesView onBack={() => setView(view.from ?? homeView)} />);
 
   if (view.name === "callers-directory")
     return shell(

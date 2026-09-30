@@ -18,6 +18,7 @@ export function AccountMenu({
   onCustomizationChange,
   onRequestReport,
   onOpenMaintenanceSiteContact,
+  onOpenMaintenanceScopes,
 }) {
   const tr = useT();
   const [open, setOpen] = useState(false);
@@ -203,6 +204,16 @@ export function AccountMenu({
         style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
       >
         Associate – Site-contact
+      </button>
+      <button
+        role="menuitem"
+        onClick={() => {
+          setOpen(false);
+          onOpenMaintenanceScopes?.();
+        }}
+        style={{ ...menuItemStyle, borderTop: `1px solid ${t.frost}` }}
+      >
+        Manage scopes
       </button>
     </>
   );
