@@ -48,6 +48,7 @@ import {
   getTodoRouterUserId,
   linkStaffUserContact,
   normalizeCallerPhone,
+  getEffectiveScopes,
 } from "@sbm/core";
 import {
   clearSessionCookieHeader,
@@ -203,7 +204,10 @@ export async function handleMe(request: Request, env: Env): Promise<Response> {
     findCallerForUser(env.DB, session.user_id, session.user_phone),
   ]);
   const customization = resolveCustomization(rows);
+  // SBM-81 — view-as scope levels; only meaningful for admin/superadmin, fetched once at load.
+  const scopes = session.user_role === "staff" ? {} : await getEffectiveScopes(env.DB, session.user_id, session.user_role);
   return json({
+    scopes,
     id: session.user_id,
     name: session.user_name,
     role: session.user_role,

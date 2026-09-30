@@ -10,6 +10,7 @@ import { CarriedForwardLabel } from "../../views/work/CarriedForwardLabel.jsx";
 import { urgentDeadline } from "../../views/work/workDates.js";
 import { categoryLabel, fmtShortLang, fmtTimeLeftLang, stageLabel, useLang, useT } from "../../lib/i18n.jsx";
 import { useTodoPermissions } from "../../lib/todoPermissions.jsx";
+import { useScope } from "../../lib/scopes.jsx";
 
 const tagStyle = {
   fontFamily: t.label,
@@ -49,6 +50,9 @@ export function WorkCard({
   const [passing, setPassing] = useState(false);
   const [confirmingDone, setConfirmingDone] = useState(false);
   const { canComplete } = useTodoPermissions(item);
+  /* SBM-81: an admin viewing this on a staff tab may be read-only. */
+  const canAct = useScope("staff.assigned_work.act").canWrite;
+  const canPass = useScope("staff.assigned_work.handoff").canWrite;
   const urgent = Boolean(item.urgent_at);
   const overdue = !urgent && item.scheduled_for && item.scheduled_for < today;
   const isComplaint = item.kind === "complaint";
@@ -57,7 +61,7 @@ export function WorkCard({
   const showCategory = isStage && item.category && (canAdmin || !STAFF_HIDDEN_WORKFLOW_CATEGORIES.includes(item.category));
   const title = isStage ? stageLabel(lang, item.stage_id, item.title) : item.title;
   /* SBM-82: a todo still waiting to be routed can't be finished yet. */
-  const canFinish = isComplaint ? canAdmin : item.kind !== "todo" || canComplete;
+  const canFinish = canAct && (isComplaint ? canAdmin : item.kind !== "todo" || canComplete);
 
   return (
     <Card
@@ -139,13 +143,13 @@ export function WorkCard({
               aria-label={tr("planForDate")}
               value={item.scheduled_for ?? ""}
               min={canAdmin ? undefined : today}
-              disabled={busy}
+              disabled={busy || !canAct}
               onChange={(e) => onSchedule(item, e.target.value || null)}
               style={{ ...TEXT_INPUT_STYLE, minHeight: 44, flex: 1, minWidth: 0 }}
             />
           </label>
         )}
-        <div style={{ display: "grid", gridTemplateColumns: canFinish ? "1fr 1fr" : "1fr", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: canFinish && canPass ? "1fr 1fr" : "1fr", gap: 8 }}>
           {canFinish && (
             <button
               type="button"
@@ -156,6 +160,7 @@ export function WorkCard({
               <Check size={14} /> {isComplaint ? tr("resolve") : tr("done")}
             </button>
           )}
+          {canPass && (
           <button
             type="button"
             disabled={busy}
@@ -164,6 +169,7 @@ export function WorkCard({
           >
             <ArrowRightLeft size={14} /> {tr("passOn")}
           </button>
+          )}
         </div>
         {confirmingDone && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
