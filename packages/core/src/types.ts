@@ -257,6 +257,8 @@ export interface Todo {
   site_id: string | null;
   /** migration 0045 — prompt v8 context note; NULL for older extractions. */
   context?: string | null;
+  /** migration 0053 (SBM-82) — set when an admin routes it; done is blocked while NULL. */
+  routed_at?: string | null;
   created_at: string;
 }
 

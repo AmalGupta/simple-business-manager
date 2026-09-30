@@ -214,6 +214,8 @@ export async function handleMe(request: Request, env: Env): Promise<Response> {
     ),
     // migration 0045 — this user routes every new todo to staff.
     is_todo_router: routerUserId === session.user_id,
+    // SBM-82 — while a router is set, a todo must be routed before it can be marked done.
+    todo_routing_active: routerUserId != null,
   });
 }
 

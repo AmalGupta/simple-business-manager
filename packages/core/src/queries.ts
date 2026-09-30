@@ -774,6 +774,12 @@ export async function getTodoRouterUserId(db: D1Database): Promise<string | null
   return value && value.trim() ? value.trim() : null;
 }
 
+/** SBM-82 — while a router is set, a todo can't be marked done until it's routed. */
+export async function isTodoAwaitingRouting(db: D1Database, todo: { routed_at?: string | null }): Promise<boolean> {
+  if (todo.routed_at) return false;
+  return (await getTodoRouterUserId(db)) != null;
+}
+
 export async function listUserSettings(
   db: D1Database,
   userId: string
@@ -1428,6 +1434,8 @@ export interface TodoRow {
   urgent_at: string | null;
   /** migration 0049 (SBM-67) — admin override, NULL = default (office). */
   work_location: string | null;
+  /** migration 0053 (SBM-82) — set when an admin routes it; done is blocked while NULL. */
+  routed_at: string | null;
   /** Row create time (extraction / manual). */
   created_at: string | null;
   /** migration 0025 — a todo can be assigned to more than one staff member. */
@@ -1542,6 +1550,7 @@ interface RawTodoRow {
   context?: string | null;
   urgent_at?: string | null;
   work_location?: string | null;
+  routed_at?: string | null;
   created_at: string | null;
 }
 
@@ -1614,7 +1623,8 @@ const TODO_SELECT = `
          todos.completed_at, todos.closed_by_call_id, todos.customer_waiting,
          todos.created_at AS created_at,
          todos.site_id AS site_id, sites.name AS site_name, todos.context AS context,
-         todos.urgent_at AS urgent_at, todos.work_location AS work_location
+         todos.urgent_at AS urgent_at, todos.work_location AS work_location,
+         todos.routed_at AS routed_at
   FROM todos
   LEFT JOIN sites ON sites.id = todos.site_id
 `;
@@ -1647,6 +1657,7 @@ function toTodoRow(t: RawTodoRow): TodoRow {
     context: t.context ?? null,
     urgent_at: t.urgent_at ?? null,
     work_location: t.work_location ?? null,
+    routed_at: t.routed_at ?? null,
     created_at: t.created_at ?? null,
     assignees: [], // filled in by hydrateTodoAssignees — see hydrateCallRows/getCallWithTodos
   };
@@ -1703,6 +1714,9 @@ export async function setTodoAssignees(
     : db.prepare(`DELETE FROM todo_assignees WHERE todo_id = ?`).bind(todoId);
   await db.batch([
     removeStmt,
+    keep.length
+      ? db.prepare(`UPDATE todos SET routed_at = COALESCE(routed_at, datetime('now')) WHERE id = ?`).bind(todoId)
+      : db.prepare(`UPDATE todos SET routed_at = NULL WHERE id = ?`).bind(todoId),
     // A new assignee on an urgent todo lands on today, same as setWorkUrgent.
     ...keep.map((uid) =>
       db
@@ -3155,8 +3169,8 @@ export async function createSiteVoiceNoteTask(
 
   await db.batch([
     db
-      .prepare(`INSERT INTO todos (id, call_id, owner, text, due_date, origin) VALUES (?, ?, ?, ?, NULL, 'manual')`)
-      .bind(todoId, input.callId, owner, text),
+      .prepare(`INSERT INTO todos (id, call_id, owner, text, due_date, origin, routed_at) VALUES (?, ?, ?, ?, NULL, 'manual', CASE WHEN ? THEN datetime('now') END)`)
+      .bind(todoId, input.callId, owner, text, assigneeUserIds.length > 0 ? 1 : 0),
     ...assigneeUserIds.map((userId) =>
       db
         .prepare(
@@ -5224,6 +5238,8 @@ export interface AssignedTodoRow {
   urgent_at?: string | null;
   /** migration 0049 (SBM-67) — admin override, NULL = default (office). */
   work_location?: string | null;
+  /** migration 0053 (SBM-82) — set when an admin routes it; done is blocked while NULL. */
+  routed_at?: string | null;
   assignees: TodoAssignee[];
   /** Present on Blocked bookmark rows — call-level unresolved that put the card here. */
   unresolved?: UnresolvedRow[];
@@ -5482,6 +5498,7 @@ export async function listOpenTodosByAssigneeBucket(
               todos.due_date AS due_date,
               todos.context AS context,
               todos.urgent_at AS urgent_at,
+              todos.routed_at AS routed_at,
               todos.work_location AS work_location,
               todos.status AS status,
               ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
@@ -5579,6 +5596,7 @@ export async function listOpenTodosForSite(db: D1Database, siteId: string): Prom
               todos.due_date AS due_date,
               todos.context AS context,
               todos.urgent_at AS urgent_at,
+              todos.routed_at AS routed_at,
               todos.work_location AS work_location,
               todos.status AS status,
               COALESCE(callers.name, 'Unknown caller') AS client_name,
@@ -5726,6 +5744,7 @@ export async function listMyOpenTodos(
               todos.due_date AS due_date,
               todos.context AS context,
               todos.urgent_at AS urgent_at,
+              todos.routed_at AS routed_at,
               todos.work_location AS work_location,
               todos.status AS status,
               COALESCE(
@@ -5998,6 +6017,8 @@ export interface WorkItem {
   site_contact_number: string | null;
   /** SBM-72 — site stages only: the fixed stage id, so the UI can show a translated label. */
   stage_id?: string | null;
+  /** SBM-82 — todos only: NULL while it still needs routing (done is hidden). */
+  routed_at?: string | null;
 }
 
 export type WorkEventType =
@@ -6186,6 +6207,7 @@ export async function listAssignedWork(db: D1Database, userId: string): Promise<
       assignee_name: user?.name ?? null,
       work_location: effectiveWorkLocation(td.work_location, null),
       site_contact_number: null,
+      routed_at: td.routed_at ?? null,
     });
   }
   for (const tk of tasks) {
@@ -6415,6 +6437,10 @@ export function handOffWorkStmts(
                VALUES (?, ?, ?, datetime('now'), ?)`
             )
             .bind(ref.id, toUserId, actorUserId, planned),
+          // Back with the router after an offboarding: it needs routing again.
+          ...(fromEvent === "offboard_rerouted"
+            ? [db.prepare(`UPDATE todos SET routed_at = NULL WHERE id = ?`).bind(ref.id)]
+            : []),
         ]
       : [
           db

@@ -75,7 +75,10 @@ export function TodoAssignControl({
      checklist starts from the suggestion without him ticked, so saving
      hands it over rather than adding a co-assignee. */
   const routerHeld = Boolean(
-    currentUser?.is_todo_router && assignees.length > 0 && assignees.every((a) => a.id === currentUser.id)
+    currentUser?.is_todo_router &&
+      !todo.routed_at &&
+      assignees.length > 0 &&
+      assignees.every((a) => a.id === currentUser.id)
   );
   const initialChecked = () => {
     if (routerHeld) return suggested && suggested.id !== currentUser.id ? new Set([suggested.id]) : new Set();
