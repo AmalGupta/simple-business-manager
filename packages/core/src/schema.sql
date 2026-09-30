@@ -92,6 +92,10 @@ CREATE TABLE sites (
   poc_contact_number TEXT,
   assigned_by   TEXT,
   referred_by   TEXT,
+  -- migration 0054 (SBM-83): the directory contacts behind the two fields
+  -- above; the text columns are the display snapshot / legacy value.
+  assigned_by_caller_id TEXT REFERENCES callers(id) ON DELETE SET NULL,
+  referred_by_caller_id TEXT REFERENCES callers(id) ON DELETE SET NULL,
   site_location TEXT,          -- lat,lng or map pin captured at intake
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   -- migration 0012: admin/superadmin-editable, ISO date. Drives the missed

@@ -13,6 +13,7 @@
 import {
   createSession,
   createUser,
+  findCallerForUser,
   getUserByName,
   getUserById,
   incrementFailedLogin,
@@ -196,9 +197,10 @@ export async function handleLogoutRedirect(request: Request, env: Env): Promise<
 export async function handleMe(request: Request, env: Env): Promise<Response> {
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
-  const [rows, routerUserId] = await Promise.all([
+  const [rows, routerUserId, contact] = await Promise.all([
     listUserSettings(env.DB, session.user_id),
     getTodoRouterUserId(env.DB),
+    findCallerForUser(env.DB, session.user_id, session.user_phone),
   ]);
   const customization = resolveCustomization(rows);
   return json({
@@ -216,6 +218,8 @@ export async function handleMe(request: Request, env: Env): Promise<Response> {
     is_todo_router: routerUserId === session.user_id,
     // SBM-82 — while a router is set, a todo must be routed before it can be marked done.
     todo_routing_active: routerUserId != null,
+    // SBM-83 — default "Assigned by" contact when this user adds a site.
+    contact,
   });
 }
 

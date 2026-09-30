@@ -977,7 +977,10 @@ export default function SimpleBusinessManager() {
   if (view.name === "add-site")
     return shellInStaffBookmark(
       <AddSiteScreen
-        defaultAssignedBy={me?.name ?? ""}
+        canPickContacts={me.role !== "staff"}
+        defaultAssignedBy={
+          me?.contact ? { caller_id: me.contact.id, name: me.contact.name, phone: me.contact.phone || null } : null
+        }
         onBack={() => setView(view.from ?? homeView)}
         onCreate={createSiteAndRefresh}
         onDone={(site) => {

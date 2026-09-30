@@ -185,8 +185,15 @@ function CheckBox({ checked, disabled, label, onToggle }) {
  *
  * `onSkip` (Review sites, unconfirmed site with no phone contact): offers
  * "Skip" — mark the site valid without adding a contact.
+ *
+ * `pick` = `{ title, onPick(caller) }` (SBM-83): single-select mode for a
+ * site field that names one contact (Assigned by / Referred by). Nothing
+ * is linked to the site; `site` may be null (Add new site, before create).
+ * Likely matches are skipped — they score the site's own contacts, which
+ * say nothing about who referred it — and "Add a new contact" is always on.
  */
-export function AssociateContactsModal({ site, existingContactIds = [], onClose, onSave, onSkip }) {
+export function AssociateContactsModal({ site, existingContactIds = [], onClose, onSave, onSkip, pick }) {
+  const picking = Boolean(pick);
   const gridRef = useRef(null);
   const seededStrong = useRef(false);
   const searchSeq = useRef(0);
@@ -197,6 +204,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
   const [typeFilter, setTypeFilter] = useState(TYPE_FILTER_ALL);
   const [selected, setSelected] = useState(() => new Set());
   const [selectedNames, setSelectedNames] = useState(() => ({}));
+  const [pickedCaller, setPickedCaller] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [confirmation, setConfirmation] = useState(null);
@@ -214,6 +222,10 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
 
   /* Likely-match candidates — a few targeted searches, not the full category. */
   useEffect(() => {
+    if (picking) {
+      setMatchCandidates([]);
+      return undefined;
+    }
     let cancelled = false;
     fetchLikelyMatchCandidates(site)
       .then((list) => {
@@ -226,7 +238,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
     return () => {
       cancelled = true;
     };
-  }, [site]);
+  }, [site, picking]);
 
   /* Debounced server-side search for the grid (Add-people pattern). */
   useEffect(() => {
@@ -254,14 +266,14 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
   }, [query, typeFilter]);
 
   const likelyMatches = useMemo(() => {
-    if (!matchCandidates) return [];
+    if (!matchCandidates || picking) return [];
     return rankContactMatches(site, matchCandidates, { excludeIds: alreadyLinked, limit: 5 });
-  }, [matchCandidates, site, alreadyLinked]);
+  }, [matchCandidates, site, alreadyLinked, picking]);
 
   const offer = useMemo(() => {
-    if (!matchCandidates || newContactDone) return null;
+    if (!matchCandidates || newContactDone || picking) return null;
     return newContactOffer(site, matchCandidates, likelyMatches);
-  }, [matchCandidates, site, likelyMatches, newContactDone]);
+  }, [matchCandidates, site, likelyMatches, newContactDone, picking]);
 
   useEffect(() => {
     if (!matchCandidates || seededStrong.current) return;
@@ -285,9 +297,9 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
   }, [matchCandidates, likelyMatches]);
 
   const openNewContactForm = () => {
-    if (!offer) return;
-    setNewName(offer.identified.suggestedName || "");
-    setNewPhone(offer.identified.phoneDisplay || offer.identified.phone || "");
+    if (!offer && !picking) return;
+    setNewName(offer?.identified.suggestedName || "");
+    setNewPhone(offer?.identified.phoneDisplay || offer?.identified.phone || "");
     setNewCategory(typeFilter || "client");
     setCreateError("");
     setAddingNew(true);
@@ -347,11 +359,16 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
         }
         return [saved, ...list];
       });
-      setSelected((current) => {
-        const next = new Set(current);
-        next.add(saved.id);
-        return next;
-      });
+      if (picking) {
+        setSelected(new Set([saved.id]));
+        setPickedCaller(saved);
+      } else {
+        setSelected((current) => {
+          const next = new Set(current);
+          next.add(saved.id);
+          return next;
+        });
+      }
       setSelectedNames((current) => ({ ...current, [saved.id]: saved.name }));
       setAddingNew(false);
       setNewContactDone(true);
@@ -367,6 +384,11 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
 
   const toggle = useCallback((caller) => {
     if (!caller?.id) return;
+    if (picking) {
+      setPickedCaller((current) => (current?.id === caller.id ? null : caller));
+      setSelected((current) => (current.has(caller.id) ? new Set() : new Set([caller.id])));
+      return;
+    }
     setSelected((current) => {
       const next = new Set(current);
       if (next.has(caller.id)) next.delete(caller.id);
@@ -379,7 +401,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
       else next[caller.id] = caller.name;
       return next;
     });
-  }, []);
+  }, [picking]);
 
   const rows = useMemo(
     () =>
@@ -419,7 +441,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
         valueFormatter: (p) => p.value || "—",
       },
       {
-        headerName: "Add to site",
+        headerName: picking ? "Choose" : "Add to site",
         colId: "add",
         width: 104,
         suppressSizeToFit: true,
@@ -431,13 +453,19 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
             <CheckBox
               checked={p.data.chosen}
               disabled={p.data.linked}
-              label={p.data.linked ? `${p.data.name} is already on this site` : `Add ${p.data.name} to this site`}
+              label={
+                picking
+                  ? `Choose ${p.data.name}`
+                  : p.data.linked
+                    ? `${p.data.name} is already on this site`
+                    : `Add ${p.data.name} to this site`
+              }
               onToggle={() => toggle(p.data)}
             />
           ) : null,
       },
     ],
-    [toggle]
+    [toggle, picking]
   );
 
   const defaultColDef = useMemo(
@@ -449,6 +477,14 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
   const getRowClass = useCallback((params) => (params.data?.chosen ? "sbm-crow-chosen" : undefined), []);
 
   const submit = async () => {
+    if (picking) {
+      if (!pickedCaller) {
+        setError("Tick a contact.");
+        return;
+      }
+      pick.onPick(pickedCaller);
+      return;
+    }
     const ids = [...selected];
     if (ids.length === 0) {
       setError("Tick at least one contact.");
@@ -487,8 +523,8 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
 
   return (
     <Modal
-      label={`Associate contacts with ${site.name}`}
-      title={`Associate contacts — ${site.name}`}
+      label={picking ? pick.title : `Associate contacts with ${site.name}`}
+      title={picking ? pick.title : `Associate contacts — ${site.name}`}
       onClose={onClose}
       width={720}
       scroll
@@ -497,7 +533,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
 
       {matchCandidates !== null && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {offer && (
+          {(offer || picking) && (
             <div
               style={{
                 display: "flex",
@@ -517,22 +553,28 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
                   flexWrap: "wrap",
                 }}
               >
-                <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
-                  <span style={sectionLabelStyle}>Identified contact</span>
-                  <span style={{ fontSize: 14, color: t.edge, fontWeight: 500 }}>
-                    {offer.identified.label}
-                    {offer.identified.phoneDisplay && !isPhoneLikeName(offer.identified.label) ? (
-                      <span style={{ fontWeight: 400, color: t.edge2, marginLeft: 8 }}>
-                        {offer.identified.phoneDisplay}
-                      </span>
-                    ) : null}
+                {offer ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+                    <span style={sectionLabelStyle}>Identified contact</span>
+                    <span style={{ fontSize: 14, color: t.edge, fontWeight: 500 }}>
+                      {offer.identified.label}
+                      {offer.identified.phoneDisplay && !isPhoneLikeName(offer.identified.label) ? (
+                        <span style={{ fontWeight: 400, color: t.edge2, marginLeft: 8 }}>
+                          {offer.identified.phoneDisplay}
+                        </span>
+                      ) : null}
+                    </span>
+                    <span style={{ fontSize: 12, color: t.edge2 }}>
+                      {offer.reason === "phone_only"
+                        ? "Listed in the directory as a phone number only — give them a name to add as a contact."
+                        : "Not found as a named contact in the directory."}
+                    </span>
+                  </div>
+                ) : (
+                  <span style={{ fontSize: 13, color: t.edge2, flex: 1, minWidth: 0 }}>
+                    Not in the directory yet? Add them, then tick.
                   </span>
-                  <span style={{ fontSize: 12, color: t.edge2 }}>
-                    {offer.reason === "phone_only"
-                      ? "Listed in the directory as a phone number only — give them a name to add as a contact."
-                      : "Not found as a named contact in the directory."}
-                  </span>
-                </div>
+                )}
                 {!addingNew && (
                   <button type="button" onClick={openNewContactForm} style={linkButtonStyle}>
                     Add a new contact
@@ -605,7 +647,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
                     >
                       {creating
                         ? "Saving…"
-                        : offer.existingCallerId
+                        : offer?.existingCallerId
                           ? "Save to directory"
                           : "Add to directory"}
                     </button>
@@ -615,8 +657,8 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
             </div>
           )}
 
-          <h3 style={sectionLabelStyle}>Most likely matches</h3>
-          {likelyMatches.length === 0 ? (
+          {picking ? null : <h3 style={sectionLabelStyle}>Most likely matches</h3>}
+          {picking ? null : likelyMatches.length === 0 ? (
             <p style={{ fontSize: 13, color: t.edge2, margin: 0 }}>
               No close matches in the directory
               {site.discovered_from_caller_name || site.poc_name
@@ -707,7 +749,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <h3 style={sectionLabelStyle}>Select existing contacts</h3>
+        <h3 style={sectionLabelStyle}>{picking ? "Choose a contact" : "Select existing contacts"}</h3>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <input
             value={query}
@@ -760,7 +802,13 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <span style={{ fontSize: 12, color: t.edge2 }}>
-          {selected.size === 0 ? "Nothing ticked yet." : `${selected.size} ticked.`}
+          {picking
+            ? pickedCaller
+              ? `${pickedCaller.name}${pickedCaller.phone ? ` · ${pickedCaller.phone}` : ""}`
+              : "Nothing ticked yet."
+            : selected.size === 0
+              ? "Nothing ticked yet."
+              : `${selected.size} ticked.`}
         </span>
         <span style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
           {onSkip && (
@@ -793,7 +841,7 @@ export function AssociateContactsModal({ site, existingContactIds = [], onClose,
               opacity: saving || selected.size === 0 ? 0.5 : 1,
             }}
           >
-            {saving ? "Adding…" : "Add to site"}
+            {picking ? "Use this contact" : saving ? "Adding…" : "Add to site"}
           </button>
         </span>
       </div>
