@@ -631,7 +631,7 @@ CREATE TABLE app_requests (
   created_by_user_id TEXT NOT NULL REFERENCES users(id),
   created_by_name    TEXT NOT NULL,
   created_by_role    TEXT NOT NULL DEFAULT 'staff',     -- snapshot at submit time — titles the Jira issue [Staff-Request]/[Admin-Request]
-  status             TEXT NOT NULL DEFAULT 'pending',   -- pending | transcribing | submitted | failed
+  status             TEXT NOT NULL DEFAULT 'pending',   -- pending | transcribing | filing | submitted | failed
   r2_key             TEXT,                              -- VOICE_NOTES object holding the spoken request
   stt_job_id         TEXT,                              -- Sarvam batch job id — webhook dispatch key
   speaker_name       TEXT,                              -- Claude-extracted (defaults to created_by_name)

@@ -4082,6 +4082,24 @@ export async function setAppRequestSubmittedToStt(db: D1Database, id: string, jo
     .run();
 }
 
+/**
+ * Atomically moves the row to 'filing' so only one Sarvam webhook delivery
+ * formats + files it — Sarvam re-delivers callbacks, and each unguarded
+ * delivery created another Jira issue. A 'failed' row with no Jira key may be
+ * reclaimed so a genuine retry can still file it. Returns false if another
+ * delivery already owns (or finished) the row.
+ */
+export async function claimAppRequestForFiling(db: D1Database, id: string): Promise<boolean> {
+  const res = await db
+    .prepare(
+      `UPDATE app_requests SET status = 'filing'
+       WHERE id = ? AND jira_issue_key IS NULL AND status IN ('pending', 'transcribing', 'failed')`
+    )
+    .bind(id)
+    .run();
+  return (res.meta?.changes ?? 0) > 0;
+}
+
 export async function markAppRequestSubmitted(
   db: D1Database,
   id: string,
@@ -7012,6 +7030,22 @@ export interface TaskAuditRow extends WorkEventRow {
   call_id: string | null;
   call_kind: "call" | "desk" | "site_memo" | null;
   client_name: string | null;
+  client_id: string | null;
+  client_phone: string | null;
+  site_id: string | null;
+  /** Directory contacts linked to the row's site (caller_sites), any type. */
+  site_contacts?: SiteContactRow[];
+}
+
+/** Attaches each row's site contacts in one batched lookup. */
+async function attachSiteContacts<T extends { site_id: string | null; site_contacts?: SiteContactRow[] }>(
+  db: D1Database,
+  rows: T[]
+): Promise<T[]> {
+  const siteIds = [...new Set(rows.map((r) => r.site_id).filter((id): id is string => Boolean(id)))];
+  const bySite = await getSiteContactsBySiteIds(db, siteIds);
+  for (const r of rows) r.site_contacts = r.site_id ? (bySite.get(r.site_id) ?? []) : [];
+  return rows;
 }
 
 const TASK_AUDIT_SELECT = `
@@ -7028,7 +7062,8 @@ const TASK_AUDIT_SELECT = `
               WHEN calls.recorded_for_site_id IS NOT NULL THEN 'site_memo'
               WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'desk'
               ELSE 'call' END AS call_kind,
-         callers.name AS client_name
+         callers.name AS client_name, callers.id AS client_id, callers.phone AS client_phone,
+         work_events.site_id AS site_id
   FROM work_events
   LEFT JOIN todos ON work_events.item_kind = 'todo' AND todos.id = work_events.item_id
   LEFT JOIN calls ON calls.id = todos.call_id
@@ -7084,7 +7119,7 @@ export async function listTaskAudit(
       .bind(todayStartUtc)
       .first<{ n: number }>(),
   ]);
-  return { items: list.results ?? [], today_count: today?.n ?? 0 };
+  return { items: await attachSiteContacts(db, list.results ?? []), today_count: today?.n ?? 0 };
 }
 
 export interface TaskTimeline {
@@ -7096,8 +7131,24 @@ export interface TaskTimeline {
   call_id: string | null;
   urgent: boolean;
   assignees: string[];
+  /** Call todos: the caller. Every task: the contacts linked to its site. */
+  client_name: string | null;
+  client_phone: string | null;
+  site_contacts: SiteContactRow[];
   events: TaskAuditRow[];
 }
+
+type TaskTimelineHead = {
+  title: string;
+  status: string;
+  site_name: string | null;
+  site_id: string | null;
+  call_id: string | null;
+  urgent: number;
+  assignees: string | null;
+  client_name?: string | null;
+  client_phone?: string | null;
+};
 
 /** Every transition on one task, oldest first, with the task's current state. */
 export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: string): Promise<TaskTimeline | null> {
@@ -7105,18 +7156,24 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
     kind === "todo"
       ? await db
           .prepare(
-            `SELECT todos.text AS title, todos.status AS status, sites.name AS site_name, todos.call_id AS call_id,
-                    todos.urgent_at IS NOT NULL AS urgent,
+            `SELECT todos.text AS title, todos.status AS status, sites.name AS site_name, sites.id AS site_id,
+                    todos.call_id AS call_id, todos.urgent_at IS NOT NULL AS urgent,
                     (SELECT group_concat(users.name, ', ') FROM todo_assignees JOIN users ON users.id = todo_assignees.user_id
-                     WHERE todo_assignees.todo_id = todos.id) AS assignees
-             FROM todos LEFT JOIN sites ON sites.id = todos.site_id WHERE todos.id = ?`
+                     WHERE todo_assignees.todo_id = todos.id) AS assignees,
+                    CASE WHEN calls.recorded_for_site_id IS NULL AND calls.uploaded_by_user_id IS NULL THEN callers.name END AS client_name,
+                    CASE WHEN calls.recorded_for_site_id IS NULL AND calls.uploaded_by_user_id IS NULL THEN callers.phone END AS client_phone
+             FROM todos
+             LEFT JOIN sites ON sites.id = todos.site_id
+             LEFT JOIN calls ON calls.id = todos.call_id
+             LEFT JOIN callers ON callers.id = calls.client_id
+             WHERE todos.id = ?`
           )
           .bind(id)
-          .first<{ title: string; status: string; site_name: string | null; call_id: string; urgent: number; assignees: string | null }>()
+          .first<TaskTimelineHead>()
       : kind === "complaint"
         ? await db
             .prepare(
-              `SELECT escalations.text AS title, escalations.status AS status, sites.name AS site_name,
+              `SELECT escalations.text AS title, escalations.status AS status, sites.name AS site_name, sites.id AS site_id,
                       escalations.voice_call_id AS call_id, escalations.urgent_at IS NOT NULL AS urgent,
                       users.name AS assignees
                FROM escalations
@@ -7125,10 +7182,10 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
                WHERE escalations.id = ?`
             )
             .bind(id)
-            .first<{ title: string; status: string; site_name: string | null; call_id: string | null; urgent: number; assignees: string | null }>()
+            .first<TaskTimelineHead>()
       : await db
           .prepare(
-            `SELECT workflow_stages.label AS title, site_tasks.status AS status, sites.name AS site_name, NULL AS call_id,
+            `SELECT workflow_stages.label AS title, site_tasks.status AS status, sites.name AS site_name, sites.id AS site_id, NULL AS call_id,
                     site_tasks.urgent_at IS NOT NULL AS urgent, users.name AS assignees
              FROM site_tasks
              JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id
@@ -7137,7 +7194,7 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
              WHERE site_tasks.id = ?`
           )
           .bind(id)
-          .first<{ title: string; status: string; site_name: string | null; call_id: string | null; urgent: number; assignees: string | null }>();
+          .first<TaskTimelineHead>();
   const { results } = await db
     .prepare(
       `${TASK_AUDIT_SELECT}
@@ -7147,6 +7204,7 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
     .bind(kind, id)
     .all<TaskAuditRow>();
   if (!head && (results ?? []).length === 0) return null;
+  const siteContacts = head?.site_id ? ((await getSiteContactsBySiteIds(db, [head.site_id])).get(head.site_id) ?? []) : [];
   return {
     kind,
     id,
@@ -7156,6 +7214,9 @@ export async function getTaskTimeline(db: D1Database, kind: WorkItemKind, id: st
     call_id: head?.call_id ?? null,
     urgent: Boolean(head?.urgent),
     assignees: head?.assignees ? head.assignees.split(", ") : [],
+    client_name: head?.client_name ?? null,
+    client_phone: head?.client_phone ?? null,
+    site_contacts: siteContacts,
     events: results ?? [],
   };
 }
