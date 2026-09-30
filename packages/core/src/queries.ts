@@ -5546,6 +5546,10 @@ export interface AssignedTodoRow {
   client_contact_name?: string | null;
   client_contact_phone?: string | null;
   site_contacts?: SiteContactRow[];
+  /** Admin Open tasks — what the recording is, and the phone caller behind a client call. */
+  call_kind?: "call" | "desk" | "site_memo";
+  caller_name?: string | null;
+  caller_phone?: string | null;
 }
 
 /** Open call todos for one site — confirmed-sites Open-count popup. */
@@ -5553,8 +5557,13 @@ export interface SiteOpenTodoRow extends AssignedTodoRow {
   recording_date: string | null;
 }
 
-/** Admin Open tasks bookmarks — assignee partitions + cross-cut Blocked (unresolved). */
-export type OpenTodoAssigneeBucket = "mine" | "unassigned" | "staff" | "blocked";
+/**
+ * Admin Open tasks bookmarks. The assignee partitions + cross-cut Blocked
+ * (unresolved) cover client calls only; non-client recordings get their own
+ * tabs — desk conversations and site voice notes.
+ */
+export const OPEN_TODO_BUCKETS = ["mine", "unassigned", "staff", "blocked", "desk", "voice_notes"] as const;
+export type OpenTodoAssigneeBucket = (typeof OPEN_TODO_BUCKETS)[number];
 
 export interface ListOpenTodosByBucketOptions {
   viewerUserId: string;
@@ -5578,9 +5587,11 @@ export interface OpenTodoBucketCounts {
   mine: number;
   unassigned: number;
   staff: number;
-  /** Open todos on calls with a non-empty unresolved list (overlaps assignee buckets). */
+  /** Open todos on client calls with a non-empty unresolved list (overlaps assignee buckets). */
   blocked: number;
-  /** mine + unassigned + staff (all open on non-deleted calls). */
+  desk: number;
+  voice_notes: number;
+  /** mine + unassigned + staff + desk + voice_notes (all open on non-deleted calls). */
   total: number;
 }
 
@@ -5725,7 +5736,14 @@ function openTodoDateRangeClause(dateFrom?: string | null, dateTo?: string | nul
 }
 
 function openTodoBucketWhere(bucket: OpenTodoAssigneeBucket, viewerUserId: string): { sql: string; binds: unknown[] } {
-  const base = `todos.status = 'open' AND calls.deleted_at IS NULL`;
+  const open = `todos.status = 'open' AND calls.deleted_at IS NULL`;
+  if (bucket === "desk") {
+    return { sql: `${open} AND calls.uploaded_by_user_id IS NOT NULL AND calls.recorded_for_site_id IS NULL`, binds: [] };
+  }
+  if (bucket === "voice_notes") {
+    return { sql: `${open} AND calls.recorded_for_site_id IS NOT NULL`, binds: [] };
+  }
+  const base = `${open} AND calls.uploaded_by_user_id IS NULL AND calls.recorded_for_site_id IS NULL`;
   if (bucket === "mine") {
     return {
       sql: `${base}
@@ -5812,7 +5830,12 @@ export async function listOpenTodosByAssigneeBucket(
               calls.unresolved AS unresolved_json,
               todo_client.id AS client_contact_id,
               todo_client.name AS client_contact_name,
-              todo_client.phone AS client_contact_phone
+              todo_client.phone AS client_contact_phone,
+              CASE WHEN calls.recorded_for_site_id IS NOT NULL THEN 'site_memo'
+                   WHEN calls.uploaded_by_user_id IS NOT NULL THEN 'desk'
+                   ELSE 'call' END AS call_kind,
+              callers.name AS caller_name,
+              callers.phone AS caller_phone
        FROM todos
        JOIN calls ON calls.id = todos.call_id
        LEFT JOIN callers ON callers.id = calls.client_id
@@ -5874,8 +5897,8 @@ export async function countOpenTodosByAssigneeBucket(
   opts: { dateFrom?: string | null; dateTo?: string | null } = {}
 ): Promise<OpenTodoBucketCounts> {
   const { sql: dateSql, binds: dateBinds } = openTodoDateRangeClause(opts.dateFrom, opts.dateTo);
-  const [mine, unassigned, staff, blocked] = await Promise.all(
-    (["mine", "unassigned", "staff", "blocked"] as const).map(async (bucket) => {
+  const [mine, unassigned, staff, blocked, desk, voice_notes] = await Promise.all(
+    OPEN_TODO_BUCKETS.map(async (bucket) => {
       const { sql, binds } = openTodoBucketWhere(bucket, viewerUserId);
       const row = await db
         .prepare(
@@ -5889,7 +5912,7 @@ export async function countOpenTodosByAssigneeBucket(
       return Number(row?.n) || 0;
     })
   );
-  return { mine, unassigned, staff, blocked, total: mine + unassigned + staff };
+  return { mine, unassigned, staff, blocked, desk, voice_notes, total: mine + unassigned + staff + desk + voice_notes };
 }
 
 /** Open call todos linked to a site via call_sites, newest call first. */

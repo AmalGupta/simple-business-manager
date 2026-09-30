@@ -81,13 +81,20 @@ const BUCKETS = [
   { id: "unassigned", label: "Unassigned" },
   { id: "staff", label: "Staff assigned" },
   { id: "blocked", label: "Blocked" },
+  { id: "desk", label: "Desk conversations" },
+  { id: "voice_notes", label: "Voice notes" },
 ];
+
+/* Non-client recordings have their own tabs, so they stay put when reassigned. */
+const NON_CLIENT_BUCKETS = new Set(["desk", "voice_notes"]);
 
 const EMPTY_COPY = {
   mine: "Nothing assigned to you right now.",
   unassigned: "No unassigned open tasks right now.",
   staff: "No tasks assigned only to staff right now.",
   blocked: "No open tasks with unresolved items right now.",
+  desk: "No open tasks from desk conversations right now.",
+  voice_notes: "No open tasks from site voice notes right now.",
 };
 
 /** Default Open tasks window: last 7 calendar days (inclusive), by identification date. */
@@ -97,7 +104,8 @@ export function defaultOpenTodosDateRange() {
 }
 
 /**
- * Admin Open tasks — assignee bookmarks + Blocked (unresolved), server-paginated.
+ * Admin Open tasks — client calls by assignee bookmark + Blocked (unresolved),
+ * then Desk conversations and Voice notes as their own bookmarks. Server-paginated.
  * Default: last 7 days by task identification date; From/To filter or “older” to go back.
  */
 export function OpenTodosView({
@@ -120,7 +128,15 @@ export function OpenTodosView({
   const [draftTo, setDraftTo] = useState(initialRange.dateTo);
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
-  const [counts, setCounts] = useState({ mine: 0, unassigned: 0, staff: 0, blocked: 0, total: 0 });
+  const [counts, setCounts] = useState({
+    mine: 0,
+    unassigned: 0,
+    staff: 0,
+    blocked: 0,
+    desk: 0,
+    voice_notes: 0,
+    total: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [siteTodo, setSiteTodo] = useState(null);
@@ -133,6 +149,8 @@ export function OpenTodosView({
           unassigned: data?.unassigned ?? 0,
           staff: data?.staff ?? 0,
           blocked: data?.blocked ?? 0,
+          desk: data?.desk ?? 0,
+          voice_notes: data?.voice_notes ?? 0,
           total: data?.total ?? 0,
         });
       })
@@ -214,6 +232,7 @@ export function OpenTodosView({
     const unassigned = assignees.length === 0;
     const stays =
       bucket === "blocked" ||
+      NON_CLIENT_BUCKETS.has(bucket) ||
       (bucket === "mine" && assignedToMe) ||
       (bucket === "unassigned" && unassigned) ||
       (bucket === "staff" && !unassigned && !assignedToMe);
