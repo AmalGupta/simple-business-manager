@@ -244,6 +244,13 @@ const STRINGS = {
   newComplaint: { en: "New complaint", hi: "नई शिकायत", pa: "ਨਵੀਂ ਸ਼ਿਕਾਇਤ" },
   whichSite: { en: "Which site is this about?", hi: "यह किस साइट के बारे में है?", pa: "ਇਹ ਕਿਸ ਸਾਈਟ ਬਾਰੇ ਹੈ?" },
   addNewSite: { en: "Add new site", hi: "नई साइट जोड़ें", pa: "ਨਵੀਂ ਸਾਈਟ ਜੋੜੋ" },
+  // SBM-95 — search existing sites before adding a new one
+  findExistingSite: { en: "Site already exists? Search it", hi: "साइट पहले से है? खोजें", pa: "ਸਾਈਟ ਪਹਿਲਾਂ ਤੋਂ ਹੈ? ਲੱਭੋ" },
+  phSearchSite: { en: "Name, sector or city", hi: "नाम, सेक्टर या शहर", pa: "ਨਾਮ, ਸੈਕਟਰ ਜਾਂ ਸ਼ਹਿਰ" },
+  noSiteMatches: { en: "No matching site — add it below.", hi: "कोई साइट नहीं मिली — नीचे जोड़ें।", pa: "ਕੋਈ ਸਾਈਟ ਨਹੀਂ ਮਿਲੀ — ਹੇਠਾਂ ਜੋੜੋ।" },
+  yourSite: { en: "Your site", hi: "आपकी साइट", pa: "ਤੁਹਾਡੀ ਸਾਈਟ" },
+  orAddNewSite: { en: "Or add a new site", hi: "या नई साइट जोड़ें", pa: "ਜਾਂ ਨਵੀਂ ਸਾਈਟ ਜੋੜੋ" },
+  failedPickSite: { en: "Couldn’t open that site — try again.", hi: "साइट नहीं खुली — फिर कोशिश करें।", pa: "ਸਾਈਟ ਨਹੀਂ ਖੁੱਲ੍ਹੀ — ਦੁਬਾਰਾ ਕੋਸ਼ਿਸ਼ ਕਰੋ।" },
   complaintTitle: { en: "{site} — Complaint", hi: "{site} — शिकायत", pa: "{site} — ਸ਼ਿਕਾਇਤ" },
   recordComplaintHint: {
     en: "Record a voice note describing the complaint. You can add photos or video after.",
