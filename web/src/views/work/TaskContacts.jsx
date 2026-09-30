@@ -29,7 +29,7 @@ export function TaskContacts({ contacts, style }) {
     <span style={{ display: "flex", flexWrap: "wrap", gap: "2px 10px", fontSize: 11, color: t.edge2, ...style }}>
       {contacts.map((c) => (
         <span key={c.key} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <span style={{ color: t.edge, fontWeight: 600 }}>{c.name}</span>
+          {c.name ? <span style={{ color: t.edge, fontWeight: 600 }}>{c.name}</span> : null}
           {c.phone ? (
             <a
               href={`tel:${c.phone.replace(/\s/g, "")}`}

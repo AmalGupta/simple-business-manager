@@ -152,9 +152,7 @@ export function OpenTodoCard({
             {title}
           </button>
           {clientName || clientPhone ? (
-            <TaskContacts
-              contacts={[{ key: "caller", name: clientName || head.caller_name, phone: clientPhone }]}
-            />
+            <TaskContacts contacts={[{ key: "caller", name: clientName, phone: clientPhone }]} />
           ) : null}
         </div>
 
