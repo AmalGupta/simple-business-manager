@@ -217,7 +217,7 @@ export function OpenTodosView({
       (bucket === "mine" && assignedToMe) ||
       (bucket === "unassigned" && unassigned) ||
       (bucket === "staff" && !unassigned && !assignedToMe);
-    if (stays) patchLocalTodo(todoId, { assignees });
+    if (stays) patchLocalTodo(todoId, { assignees, routed_at: updated.routed_at ?? null });
     else removeLocalTodo(todoId);
     return updated;
   };

@@ -2,13 +2,14 @@ import { useState } from "react";
 import { AlertTriangle, ArrowRightLeft, Check, MapPin, MessageSquareWarning, Phone } from "lucide-react";
 import { t } from "../../theme.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "../../lib/constants.js";
-import { SMALL_SECONDARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
+import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
 import { Card } from "../Card.jsx";
 import { TodoContext } from "../TodoContext.jsx";
 import { PassOnPicker } from "./PassOnPicker.jsx";
 import { CarriedForwardLabel } from "../../views/work/CarriedForwardLabel.jsx";
 import { urgentDeadline } from "../../views/work/workDates.js";
 import { categoryLabel, fmtShortLang, fmtTimeLeftLang, stageLabel, useLang, useT } from "../../lib/i18n.jsx";
+import { useTodoPermissions } from "../../lib/todoPermissions.jsx";
 
 const tagStyle = {
   fontFamily: t.label,
@@ -46,6 +47,8 @@ export function WorkCard({
   const tr = useT();
   const lang = useLang();
   const [passing, setPassing] = useState(false);
+  const [confirmingDone, setConfirmingDone] = useState(false);
+  const { canComplete } = useTodoPermissions(item);
   const urgent = Boolean(item.urgent_at);
   const overdue = !urgent && item.scheduled_for && item.scheduled_for < today;
   const isComplaint = item.kind === "complaint";
@@ -53,7 +56,8 @@ export function WorkCard({
   /* SBM-68: staff see an Admin & Intake stage assigned to them, but not its category. */
   const showCategory = isStage && item.category && (canAdmin || !STAFF_HIDDEN_WORKFLOW_CATEGORIES.includes(item.category));
   const title = isStage ? stageLabel(lang, item.stage_id, item.title) : item.title;
-  const canFinish = !isComplaint || canAdmin;
+  /* SBM-82: a todo still waiting to be routed can't be finished yet. */
+  const canFinish = isComplaint ? canAdmin : item.kind !== "todo" || canComplete;
 
   return (
     <Card
@@ -146,7 +150,7 @@ export function WorkCard({
             <button
               type="button"
               disabled={busy}
-              onClick={() => onDone(item)}
+              onClick={() => setConfirmingDone(true)}
               style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
             >
               <Check size={14} /> {isComplaint ? tr("resolve") : tr("done")}
@@ -161,6 +165,25 @@ export function WorkCard({
             <ArrowRightLeft size={14} /> {tr("passOn")}
           </button>
         </div>
+        {confirmingDone && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 13, color: t.edge, flex: "1 1 auto" }}>{tr("confirmMarkDone")}</span>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setConfirmingDone(false);
+                onDone(item);
+              }}
+              style={{ ...PRIMARY_BUTTON_STYLE, minHeight: 44 }}
+            >
+              {tr("yesDone")}
+            </button>
+            <button type="button" onClick={() => setConfirmingDone(false)} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44 }}>
+              {tr("cancel")}
+            </button>
+          </div>
+        )}
         {passing && (
           <PassOnPicker
             roster={roster}

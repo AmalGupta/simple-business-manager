@@ -275,6 +275,10 @@ CREATE TABLE todos (
   -- default (see packages/core/src/work-location.ts).
   work_location     TEXT,
 
+  -- migration 0053 (SBM-82): set when an admin routes it (saves assignees).
+  -- A todo can't be marked done while NULL.
+  routed_at         TEXT,
+
   created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 
   -- Assignment lived here as assigned_to_user_id/assigned_by_user_id/

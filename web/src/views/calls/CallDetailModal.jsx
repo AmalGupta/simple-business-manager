@@ -88,7 +88,7 @@ export function CallDetailModal({
   const handleAssign = async (todoId, userIds) => {
     const updated = await onAssign?.(todoId, userIds);
     if (updated?.assignees) {
-      patchLocalTodo(todoId, { assignees: updated.assignees });
+      patchLocalTodo(todoId, { assignees: updated.assignees, routed_at: updated.routed_at ?? null });
     }
     return updated;
   };

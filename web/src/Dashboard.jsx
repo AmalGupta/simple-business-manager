@@ -34,6 +34,7 @@ import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
 import { StaffLanguagePicker } from "./views/staff/StaffLanguagePicker.jsx";
 import { LanguageProvider } from "./lib/i18n.jsx";
+import { TodoPermissionsProvider } from "./lib/todoPermissions.jsx";
 import { StaffHubView } from "./views/staff/StaffHubView.jsx";
 import { OffboardingListView } from "./views/staff/OffboardingListView.jsx";
 import { OffboardingView } from "./views/staff/OffboardingView.jsx";
@@ -124,6 +125,12 @@ export default function SimpleBusinessManager() {
      timeline — their bulk `calls` list is never loaded (see the `me` effect
      below), so this is the only path to a call's transcript for them. */
   const [fetchedCall, setFetchedCall] = useState(null);
+  /* The open call page is fetched once — keep its todos in step with edits. */
+  const patchFetchedCallTodo = useCallback((todoId, patch) => {
+    setFetchedCall((c) =>
+      c?.todos ? { ...c, todos: c.todos.map((td) => (td.id === todoId ? { ...td, ...patch } : td)) } : c
+    );
+  }, []);
 
   /* undefined = checking, null = logged out, object = logged in. See
      src/lib/auth.ts / LoginScreen above — additive session-cookie auth,
@@ -366,6 +373,7 @@ export default function SimpleBusinessManager() {
     }
     try {
       await patchTodo(todo.id, patch);
+      patchFetchedCallTodo(todo.id, patch);
       setTodoRefreshKey((k) => k + 1);
       if (me?.role !== "staff") {
         fetchDashboardSummary()
@@ -440,6 +448,10 @@ export default function SimpleBusinessManager() {
      personal queue tile without a full page reload. */
   const onAssignTodo = useCallback(async (todoId, userIds) => {
     const updated = await patchTodo(todoId, { assigned_to_user_ids: userIds });
+    patchFetchedCallTodo(todoId, {
+      ...(updated?.assignees ? { assignees: updated.assignees } : {}),
+      routed_at: updated?.routed_at ?? null,
+    });
     setTodoRefreshKey((k) => k + 1);
     try {
       const [summary, todos] = await Promise.all([
@@ -623,6 +635,7 @@ export default function SimpleBusinessManager() {
 
   const shell = (children, { wide = false, fillViewport = false } = {}) => (
     <LanguageProvider lang={displayLang}>
+    <TodoPermissionsProvider me={me}>
     <div
       className={fillViewport ? "sbm-fill-viewport" : undefined}
       data-inner-scrolls={innerScrolls ? "1" : "0"}
@@ -727,6 +740,7 @@ export default function SimpleBusinessManager() {
         {children}
       </main>
     </div>
+    </TodoPermissionsProvider>
     </LanguageProvider>
   );
 
