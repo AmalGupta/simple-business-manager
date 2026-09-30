@@ -8,6 +8,7 @@ import { TodoAssignControl } from "./TodoAssignControl.jsx";
 import { TodoAssigneeMeta, TodoCallExtractionMeta } from "./TodoFacts.jsx";
 import { TodoContext } from "../../components/TodoContext.jsx";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
+import { TaskContacts, taskContacts } from "../work/TaskContacts.jsx";
 import "./OpenTodoCard.css";
 
 export const OPEN_TODO_PAGE_SIZE = 20;
@@ -212,6 +213,14 @@ export function OpenTodoCard({
                   )}
 
                   <div className="sbm-open-todo-card__below-text">
+                    <TaskContacts
+                      contacts={taskContacts({
+                        client_id: td.client_contact_id,
+                        client_name: td.client_contact_name,
+                        client_phone: td.client_contact_phone,
+                        site_contacts: td.site_contacts,
+                      })}
+                    />
                     <TodoAssigneeMeta todo={td} />
                     {onAssign ? (
                       <div className="sbm-open-todo-card__toolbar">
