@@ -36,6 +36,8 @@ import {
   listMyOpenTodos,
   listOpenTodosByAssigneeBucket,
   countOpenTodosByAssigneeBucket,
+  OPEN_TODO_BUCKETS,
+  type OpenTodoAssigneeBucket,
   getLatestVoiceNotesByTodoIds,
   getSitesNeedingAttention,
   getTodoById,
@@ -419,18 +421,19 @@ export async function handleGetMyOpenTodos(request: Request, env: Env): Promise<
 }
 
 /**
- * Admin Open tasks — paginated open todos by assignee bucket
- * (mine | unassigned | staff | blocked). Optional date_from / date_to filter
- * on task identification date (todos.created_at).
+ * Admin Open tasks — paginated open todos by bucket: client calls by assignee
+ * (mine | unassigned | staff | blocked), plus desk | voice_notes. Optional
+ * date_from / date_to filter on task identification date (todos.created_at).
  */
 export async function handleGetOpenTodos(request: Request, env: Env): Promise<Response> {
   const gate = await requireAdmin(request, env);
   if (gate instanceof Response) return gate;
   const url = new URL(request.url);
-  const bucket = url.searchParams.get("bucket")?.trim() || "mine";
-  if (bucket !== "mine" && bucket !== "unassigned" && bucket !== "staff" && bucket !== "blocked") {
-    return json({ error: "bucket must be mine, unassigned, staff, or blocked" }, 400);
+  const bucketParam = url.searchParams.get("bucket")?.trim() || "mine";
+  if (!(OPEN_TODO_BUCKETS as readonly string[]).includes(bucketParam)) {
+    return json({ error: `bucket must be one of ${OPEN_TODO_BUCKETS.join(", ")}` }, 400);
   }
+  const bucket = bucketParam as OpenTodoAssigneeBucket;
   const limitParam = Number(url.searchParams.get("limit"));
   const offsetParam = Number(url.searchParams.get("offset"));
   const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(limitParam, 100) : 20;

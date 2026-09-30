@@ -101,7 +101,14 @@ export function OpenTodoCard({
 
   const head = todos[0];
   const callId = head.call_id;
-  const title = callName || head.client_name || "Unknown caller";
+  /* Client call (admin Open tasks): site name on top, caller name + phone under it. */
+  const clientCall = head.call_kind === "call" && Boolean(head.caller_name || head.caller_phone);
+  const siteNames = clientCall ? [...new Set(todos.map((td) => td.site_name).filter(Boolean))] : [];
+  const title = siteNames.length
+    ? siteNames.join(", ")
+    : callName || head.client_name || "Unknown caller";
+  const clientName = clientCall && siteNames.length ? head.caller_name : null;
+  const clientPhone = clientCall ? head.caller_phone : null;
   const canOpen = typeof onOpenCall === "function" && Boolean(callId);
 
   const unresolved = resolveUnresolved(todos, unresolvedProp);
@@ -132,17 +139,24 @@ export function OpenTodoCard({
           {expanded ? <ChevronDown size={16} strokeWidth={2} /> : <ChevronRight size={16} strokeWidth={2} />}
         </button>
 
-        <button
-          type="button"
-          className="sbm-open-todo-card__call"
-          disabled={!canOpen}
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpenCall?.(callId);
-          }}
-        >
-          {title}
-        </button>
+        <div className="sbm-open-todo-card__heading">
+          <button
+            type="button"
+            className="sbm-open-todo-card__call"
+            disabled={!canOpen}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenCall?.(callId);
+            }}
+          >
+            {title}
+          </button>
+          {clientName || clientPhone ? (
+            <TaskContacts
+              contacts={[{ key: "caller", name: clientName || head.caller_name, phone: clientPhone }]}
+            />
+          ) : null}
+        </div>
 
         <dl className="sbm-open-todo-card__summary-stats" onClick={toggle}>
           <div className="sbm-open-todo-card__summary-stat">
@@ -219,7 +233,7 @@ export function OpenTodoCard({
                         client_name: td.client_contact_name,
                         client_phone: td.client_contact_phone,
                         site_contacts: td.site_contacts,
-                      })}
+                      }).filter((c) => !clientPhone || c.phone !== clientPhone)}
                     />
                     <TodoAssigneeMeta todo={td} />
                     {onAssign ? (
