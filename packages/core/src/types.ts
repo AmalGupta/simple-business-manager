@@ -213,7 +213,7 @@ export interface Escalation {
 }
 
 /** migration 0033/0034: an in-app "request/report an issue" form — voice only, filed directly into Jira. */
-export type AppRequestStatus = "pending" | "transcribing" | "submitted" | "failed";
+export type AppRequestStatus = "pending" | "transcribing" | "filing" | "submitted" | "failed";
 
 export interface AppRequest {
   id: string;
