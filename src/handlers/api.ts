@@ -69,6 +69,7 @@ import {
   setCallSubmitted,
   setTodoAssignees,
   updateSite,
+  SiteContactRefError,
   updateTodo,
   type SessionWithUser,
   type CallEntryTypeFilter,
@@ -699,8 +700,9 @@ export async function handlePostSite(request: Request, env: Env): Promise<Respon
     address: str("address"),
     poc_name: str("poc_name"),
     poc_contact_number: str("poc_contact_number"),
-    assigned_by: str("assigned_by"),
-    referred_by: str("referred_by"),
+    // SBM-83 — picked from the admin-only Contacts directory; staff can't set them.
+    assigned_by_caller_id: session.user_role === "staff" ? null : str("assigned_by_caller_id"),
+    referred_by_caller_id: session.user_role === "staff" ? null : str("referred_by_caller_id"),
     site_location: str("site_location"),
   };
   if (!details.name && !details.house_no && !details.sector && !details.city) {
@@ -708,8 +710,13 @@ export async function handlePostSite(request: Request, env: Env): Promise<Respon
   }
 
   const assignCreator = session.user_role === "staff" ? session.user_id : null;
-  const site = await createSite(env.DB, details, session.user_id, assignCreator);
-  return json(site, 201);
+  try {
+    const site = await createSite(env.DB, details, session.user_id, assignCreator);
+    return json(site, 201);
+  } catch (err) {
+    if (err instanceof SiteContactRefError) return json({ error: err.message }, 400);
+    throw err;
+  }
 }
 
 export async function handleGetSitesAttention(request: Request, env: Env): Promise<Response> {
@@ -808,8 +815,9 @@ const SITE_PATCH_KEYS = [
   "sector",
   "city",
   "poc_contact_number",
-  "assigned_by",
-  "referred_by",
+  /* SBM-83 — directory contact ids only; updateSite fills the display text. */
+  "assigned_by_caller_id",
+  "referred_by_caller_id",
   "site_location",
   "target_closure_date",
 ] as const;
@@ -894,6 +902,7 @@ export async function handlePatchSite(request: Request, env: Env, id: string): P
     if (!updated) return json({ error: "not found" }, 404);
     return json(updated);
   } catch (err) {
+    if (err instanceof SiteContactRefError) return json({ error: err.message }, 400);
     // UNIQUE(name) — renaming onto a site that already exists. Same shape as
     // the caller-phone conflict in handlers/callers.ts.
     if (String(err).includes("UNIQUE")) return json({ error: "a site with that name already exists" }, 409);
