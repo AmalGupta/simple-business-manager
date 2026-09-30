@@ -23,6 +23,7 @@ import { formatSpokenRequest } from "../../packages/core/prompts/app-request-for
 import { scanCallForSites } from "../../packages/core/prompts/site-scan";
 import { scanCallForSpam } from "../../packages/core/prompts/spam-scan";
 import {
+  claimAppRequestForFiling,
   getAppRequestByJobId,
   getCallByJobId,
   type AppRequest,
@@ -195,12 +196,19 @@ export async function handleSarvamWebhook(
   }
 
   if (appRequest) {
-    try {
-      const result = await fetchResult(env, body.job_id);
-      await processAppRequest(env, appRequest, result.transcript ?? "");
-    } catch (err) {
-      await markAppRequestFailed(env.DB, appRequest.id, `webhook: ${String(err)}`);
+    if (!(await claimAppRequestForFiling(env.DB, appRequest.id))) {
+      return new Response("ok", { status: 200 });
     }
+    ctx.waitUntil(
+      (async () => {
+        try {
+          const result = await fetchResult(env, body.job_id);
+          await processAppRequest(env, appRequest, result.transcript ?? "");
+        } catch (err) {
+          await markAppRequestFailed(env.DB, appRequest.id, `webhook: ${String(err)}`);
+        }
+      })()
+    );
     return new Response("ok", { status: 200 });
   }
   if (!call) return new Response("Unknown job_id", { status: 404 }); // unreachable — narrows the type below
