@@ -497,16 +497,15 @@ export function SitesReviewGrid({
     [contactsBySite]
   );
 
-  const saveContacts = async (callerIds) => {
-    const contacts = await postSiteContacts(contactsSite.id, callerIds);
-    setContactsBySite((current) => ({ ...current, [contactsSite.id]: contacts }));
-    setDetailsSite((current) =>
-      current?.id === contactsSite.id ? { ...current, contacts } : current
-    );
+  const saveContacts = async (siteId, callerIds) => {
+    const contacts = await postSiteContacts(siteId, callerIds);
+    setContactsBySite((current) => ({ ...current, [siteId]: contacts }));
+    setDetailsSite((current) => (current?.id === siteId ? { ...current, contacts } : current));
     // Server truth for every other screen reading this list (and for a
     // later remount of this one) — the local override is only the bridge.
     // Also refreshes site_name_being_used / poc_* rewritten on contact save.
     await onContactsChanged?.();
+    return contacts;
   };
 
   /* Same route the site page uses: the memo becomes a call on the site,
@@ -755,7 +754,7 @@ export function SitesReviewGrid({
             (c) => c.caller_id
           )}
           onClose={() => setContactsSite(null)}
-          onSave={saveContacts}
+          onSave={(callerIds) => saveContacts(contactsSite.id, callerIds)}
           onSkip={
             onConfirmWithoutContact &&
             contactsSite.is_confirmed !== "Y" &&
@@ -782,11 +781,7 @@ export function SitesReviewGrid({
           editableName
           onClose={() => setDetailsSite(null)}
           onSave={(patch) => onDetailsSaved(detailsSite, patch)}
-          onAddContact={() => {
-            const site = detailsSite;
-            setDetailsSite(null);
-            setContactsSite(site);
-          }}
+          onSaveContacts={(callerIds) => saveContacts(detailsSite.id, callerIds)}
         />
       )}
     </>
