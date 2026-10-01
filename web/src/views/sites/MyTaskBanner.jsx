@@ -6,6 +6,7 @@ import { TILE_ROW_STYLE, TEXT_INPUT_STYLE, PRIMARY_BUTTON_STYLE, SMALL_SECONDARY
 import { patchSiteTask, fetchUnassignedSiteTasks, fetchStaffRoster } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
+import { CompleteTaskModal } from "../../components/work/CompleteTaskModal.jsx";
 
 /* Staff-facing banner on their own SiteView — their open task(s) at this
    site, with a one-tap "Mark done" that then offers an immediate handoff to
@@ -24,10 +25,12 @@ export function MyTaskBanner({ siteId, myTasks, onChanged }) {
   const [staffId, setStaffId] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const markDone = async (task) => {
+  const [doneFor, setDoneFor] = useState(null); // SBM-103: task whose completion notes are open
+
+  const afterDone = async (task) => {
+    setDoneFor(null);
     setCompletingId(task.id);
     try {
-      await patchSiteTask(task.id, { status: "done" });
       // Completion itself is done regardless of what follows — refresh
       // immediately so the app-level tile counts and this banner reflect it
       // even if the handoff picker below can't be offered for some reason.
@@ -45,7 +48,7 @@ export function MyTaskBanner({ siteId, myTasks, onChanged }) {
         console.error("[sbm] failed to load handoff options — completion still succeeded", err);
       }
     } catch (err) {
-      console.error("[sbm] failed to mark task done", err);
+      console.error("[sbm] failed to refresh after marking task done", err);
     } finally {
       setCompletingId(null);
     }
@@ -83,7 +86,7 @@ export function MyTaskBanner({ siteId, myTasks, onChanged }) {
               )}
             </div>
             <button
-              onClick={() => markDone(task)}
+              onClick={() => setDoneFor(task)}
               disabled={completingId === task.id}
               style={{ ...PRIMARY_BUTTON_STYLE, opacity: completingId === task.id ? 0.6 : 1, minHeight: 34, padding: "0 12px" }}
             >
@@ -92,6 +95,16 @@ export function MyTaskBanner({ siteId, myTasks, onChanged }) {
           </div>
         ))}
       </Card>
+      )}
+
+      {doneFor && (
+        <CompleteTaskModal
+          kind="site_task"
+          id={doneFor.id}
+          title={stageLabel(lang, doneFor.stage_id, doneFor.stage_label)}
+          onClose={() => setDoneFor(null)}
+          onCompleted={() => afterDone(doneFor)}
+        />
       )}
 
       {handoffFor && (

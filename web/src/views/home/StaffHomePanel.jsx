@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { AssignedWorkTile } from "../work/AssignedWorkTile.jsx";
+import { fetchTaskUpdateInbox } from "../../lib/api.js";
 import { SiteVisitTile } from "../site-visit/SiteVisitTile.jsx";
 import { ComplaintsTile } from "../site-visit/ComplaintsTile.jsx";
 import { ScopeGate, useViewAsReadOnly } from "../../lib/scopes.jsx";
@@ -24,6 +26,17 @@ export function StaffHomePanel({
 }) {
   const confirmedSites = (sites ?? []).filter((s) => s.is_confirmed !== "N");
   const readOnly = useViewAsReadOnly();
+  /* SBM-103 — tasks with an admin's update not yet opened: green bubble on the tile. */
+  const [updatesCount, setUpdatesCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetchTaskUpdateInbox({ forUserId })
+      .then((rows) => !cancelled && setUpdatesCount(rows.length))
+      .catch((err) => console.error("[sbm] failed to load task updates inbox", err));
+    return () => {
+      cancelled = true;
+    };
+  }, [forUserId, myOpenTodosCount, openSiteTasks.length]);
 
   return (
     <>
@@ -57,6 +70,7 @@ export function StaffHomePanel({
             count={(myOpenTodosCount ?? 0) + openSiteTasks.length}
             urgentCount={urgentWorkCount}
             complaintsCount={assignedComplaintsCount}
+            updatesCount={updatesCount}
             onOpen={onOpenAssignedWork}
           />
         </ScopeGate>

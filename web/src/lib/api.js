@@ -1336,6 +1336,49 @@ export function postWorkHandoff(kind, id, toUserId, { forUserId } = {}) {
   });
 }
 
+/* SBM-103 — task updates. A "section" is { body, files: [{ file|blob, name }] }. */
+function appendSection(fd, prefix, section) {
+  if (section?.body?.trim()) fd.append(`${prefix}body`, section.body.trim());
+  for (const f of section?.files ?? []) fd.append(`${prefix}media`, f.file, f.name);
+}
+
+async function multipartWork(path, fd) {
+  const res = await fetch(path, { method: "POST", body: fd });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `POST ${path} → ${res.status}`);
+  }
+  return res.json();
+}
+
+/** { task, updates } — task header + transitions, and every post newest first. */
+export function fetchTaskUpdates(kind, id) {
+  return workFetch(`/api/work/${kind}/${id}/updates`);
+}
+
+export function postTaskUpdate(kind, id, section) {
+  const fd = new FormData();
+  appendSection(fd, "", section);
+  return multipartWork(`/api/work/${kind}/${id}/updates`, fd);
+}
+
+/** Mark done with notes; a non-empty `pending` creates a follow-up task. */
+export function postTaskComplete(kind, id, { completed, pending }, { forUserId } = {}) {
+  const fd = new FormData();
+  appendSection(fd, "completed_", completed);
+  appendSection(fd, "pending_", pending);
+  return multipartWork(`/api/work/${kind}/${id}/complete${forUserQuery(forUserId)}`, fd);
+}
+
+export function postTaskUpdatesSeen(kind, id) {
+  return workFetch(`/api/work/${kind}/${id}/updates/seen`, { method: "POST", body: "{}" });
+}
+
+/** Items with posts from the other side not yet opened — the green-bubble list. */
+export function fetchTaskUpdateInbox({ forUserId } = {}) {
+  return workFetch(`/api/work/updates/inbox${forUserQuery(forUserId)}`);
+}
+
 export function fetchStaffRosterGrid(to) {
   return workFetch(`/api/work/roster?to=${encodeURIComponent(to)}`);
 }
