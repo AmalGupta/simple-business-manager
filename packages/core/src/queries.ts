@@ -2154,54 +2154,6 @@ export async function listCallCallerOptions(
   return (results ?? []).map((r) => r.name);
 }
 
-export interface CallsCalendarResult {
-  days: Record<string, number>;
-  min_year: number;
-}
-
-/** Home calendar — call counts per day (excludes low_signal, same as legacy bulk fetch). */
-export async function getCallsCalendar(db: D1Database, year: number, month: number): Promise<CallsCalendarResult> {
-  const monthIndex = month - 1;
-  if (monthIndex < 0 || monthIndex > 11) throw new Error("invalid month");
-  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-  const daysInMonth = new Date(year, month, 0).getDate();
-  const monthEnd = `${year}-${String(month).padStart(2, "0")}-${String(daysInMonth).padStart(2, "0")}`;
-
-  const baseWhere = buildCallListWhere({ includeLowSignal: false });
-
-  const [{ results: dayRows }, minRow] = await Promise.all([
-    db
-      .prepare(
-        `SELECT substr(calls.recorded_at, 1, 10) AS day, COUNT(*) AS n
-         ${CALL_LIST_FROM}
-         ${baseWhere.sql}
-           AND calls.recorded_at IS NOT NULL
-           AND substr(calls.recorded_at, 1, 10) >= ?
-           AND substr(calls.recorded_at, 1, 10) <= ?
-         GROUP BY day`
-      )
-      .bind(...baseWhere.binds, monthStart, monthEnd)
-      .all<{ day: string; n: number }>(),
-    db
-      .prepare(
-        `SELECT MIN(CAST(substr(calls.recorded_at, 1, 4) AS INTEGER)) AS min_year
-         ${CALL_LIST_FROM}
-         ${baseWhere.sql}
-           AND calls.recorded_at IS NOT NULL`
-      )
-      .bind(...baseWhere.binds)
-      .first<{ min_year: number | null }>(),
-  ]);
-
-  const days: Record<string, number> = {};
-  for (const row of dayRows ?? []) days[row.day] = row.n;
-
-  const currentYear = new Date().getFullYear();
-  const min_year = minRow?.min_year ?? currentYear;
-
-  return { days, min_year };
-}
-
 export interface DayClosureRow {
   id: string;
   text: string;
@@ -2437,11 +2389,10 @@ export async function countCallsNeedingAction(
 }
 
 /**
- * Qualifying-call counts per day across a date range, for the carousel's date
- * strip. getCallsCalendar can't be reused: it groups on `recorded_at` (upload
- * time) and counts every call, so its dots would point at days the carousel
- * has nothing on. This groups on the same effective-date expression the list
- * orders by, over the same qualifying set.
+ * Qualifying-call counts per day across a date range — the dots on both the
+ * carousel's date strip and the home header calendar. Groups on the same
+ * effective-date expression the list orders by, over the same qualifying set,
+ * so a dot always opens a day with cards.
  *
  * Only ever over the window asked for (the client asks in 30-day blocks), so
  * it stays an index range scan — no unbounded aggregate like an earliest-year

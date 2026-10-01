@@ -110,10 +110,6 @@ export async function fetchCallCallers(includeLowSignal = true) {
   return fetchJSON(`/api/calls/callers${qs}`);
 }
 
-export async function fetchCallsCalendar(year, month) {
-  return fetchJSON(`/api/calls/calendar?year=${year}&month=${month}`);
-}
-
 export async function fetchCallsDay(date) {
   return fetchJSON(`/api/calls/day?date=${encodeURIComponent(date)}`);
 }
@@ -866,6 +862,12 @@ export function loadCallsNeedingActionCalendar(index = 0) {
     windows.set(index, created);
   }
   return entry.promise.then(() => getCachedCallsNeedingActionCalendar());
+}
+
+/** Drops every loaded window — after a change (e.g. a call deleted) that can
+ *  move counts outside the day on screen. */
+export function invalidateCallsNeedingActionCalendar() {
+  cnaCalendar = { today: null, windows: new Map() };
 }
 
 /** Whether window `index`'s dots are loaded or loading. */
