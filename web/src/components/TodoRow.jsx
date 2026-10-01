@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Circle, Check, Clock } from "lucide-react";
+import { CheckCircle2, RotateCcw } from "lucide-react";
 import { t } from "../theme.js";
 import { fmtShort, isUrgent } from "../lib/dates.js";
 import { useT } from "../lib/i18n.jsx";
@@ -21,13 +21,14 @@ export function formatTodoSentence(todo) {
 
 const CONFIRM_TIMEOUT_MS = 8000;
 
-const confirmBtn = { minHeight: 32, padding: "0 10px", fontSize: 12 };
+const actionBtn = { minHeight: 32, padding: "0 12px", fontSize: 12 };
 
-/* SBM-82 — marking done takes a second, deliberate tap on "Yes, done" (away
-   from the check), so a double tap or a row sliding under the finger can't
-   close a todo. The check is hidden until the todo is routed, and a done
-   todo can only be reopened by an admin. */
-function useDoneControl(todo, onToggle, readOnly) {
+/* SBM-100 — a todo is completed only through this explicit "Mark completed"
+   button (no tick-box), and still needs the second "Yes, done" tap (SBM-82)
+   so a double tap can't close it. Staff need the todo routed first; only an
+   admin can reopen a done todo. */
+export function TodoDoneAction({ todo, onToggle, busy, className }) {
+  const tr = useT();
   const { canComplete, canReopen } = useTodoPermissions(todo);
   const [confirming, setConfirming] = useState(false);
   const done = todo.status === "done";
@@ -42,51 +43,68 @@ function useDoneControl(todo, onToggle, readOnly) {
     setConfirming(false);
   }, [todo.id, todo.status]);
 
-  const showCheck = done || canComplete || readOnly;
-  const checkEnabled = !readOnly && (done ? canReopen : canComplete);
-  const onCheck = () => {
-    if (!checkEnabled) return;
-    if (done) onToggle(todo);
-    else setConfirming(true);
-  };
-  const confirm = () => {
-    setConfirming(false);
-    onToggle(todo);
-  };
-  return { done, showCheck, checkEnabled, onCheck, confirming, confirm, cancel: () => setConfirming(false) };
-}
+  const btnProps = className
+    ? { className, style: { display: "inline-flex", alignItems: "center", gap: 6 } }
+    : { style: { ...SMALL_SECONDARY_BUTTON_STYLE, ...actionBtn, display: "inline-flex", alignItems: "center", gap: 6 } };
 
-function ConfirmDone({ busy, onConfirm, onCancel }) {
-  const tr = useT();
+  if (done) {
+    if (!canReopen) return null;
+    return (
+      <button type="button" disabled={busy} onClick={() => onToggle(todo)} {...btnProps}>
+        <RotateCcw size={14} />
+        Reopen
+      </button>
+    );
+  }
+
+  if (confirming) {
+    return (
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+        <span style={{ fontSize: 12, color: t.edge2 }}>{tr("confirmMarkDone")}</span>
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setConfirming(false);
+            onToggle(todo);
+          }}
+          style={{ ...PRIMARY_BUTTON_STYLE, ...actionBtn }}
+        >
+          {tr("yesDone")}
+        </button>
+        <button type="button" onClick={() => setConfirming(false)} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, ...actionBtn }}>
+          {tr("cancel")}
+        </button>
+      </span>
+    );
+  }
+
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
-      <span style={{ fontSize: 12, color: t.edge2 }}>{tr("confirmMarkDone")}</span>
-      <button type="button" onClick={onConfirm} disabled={busy} style={{ ...PRIMARY_BUTTON_STYLE, ...confirmBtn }}>
-        {tr("yesDone")}
-      </button>
-      <button type="button" onClick={onCancel} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, ...confirmBtn }}>
-        {tr("cancel")}
-      </button>
-    </span>
+    <button
+      type="button"
+      disabled={busy || !canComplete}
+      title={canComplete ? undefined : "This task needs routing before it can be marked completed"}
+      onClick={() => setConfirming(true)}
+      {...btnProps}
+    >
+      <CheckCircle2 size={14} />
+      Mark completed
+    </button>
   );
 }
 
 /**
- * Checklist row — text + optional due on the right.
- * `embedded` = OpenTodoCard / Studio card body (no CallCard frost borders).
+ * Checklist row — text + optional due on the right, and the Mark completed
+ * button underneath when `onToggle` is passed (and not `readOnly`).
+ * `embedded` = OpenTodoCard / Studio card body (no CallCard frost borders);
+ * the card places the button in its own toolbar, so embedded rows omit it.
  * `showReceipt={false}` when the parent places the read receipt itself.
  */
 export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = false, showReceipt = true }) {
+  const done = todo.status === "done";
   const parked = todo.status === "snoozed";
   const urgent = isUrgent(todo);
-  const { done, showCheck, checkEnabled, onCheck, confirming, confirm, cancel } = useDoneControl(todo, onToggle, readOnly);
   const receipt = useTodoReceipt(showReceipt ? todo : null);
-  const Icon = done ? Check : parked ? Clock : Circle;
-  const label = done ? `Reopen: ${todo.text}` : `Mark done: ${todo.text}`;
-
-  const trailing = confirming ? (
-    <ConfirmDone busy={busy} onConfirm={confirm} onCancel={cancel} />
-  ) : null;
 
   if (embedded) {
     return (
@@ -94,43 +112,28 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = fal
         className={`sbm-todo-row${done ? " is-done" : ""}${busy ? " is-busy" : ""}`}
         onContextMenu={receipt.onContextMenu}
       >
-        {showCheck ? (
-          <button
-            type="button"
-            className="sbm-todo-row__check"
-            onClick={onCheck}
-            disabled={busy || !checkEnabled}
-            aria-pressed={done}
-            aria-label={label}
-          >
-            <Icon size={18} strokeWidth={done ? 2.5 : 1.6} />
-          </button>
-        ) : null}
-
         <span className={`sbm-todo-row__text${done || parked ? " is-muted" : ""}`}>
           {todo.text}
           <TodoContext text={todo.context} />
         </span>
 
-        {trailing ??
-          (!done && todo.due_date ? (
-            <span className={`sbm-todo-row__due${urgent ? " is-urgent" : ""}`}>
-              {fmtShort(todo.due_date)}
-            </span>
-          ) : null)}
+        {!done && todo.due_date ? (
+          <span className={`sbm-todo-row__due${urgent ? " is-urgent" : ""}`}>
+            {fmtShort(todo.due_date)}
+          </span>
+        ) : null}
         {receipt.ticks}
         {receipt.overlay}
       </div>
     );
   }
 
+  const action = onToggle && !readOnly ? <TodoDoneAction todo={todo} onToggle={onToggle} busy={busy} /> : null;
+
   return (
     <div
       onContextMenu={receipt.onContextMenu}
       style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
         padding: "9px 10px",
         margin: "0 -10px",
         borderTop: `1px solid ${t.frost}`,
@@ -139,46 +142,21 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = fal
         transition: "background 400ms ease, opacity 150ms ease",
       }}
     >
-      {showCheck ? (
-        <button
-          onClick={onCheck}
-          disabled={busy || !checkEnabled}
-          aria-pressed={done}
-          aria-label={label}
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span
           style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 44,
-            height: 44,
-            margin: "-11px 0 -11px -11px",
-            flexShrink: 0,
-            padding: 0,
-            border: "none",
-            background: "none",
-            cursor: busy ? "wait" : checkEnabled ? "pointer" : "default",
-            color: done ? t.edge2 : parked ? t.putty : t.edge2,
+            flex: 1,
+            fontSize: 14,
+            lineHeight: 1.5,
+            color: done || parked ? t.edge2 : t.edge,
+            textDecoration: done ? "line-through" : "none",
           }}
         >
-          <Icon size={17} strokeWidth={done ? 2.5 : 1.75} />
-        </button>
-      ) : null}
+          {todo.text}
+          <TodoContext text={todo.context} />
+        </span>
 
-      <span
-        style={{
-          flex: 1,
-          fontSize: 14,
-          lineHeight: 1.5,
-          color: done || parked ? t.edge2 : t.edge,
-          textDecoration: done ? "line-through" : "none",
-        }}
-      >
-        {todo.text}
-        <TodoContext text={todo.context} />
-      </span>
-
-      {trailing ??
-        (!done && todo.due_date && (
+        {!done && todo.due_date && (
           <span
             style={{
               fontSize: 12,
@@ -191,8 +169,10 @@ export function TodoRow({ todo, onToggle, busy, readOnly = false, embedded = fal
           >
             {fmtShort(todo.due_date)}
           </span>
-        ))}
-      {receipt.ticks}
+        )}
+        {receipt.ticks}
+      </div>
+      {action ? <div style={{ marginTop: 8 }}>{action}</div> : null}
       {receipt.overlay}
     </div>
   );
