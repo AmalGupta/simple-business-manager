@@ -19,7 +19,6 @@ import {
   createSite,
   getCallById,
   getCallsCount,
-  getCallsCalendar,
   getCallsDayView,
   getCallDiarizedForExtract,
   getCallsNeedingAction,
@@ -165,18 +164,6 @@ export async function handleGetCallCallers(request: Request, env: Env): Promise<
   if (gate instanceof Response) return gate;
   const includeLowSignal = new URL(request.url).searchParams.get("include_low_signal") === "1";
   return json(await listCallCallerOptions(env.DB, { includeLowSignal }));
-}
-
-export async function handleGetCallsCalendar(request: Request, env: Env): Promise<Response> {
-  const gate = await requireAdmin(request, env);
-  if (gate instanceof Response) return gate;
-  const params = new URL(request.url).searchParams;
-  const year = Number.parseInt(params.get("year") ?? "", 10);
-  const month = Number.parseInt(params.get("month") ?? "", 10);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
-    return json({ error: "year and month (1–12) required" }, 400);
-  }
-  return json(await getCallsCalendar(env.DB, year, month));
 }
 
 export async function handleGetCallsDay(request: Request, env: Env): Promise<Response> {
