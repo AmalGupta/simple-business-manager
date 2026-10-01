@@ -75,6 +75,7 @@ import {
   fetchOpenSiteTasks,
   refreshCallsNeedingAction,
   defaultCallsNeedingActionWindow,
+  loadCallsNeedingActionCalendar,
   postSiteInstallation,
 } from "./lib/api.js";
 
@@ -254,6 +255,9 @@ export default function SimpleBusinessManager() {
     // entry the view never reads.
     refreshCallsNeedingAction(defaultCallsNeedingActionWindow()).catch((err) =>
       console.error("[sbm] failed to prefetch calls needing action", err)
+    );
+    loadCallsNeedingActionCalendar().catch((err) =>
+      console.error("[sbm] failed to prefetch calls needing action calendar", err)
     );
 
     return () => {

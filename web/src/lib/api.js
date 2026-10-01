@@ -793,32 +793,70 @@ export async function postDeskVoiceNote(blob, fileName) {
    notes (a plain multipart POST/`<audio>` GET can't reliably carry the
    custom header). */
 
-/** How many days of cards the carousel opens on, and how far each widening
- *  step reaches. */
-export const CNA_WINDOW_DAYS = 5;
+/** How far back the date strip marks days with calls (SBM-102: today − 30). */
+export const CNA_LOOKBACK_DAYS = 30;
 
-/** How far back the carousel goes at all. The date strip's dots and the header
- *  total both describe this whole span, and scrolling can widen the loaded
- *  cards across it but not past it — "needing action" stops meaning anything
- *  actionable somewhere behind two months of history. */
-export const CNA_LOOKBACK_DAYS = 60;
-
-/** Server cap per request (CALLS_NEEDING_ACTION_MAX_LIMIT). Oldest-first, so a
- *  full page means the later days of the window were cut off. */
-export const CNA_PAGE_LIMIT = 200;
-
-/** The window the carousel opens on: the last CNA_WINDOW_DAYS days through
- *  today. Shared with the home-page cache warm-up so the two can't pick
- *  different windows and miss each other's cache entry. */
-export function defaultCallsNeedingActionWindow() {
-  const to = todayIso();
-  return { dateFrom: addDaysIso(to, -CNA_WINDOW_DAYS), dateTo: to };
+/** One day's cards — the carousel only ever shows the selected day (SBM-102). */
+export function callsNeedingActionDay(date) {
+  return { dateFrom: date, dateTo: date };
 }
 
-/** The full span the carousel can reach: the last CNA_LOOKBACK_DAYS days. */
+/** The day the carousel opens on: today. Shared with the home-page cache
+ *  warm-up so the two can't pick different keys and miss each other. */
+export function defaultCallsNeedingActionWindow() {
+  return callsNeedingActionDay(todayIso());
+}
+
+/** The span the date strip's dots cover: today and the CNA_LOOKBACK_DAYS before it. */
 export function callsNeedingActionLookback() {
   const to = todayIso();
   return { dateFrom: addDaysIso(to, -CNA_LOOKBACK_DAYS), dateTo: to };
+}
+
+/* Which days have calls needing action — loaded once per page (and again
+   only when the date rolls over) and held in memory, so reopening the
+   carousel doesn't ask again. `days` is { iso: count }, days with none
+   absent. Resolving a call adjusts it in place rather than refetching. */
+let cnaCalendar = null; // { key, promise, data }
+
+function cnaCalendarKey() {
+  const { dateFrom, dateTo } = callsNeedingActionLookback();
+  return `${dateFrom}..${dateTo}`;
+}
+
+/** Resolves to { days, min_year }. */
+export function loadCallsNeedingActionCalendar() {
+  const key = cnaCalendarKey();
+  if (cnaCalendar?.key === key) return cnaCalendar.promise;
+  const entry = { key, data: null, promise: null };
+  entry.promise = fetchCallsNeedingActionCalendar(callsNeedingActionLookback())
+    .then((data) => {
+      entry.data = { days: data.days ?? {}, min_year: data.min_year ?? null };
+      return entry.data;
+    })
+    .catch((err) => {
+      if (cnaCalendar === entry) cnaCalendar = null;
+      throw err;
+    });
+  cnaCalendar = entry;
+  return entry.promise;
+}
+
+/** The in-memory calendar if it's loaded and still for today, else null. */
+export function getCachedCallsNeedingActionCalendar() {
+  return cnaCalendar?.key === cnaCalendarKey() ? cnaCalendar.data : null;
+}
+
+/** Shift one day's count (e.g. −1 on resolve); returns the updated data. */
+export function adjustCallsNeedingActionCalendar(date, delta) {
+  const data = cnaCalendar?.data;
+  if (!data) return null;
+  const days = { ...data.days };
+  const n = (days[date] ?? 0) + delta;
+  if (n > 0) days[date] = n;
+  else delete days[date];
+  cnaCalendar.data = { ...data, days };
+  return cnaCalendar.data;
 }
 
 /** Returns { items, voiceNotesByTodoId } — the latter a Map<todoId, TodoVoiceNote>. */
