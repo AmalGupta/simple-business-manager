@@ -941,6 +941,7 @@ export default function SimpleBusinessManager() {
         currentUser={me}
         onBack={() => setView(view.from ?? homeView)}
         onOpen={(id) => setView({ name: "call", id, from: { name: "open-todos" } })}
+        onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: { name: "open-todos" } })}
         onAssign={onAssignTodo}
         onToggle={onToggle}
         onTodoSiteAssigned={onTodoSiteAssigned}
@@ -1189,13 +1190,8 @@ export default function SimpleBusinessManager() {
           setView((v) => (v.name === "task-audit" && (v.tab !== tab || v.q !== q) ? { ...v, tab, q } : v))
         }
         onBack={() => setView(view.from ?? homeView)}
-        onOpenTask={(e) =>
-          /* A call todo opens its call (or desk conversation) with the task's
-             timeline above it; a site task opens the timeline on its own. */
-          e.item_kind === "todo" && e.call_id
-            ? setView({ name: "call", id: e.call_id, task: { kind: "todo", id: e.item_id }, from: view })
-            : setView({ name: "task-timeline", kind: e.item_kind, id: e.item_id, from: view })
-        }
+        onOpenCall={(id) => setView({ name: "call", id, from: view })}
+        onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: view })}
       />
     );
 

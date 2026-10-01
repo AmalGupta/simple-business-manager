@@ -9,6 +9,7 @@ import { BackLink } from "../../components/BackLink.jsx";
 import { fmtDateTime, parseSqliteUtc } from "./workDates.js";
 import { assignedToName, auditDayKey, callKindLabel, describeTransition } from "./taskAuditFormat.js";
 import { TaskContacts, taskContacts } from "./TaskContacts.jsx";
+import { TaskUpdatesModal } from "../../components/work/TaskUpdatesModal.jsx";
 
 const PAGE = 300;
 const SEARCH_DEBOUNCE_MS = 300;
@@ -174,8 +175,11 @@ function AssigneeTile({ name, rows, selected, onSelect, onOpenTask }) {
 /* Admin Task audit — every change on any call todo or site task, as three
    dashboards (by date, by site, by assignee). The search box filters all
    three (server-side keyword over task, site, caller and people). */
-export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initialQ = "", onStateChange }) {
+export function TaskAuditView({ onBack, onOpenCall, onOpenSite, initialTab = "date", initialQ = "", onStateChange }) {
   const [tab, setTab] = useState(initialTab);
+  /* SBM-103 — a task opens as a popup: its timeline with staff updates, done notes and replies. */
+  const [popup, setPopup] = useState(null);
+  const openTask = (e) => setPopup({ kind: e.item_kind, id: e.item_id });
   const [q, setQ] = useState(initialQ);
   const [appliedQ, setAppliedQ] = useState(initialQ.trim());
   const [items, setItems] = useState(null);
@@ -289,14 +293,14 @@ export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initial
       {items && items.length > 0 && (tab === "date" || tab === "complaints" || tab === "completed") &&
         byDate.map(([day, rows]) => (
           <GroupCard key={day} title={fmtLong(day)} count={rows.length}>
-            <AuditTable rows={rows} onOpenTask={onOpenTask} timeOnly />
+            <AuditTable rows={rows} onOpenTask={openTask} timeOnly />
           </GroupCard>
         ))}
 
       {items && items.length > 0 && tab === "site" &&
         bySite.map(([site, rows]) => (
           <GroupCard key={site} title={site} count={rows.length}>
-            <AuditTable rows={rows} onOpenTask={onOpenTask} />
+            <AuditTable rows={rows} onOpenTask={openTask} />
           </GroupCard>
         ))}
 
@@ -310,13 +314,13 @@ export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initial
                 rows={rows}
                 selected={selectedAssignee === name}
                 onSelect={() => setSelectedAssignee((cur) => (cur === name ? null : name))}
-                onOpenTask={onOpenTask}
+                onOpenTask={openTask}
               />
             ))}
           </div>
           {selectedRows && (
             <GroupCard title={selectedAssignee === "NA" ? "Unassigned" : selectedAssignee} count={selectedRows.length}>
-              <AuditTable rows={selectedRows} onOpenTask={onOpenTask} />
+              <AuditTable rows={selectedRows} onOpenTask={openTask} />
             </GroupCard>
           )}
         </>
@@ -331,6 +335,16 @@ export function TaskAuditView({ onBack, onOpenTask, initialTab = "date", initial
         >
           {loadingMore ? "Loading…" : "Load older"}
         </button>
+      )}
+
+      {popup && (
+        <TaskUpdatesModal
+          kind={popup.kind}
+          id={popup.id}
+          onClose={() => setPopup(null)}
+          onOpenCall={onOpenCall}
+          onOpenSite={onOpenSite}
+        />
       )}
     </div>
   );

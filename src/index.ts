@@ -120,6 +120,14 @@ import { handlePostDeskVoiceNote } from "./handlers/desk-voice-note";
 import { handleGetTodoVoiceNote, handlePostTodoVoiceNote } from "./handlers/todo-voice-note";
 import { handleGetSiteTimeline } from "./handlers/site-timeline";
 import {
+  handleGetTaskUpdateInbox,
+  handleGetTaskUpdateMedia,
+  handleGetTaskUpdates,
+  handlePostTaskComplete,
+  handlePostTaskUpdate,
+  handlePostTaskUpdatesSeen,
+} from "./handlers/task-updates";
+import {
   handleGetAssignedWork,
   handleGetStaffRoster,
   handleGetWorkEvents,
@@ -474,6 +482,30 @@ export default {
       return handleGetWorkEvents(request, env);
     }
 
+    // --- SBM-103: task updates (session-gated; multipart uploads). ---
+    if (url.pathname === "/api/work/updates/inbox" && request.method === "GET") {
+      return handleGetTaskUpdateInbox(request, env);
+    }
+    const taskUpdatesSeenMatch = url.pathname.match(/^\/api\/work\/([^/]+)\/([^/]+)\/updates\/seen$/);
+    if (taskUpdatesSeenMatch && request.method === "POST") {
+      return handlePostTaskUpdatesSeen(request, env, taskUpdatesSeenMatch[1], taskUpdatesSeenMatch[2]);
+    }
+    const taskUpdatesMatch = url.pathname.match(/^\/api\/work\/([^/]+)\/([^/]+)\/updates$/);
+    if (taskUpdatesMatch && request.method === "GET") {
+      return handleGetTaskUpdates(request, env, taskUpdatesMatch[1], taskUpdatesMatch[2]);
+    }
+    if (taskUpdatesMatch && request.method === "POST") {
+      return handlePostTaskUpdate(request, env, ctx, taskUpdatesMatch[1], taskUpdatesMatch[2]);
+    }
+    const taskCompleteMatch = url.pathname.match(/^\/api\/work\/([^/]+)\/([^/]+)\/complete$/);
+    if (taskCompleteMatch && request.method === "POST") {
+      return handlePostTaskComplete(request, env, ctx, taskCompleteMatch[1], taskCompleteMatch[2]);
+    }
+    const taskUpdateMediaMatch = url.pathname.match(/^\/api\/task-update-media\/([^/]+)$/);
+    if (taskUpdateMediaMatch && request.method === "GET") {
+      return handleGetTaskUpdateMedia(request, env, taskUpdateMediaMatch[1]);
+    }
+
     const workHandoffMatch = url.pathname.match(/^\/api\/work\/([^/]+)\/([^/]+)\/handoff$/);
     if (workHandoffMatch && request.method === "POST") {
       if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
@@ -779,7 +811,7 @@ export default {
       const session = await requireSession(request, env);
       if (!session) return new Response("Unauthorized", { status: 401 });
       if (!(await assertSiteMembership(env, session, timelineMatch[1]))) return new Response("Forbidden", { status: 403 });
-      return handleGetSiteTimeline(env, timelineMatch[1], session.user_role !== "staff");
+      return handleGetSiteTimeline(env, timelineMatch[1], session.user_role !== "staff", session.user_id);
     }
 
     const siteCallsMatch = url.pathname.match(/^\/api\/sites\/([^/]+)\/calls$/);
