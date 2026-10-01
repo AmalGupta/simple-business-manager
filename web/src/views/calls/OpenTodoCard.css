@@ -297,6 +297,15 @@
   min-width: 0;
 }
 
+.sbm-open-todo-card__completed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-slate);
+}
+
 /* Call-level unresolved that put the card on Blocked */
 .sbm-open-todo-card__unresolved {
   display: flex;

@@ -11,6 +11,7 @@ import { TodoAssigneeMeta, TodoCallExtractionMeta } from "./TodoFacts.jsx";
 import { TodoContext } from "../../components/TodoContext.jsx";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 import { TaskContacts, taskContacts } from "../work/TaskContacts.jsx";
+import { fmtDateTime } from "../work/workDates.js";
 import "./OpenTodoCard.css";
 
 export const OPEN_TODO_PAGE_SIZE = 20;
@@ -75,8 +76,8 @@ function latestCompletedAt(todos) {
 const CONFIRM_TIMEOUT_MS = 8000;
 const actionBtn = { minHeight: 32, padding: "0 12px", fontSize: 12 };
 
-/* Same SBM-82 rules as the TodoRow check: a second "Yes, done" tap, and
-   disabled until the todo is routed. */
+/* Same rules as the TodoRow check: a second "Yes, done" tap (SBM-82), and
+   staff need the todo routed first. */
 function MarkCompletedButton({ todo, onToggle, busy }) {
   const tr = useT();
   const { canComplete } = useTodoPermissions(todo);
@@ -114,7 +115,7 @@ function MarkCompletedButton({ todo, onToggle, busy }) {
       type="button"
       className="sbm-open-todo-card__btn sbm-open-todo-card__btn--secondary"
       disabled={busy || !canComplete}
-      title={canComplete ? undefined : "Assign this task before marking it completed"}
+      title={canComplete ? undefined : "This task needs routing before it can be marked completed"}
       onClick={() => setConfirming(true)}
       style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
     >
@@ -231,7 +232,7 @@ export function OpenTodoCard({
           {completedView ? (
             <div className="sbm-open-todo-card__summary-stat">
               <dt>Completed</dt>
-              <dd>{latestCompletedAt(todos) ? fmtShort(String(latestCompletedAt(todos)).slice(0, 10)) : "—"}</dd>
+              <dd>{fmtDateTime(latestCompletedAt(todos)) || "—"}</dd>
             </div>
           ) : (
             <div className="sbm-open-todo-card__summary-stat">
@@ -304,6 +305,13 @@ export function OpenTodoCard({
                   )}
 
                   <div className="sbm-open-todo-card__below-text">
+                    {completedView && td.completed_at ? (
+                      <div className="sbm-open-todo-card__completed">
+                        <CheckCircle2 size={13} />
+                        Completed {fmtDateTime(td.completed_at)}
+                        {td.completed_by_name ? ` by ${td.completed_by_name}` : ""}
+                      </div>
+                    ) : null}
                     <TaskContacts
                       contacts={taskContacts({
                         client_id: td.client_contact_id,
