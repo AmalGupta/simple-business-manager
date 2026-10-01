@@ -20,7 +20,6 @@ import { SiteMediaUploadRow } from "./SiteMediaUploadRow.jsx";
 import { MyTaskBanner } from "./MyTaskBanner.jsx";
 import { SiteTimeline } from "./SiteTimeline.jsx";
 import { AddPeopleModal } from "./AddPeopleModal.jsx";
-import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
 import { SiteDetailsModal } from "./SiteDetailsModal.jsx";
 import { WorkTimelinePopup } from "./WorkTimelinePopup.jsx";
 import { siteDetailsPrefill, siteDisplayName } from "./sitesGridChrome.jsx";
@@ -73,7 +72,6 @@ export function SiteView({
   const [team, setTeam] = useState(null);
   const [contacts, setContacts] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
-  const [showAssociateContacts, setShowAssociateContacts] = useState(false);
   const [timeline, setTimeline] = useState(null);
 
   const hasCallHistory = useMemo(
@@ -450,18 +448,7 @@ export function SiteView({
           editableName
           onClose={() => setEditingDetails(false)}
           onSave={saveDetails}
-          onAddContact={() => {
-            setEditingDetails(false);
-            setShowAssociateContacts(true);
-          }}
-        />
-      )}
-      {canManage && showAssociateContacts && siteRecord?.id && (
-        <AssociateContactsModal
-          site={siteRecord}
-          existingContactIds={(contacts ?? []).map((c) => c.caller_id)}
-          onClose={() => setShowAssociateContacts(false)}
-          onSave={saveAssociatedContacts}
+          onSaveContacts={saveAssociatedContacts}
         />
       )}
       {showAssignModal && (
