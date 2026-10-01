@@ -1,9 +1,10 @@
-import { Mic, FileText, Video, Image, Users } from "lucide-react";
+import { Mic, FileText, Video, Image, Users, MessageSquare } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtDate } from "../../lib/dates.js";
 import { parseSqliteUtc } from "../work/workDates.js";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 import { VoiceMemoDetail } from "./VoiceMemoDetail.jsx";
+import { TaskUpdateContent } from "../../components/work/TaskUpdateContent.jsx";
 
 /* SBM-97 — date and time. Entries mix ISO timestamps (calls.recorded_at) and
    SQLite UTC "yyyy-mm-dd hh:mm:ss" (media/team/edits), so parse as UTC; a
@@ -26,6 +27,7 @@ function timelineEntryIcon(entry) {
   if (entry.type === "call") return entry.ref?.is_voice_memo ? <Mic size={13} /> : <FileText size={13} />;
   if (entry.type === "media") return entry.ref?.media_type === "video" ? <Video size={13} /> : <Image size={13} />;
   if (entry.type === "team_added") return <Users size={13} />;
+  if (entry.type === "task_update") return <MessageSquare size={13} />;
   return <FileText size={13} />;
 }
 
@@ -65,6 +67,16 @@ export function SiteTimelineEntry({ entry, onOpenCall, canManage, staffRoster = 
             />
           )}
         </>
+      );
+    }
+    if (entry.type === "task_update") {
+      return (
+        <TaskUpdateContent
+          section={entry.ref?.section}
+          body={entry.ref?.body}
+          media={entry.ref?.media ?? []}
+          taskTitle={entry.ref?.task_title}
+        />
       );
     }
     return <span style={{ fontSize: 14, color: t.edge }}>{entry.summary}</span>;

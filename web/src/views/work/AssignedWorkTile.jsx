@@ -4,12 +4,13 @@ import { TILE_VALUE_ROW_STYLE, TILE_NUMBER_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
 import { TileLabel } from "../../components/TileLabel.jsx";
 import { useT } from "../../lib/i18n.jsx";
+import { UpdatesBubble } from "../../components/work/UpdatesBubble.jsx";
 
 /* Staff home — open work assigned to this person. The big number is tasks
    (call todos + site stages); SBM-72 adds a red line underneath for the
    complaints they hold, which the owner asked to stand out the same way
    urgent work does. */
-export function AssignedWorkTile({ count, urgentCount = 0, complaintsCount = 0, onOpen }) {
+export function AssignedWorkTile({ count, urgentCount = 0, complaintsCount = 0, updatesCount = 0, onOpen }) {
   const tr = useT();
   return (
     <button
@@ -20,7 +21,16 @@ export function AssignedWorkTile({ count, urgentCount = 0, complaintsCount = 0, 
       }`}
     >
       <Card tile>
-        <TileLabel action={<ClipboardList size={14} color={t.edge2} />}>{tr("assignedWork")}</TileLabel>
+        <TileLabel
+          action={
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <UpdatesBubble count={updatesCount} label={tr("newUpdates")} />
+              <ClipboardList size={14} color={t.edge2} />
+            </span>
+          }
+        >
+          {tr("assignedWork")}
+        </TileLabel>
         <div style={{ ...TILE_VALUE_ROW_STYLE, flexDirection: "column", alignItems: "flex-start", justifyContent: "center", gap: 6 }}>
           <span style={TILE_NUMBER_STYLE}>{count}</span>
           {complaintsCount > 0 && (

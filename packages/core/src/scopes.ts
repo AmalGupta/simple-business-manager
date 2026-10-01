@@ -93,6 +93,8 @@ const ROUTE_RULES: { method: string; re: RegExp; key: string }[] = [
   { method: "PATCH", re: /^\/api\/work\/[^/]+\/[^/]+$/, key: "staff.assigned_work.act" },
   { method: "POST", re: /^\/api\/work\/[^/]+\/[^/]+\/handoff$/, key: "staff.assigned_work.handoff" },
   { method: "GET", re: /^\/api\/work\/assigned$/, key: "staff.assigned_work" },
+  { method: "POST", re: /^\/api\/work\/[^/]+\/[^/]+\/(updates|complete)$/, key: "staff.assigned_work.act" },
+  { method: "GET", re: /^\/api\/work\/updates\/inbox$/, key: "staff.assigned_work" },
   { method: "PATCH", re: /^\/api\/todos\/[^/]+$/, key: "staff.todos.act" },
   { method: "POST", re: /^\/api\/todos\/[^/]+\/voice-note$/, key: "staff.todos.act" },
   { method: "PATCH", re: /^\/api\/site-tasks\/[^/]+$/, key: "staff.site_tasks.act" },

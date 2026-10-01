@@ -28,7 +28,9 @@ import {
   getCallByJobId,
   type AppRequest,
   getCallerById,
+  getTaskUpdateMediaByJobId,
   isStaffCategory,
+  setTaskUpdateMediaTranscript,
   linkCallToSites,
   markAppRequestFailed,
   markAppRequestSubmitted,
@@ -183,6 +185,23 @@ export async function handleSarvamWebhook(
   // request doesn't 404.
   const call = await getCallByJobId(env.DB, body.job_id);
   const appRequest = call ? null : await getAppRequestByJobId(env.DB, body.job_id);
+  // SBM-103: a task update voice note — transcript only, never extracted.
+  const taskMedia = call || appRequest ? null : await getTaskUpdateMediaByJobId(env.DB, body.job_id);
+  if (taskMedia) {
+    if (body.status === "Failed") {
+      await setTaskUpdateMediaTranscript(env.DB, taskMedia.id, { transcript: null, status: "failed" });
+    } else if (body.status === "Completed") {
+      ctx.waitUntil(
+        fetchResult(env, body.job_id)
+          .then((result) => setTaskUpdateMediaTranscript(env.DB, taskMedia.id, { transcript: result.transcript ?? "", status: "done" }))
+          .catch((err) => {
+            console.error("[task update] transcript fetch failed", taskMedia.id, err);
+            return setTaskUpdateMediaTranscript(env.DB, taskMedia.id, { transcript: null, status: "failed" });
+          })
+      );
+    }
+    return new Response("ok", { status: 200 });
+  }
   if (!call && !appRequest) return new Response("Unknown job_id", { status: 404 });
 
   if (body.status !== "Completed") {

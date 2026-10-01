@@ -34,6 +34,7 @@ import {
   setWorkUrgent,
   updateTodo,
   type WorkItemKind,
+  type WorkItemRef,
 } from "@sbm/core";
 import { requireSession } from "../lib/auth";
 import { resolveForUserId } from "../lib/for-user-scope";
@@ -142,22 +143,43 @@ export async function handlePatchWork(request: Request, env: Env, kindRaw: strin
   }
 
   if (record.status === "done") {
-    if (kind === "todo") {
-      const todo = await getTodoById(env.DB, id);
-      if (todo && !isAdmin && (await isTodoAwaitingRouting(env.DB, todo))) {
-        return json({ error: "route this todo before marking it done" }, 409);
-      }
-      await updateTodo(env.DB, id, { status: "done", completed_at: new Date().toISOString() });
-    } else {
-      await completeSiteTask(env.DB, id, session.user_id);
-    }
-    await logWorkEvents(env.DB, [
-      { kind, itemId: id, siteId: ref.site_id, actorUserId: session.user_id, subjectUserId: subject, event: "completed" },
-    ]);
+    // SBM-103: staff finish with completed / pending notes (POST …/complete).
+    if (!isAdmin) return json({ error: "add what was completed — use complete" }, 400);
+    const blocked = await checkCanComplete(env, kind, id, isAdmin);
+    if (blocked) return blocked;
+    await markWorkItemDone(env, ref, subject, session.user_id);
     return json({ ok: true });
   }
 
   return json({ error: "no recognised fields in patch" }, 400);
+}
+
+/** Why `subject`'s share of this item can't be marked done right now, or null. */
+export async function checkCanComplete(env: Env, kind: WorkItemKind, id: string, isAdmin: boolean): Promise<Response | null> {
+  if (kind === "complaint" && !isAdmin) return json({ error: "only an admin can resolve a complaint" }, 403);
+  if (kind === "todo" && !isAdmin) {
+    const todo = await getTodoById(env.DB, id);
+    if (todo && (await isTodoAwaitingRouting(env.DB, todo))) {
+      return json({ error: "route this todo before marking it done" }, 409);
+    }
+  }
+  return null;
+}
+
+/** Marks a todo / site stage done (with its audit event) or resolves a complaint. */
+export async function markWorkItemDone(env: Env, ref: WorkItemRef, subject: string, actorUserId: string): Promise<void> {
+  if (ref.kind === "complaint") {
+    await closeEscalation(env.DB, ref.id, actorUserId);
+    return;
+  }
+  if (ref.kind === "todo") {
+    await updateTodo(env.DB, ref.id, { status: "done", completed_at: new Date().toISOString() });
+  } else {
+    await completeSiteTask(env.DB, ref.id, actorUserId);
+  }
+  await logWorkEvents(env.DB, [
+    { kind: ref.kind, itemId: ref.id, siteId: ref.site_id, actorUserId, subjectUserId: subject, event: "completed" },
+  ]);
 }
 
 export async function handlePostWorkHandoff(request: Request, env: Env, kindRaw: string, id: string): Promise<Response> {

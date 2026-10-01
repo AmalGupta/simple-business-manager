@@ -1125,7 +1125,9 @@ export type SiteActivitySource =
   | "complaint"
   | "installation"
   | "shortage"
-  | "site_created";
+  | "site_created"
+  /** SBM-103 — a task update / done note on one of the site's tasks. */
+  | "task_update";
 
 export async function touchSiteActivity(
   db: D1Database,
@@ -3872,6 +3874,8 @@ export async function getUnreadActivityCounts(
          SELECT site_id, added_by AS actor_id, created_at FROM site_team_members WHERE added_by IS NOT NULL
          UNION ALL
          SELECT site_id, actor_user_id AS actor_id, created_at FROM site_edits WHERE actor_user_id IS NOT NULL
+         UNION ALL
+         SELECT site_id, author_user_id AS actor_id, created_at FROM task_updates WHERE site_id IS NOT NULL
        ),
        my_last AS (
          SELECT site_id, MAX(created_at) AS last_at FROM activity WHERE actor_id = ? GROUP BY site_id
@@ -4779,7 +4783,7 @@ export async function listSiteCalls(db: D1Database, siteId: string): Promise<Sit
 // note for why.
 // ---------------------------------------------------------------------------
 
-export type SiteTimelineEntryType = "call" | "media" | "team_added" | "site_edit";
+export type SiteTimelineEntryType = "call" | "media" | "team_added" | "site_edit" | "task_update";
 
 export interface SiteTimelineEntry {
   type: SiteTimelineEntryType;
@@ -4801,8 +4805,10 @@ export interface SiteTimelineEntry {
 export async function getSiteTimeline(
   db: D1Database,
   siteId: string,
-  includeCallDetails = false
+  includeCallDetails = false,
+  viewerUserId: string | null = null
 ): Promise<SiteTimelineEntry[]> {
+  const taskUpdates = await listSiteTaskUpdates(db, siteId, viewerUserId ? { userId: viewerUserId, isAdmin: includeCallDetails } : null);
   const [{ results: callRows }, { results: mediaRows }, { results: teamRows }, { results: editRows }] =
     await Promise.all([
       db
@@ -4946,6 +4952,24 @@ export async function getSiteTimeline(
       actor_name: e.actor_name,
       summary: e.summary,
       ref: null,
+    });
+  }
+
+  for (const u of taskUpdates) {
+    entries.push({
+      type: "task_update",
+      id: u.id,
+      created_at: u.created_at,
+      actor_name: u.author_name,
+      summary: u.body ?? "",
+      ref: {
+        item_kind: u.item_kind,
+        item_id: u.item_id,
+        task_title: u.task_title,
+        section: u.section,
+        body: u.body,
+        media: u.media,
+      },
     });
   }
 
@@ -7908,4 +7932,399 @@ export async function updateComplaintDetails(
   const siteId = changes.siteId ?? before.site_id;
   if (siteId) await touchSiteActivity(db, siteId, { source: "complaint", refId: id });
   return true;
+}
+
+// ---------------------------------------------------------------------------
+// SBM-103 — task updates (migration 0058). Staff "Share update" on a work
+// item, the completed / pending notes left when marking it done, and the
+// admin's replies — each a task_updates row with its voice / photo / video
+// in task_update_media. Visible to admins and the item's assignee (or
+// anyone who has posted on it). A site-linked item's updates also feed the
+// site timeline and the Sites unread badge.
+// ---------------------------------------------------------------------------
+
+export type TaskUpdateSection = "update" | "completed" | "pending";
+export type TaskUpdateMediaType = "voice" | "photo" | "video";
+
+export function isTaskUpdateSection(v: unknown): v is TaskUpdateSection {
+  return v === "update" || v === "completed" || v === "pending";
+}
+
+export interface TaskUpdateMedia {
+  id: string;
+  update_id: string;
+  media_type: TaskUpdateMediaType;
+  content_type: string | null;
+  stt_status: string | null;
+  transcript: string | null;
+  created_at: string;
+}
+
+export interface TaskUpdate {
+  id: string;
+  item_kind: WorkItemKind;
+  item_id: string;
+  site_id: string | null;
+  section: TaskUpdateSection;
+  body: string | null;
+  author_user_id: string;
+  author_name: string | null;
+  author_role: UserRole | null;
+  followup_kind: WorkItemKind | null;
+  followup_id: string | null;
+  created_at: string;
+  media: TaskUpdateMedia[];
+}
+
+/** One work item's title, whatever its kind — `a` is the alias of a row carrying item_kind/item_id. */
+const taskTitleSql = (a: string) => `CASE ${a}.item_kind
+  WHEN 'todo' THEN (SELECT todos.text FROM todos WHERE todos.id = ${a}.item_id)
+  WHEN 'site_task' THEN (SELECT workflow_stages.label FROM site_tasks JOIN workflow_stages ON workflow_stages.id = site_tasks.stage_id WHERE site_tasks.id = ${a}.item_id)
+  ELSE (SELECT escalations.text FROM escalations WHERE escalations.id = ${a}.item_id) END`;
+
+const taskStatusSql = (a: string) => `CASE ${a}.item_kind
+  WHEN 'todo' THEN (SELECT todos.status FROM todos WHERE todos.id = ${a}.item_id)
+  WHEN 'site_task' THEN (SELECT site_tasks.status FROM site_tasks WHERE site_tasks.id = ${a}.item_id)
+  ELSE (SELECT escalations.status FROM escalations WHERE escalations.id = ${a}.item_id) END`;
+
+/** `a.item_kind/item_id` currently assigned to user `?` (bound once per kind → three binds). */
+const taskAssignedToSql = (a: string) => `(
+  (${a}.item_kind = 'todo' AND EXISTS (SELECT 1 FROM todo_assignees WHERE todo_assignees.todo_id = ${a}.item_id AND todo_assignees.user_id = ?))
+  OR (${a}.item_kind = 'site_task' AND EXISTS (SELECT 1 FROM site_tasks WHERE site_tasks.id = ${a}.item_id AND site_tasks.assigned_to_user_id = ?))
+  OR (${a}.item_kind = 'complaint' AND EXISTS (SELECT 1 FROM escalations WHERE escalations.id = ${a}.item_id AND escalations.assigned_to_user_id = ?)))`;
+
+/** Staff can read and post on an item they hold, or one they've already posted on (e.g. after passing it on). */
+export async function canUserAccessTaskUpdates(db: D1Database, kind: WorkItemKind, id: string, userId: string): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM (SELECT ? AS item_kind, ? AS item_id) AS it
+       WHERE ${taskAssignedToSql("it")}
+          OR EXISTS (SELECT 1 FROM task_updates WHERE task_updates.item_kind = it.item_kind AND task_updates.item_id = it.item_id AND task_updates.author_user_id = ?)`
+    )
+    .bind(kind, id, userId, userId, userId, userId)
+    .first();
+  return row !== null;
+}
+
+export interface NewTaskUpdateMedia {
+  id: string;
+  mediaType: TaskUpdateMediaType;
+  r2Key: string;
+  contentType: string | null;
+  fileSize: number | null;
+}
+
+/** Writes one post and its media; posting also counts as having seen the item. */
+export async function createTaskUpdate(
+  db: D1Database,
+  input: {
+    kind: WorkItemKind;
+    itemId: string;
+    siteId: string | null;
+    authorUserId: string;
+    section: TaskUpdateSection;
+    body: string | null;
+    media: NewTaskUpdateMedia[];
+  }
+): Promise<string> {
+  const id = crypto.randomUUID();
+  await db.batch([
+    db
+      .prepare(
+        `INSERT INTO task_updates (id, item_kind, item_id, site_id, author_user_id, section, body) VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(id, input.kind, input.itemId, input.siteId, input.authorUserId, input.section, input.body),
+    ...input.media.map((m) =>
+      db
+        .prepare(
+          `INSERT INTO task_update_media (id, update_id, media_type, r2_key, content_type, file_size, stt_status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(m.id, id, m.mediaType, m.r2Key, m.contentType, m.fileSize, m.mediaType === "voice" ? "pending" : null)
+    ),
+    taskUpdateSeenStmt(db, input.kind, input.itemId, input.authorUserId),
+  ]);
+  if (input.siteId) await touchSiteActivity(db, input.siteId, { source: "task_update", refId: id });
+  return id;
+}
+
+export async function setTaskUpdateFollowup(db: D1Database, updateId: string, kind: WorkItemKind, id: string): Promise<void> {
+  await db.prepare(`UPDATE task_updates SET followup_kind = ?, followup_id = ? WHERE id = ?`).bind(kind, id, updateId).run();
+}
+
+export async function getTaskUpdateMediaById(
+  db: D1Database,
+  id: string
+): Promise<(TaskUpdateMedia & { r2_key: string; item_kind: WorkItemKind; item_id: string; followup_kind: WorkItemKind | null; followup_id: string | null }) | null> {
+  const row = await db
+    .prepare(
+      `SELECT task_update_media.*, task_updates.item_kind AS item_kind, task_updates.item_id AS item_id,
+              task_updates.followup_kind AS followup_kind, task_updates.followup_id AS followup_id
+       FROM task_update_media JOIN task_updates ON task_updates.id = task_update_media.update_id
+       WHERE task_update_media.id = ?`
+    )
+    .bind(id)
+    .first<TaskUpdateMedia & { r2_key: string; item_kind: WorkItemKind; item_id: string; followup_kind: WorkItemKind | null; followup_id: string | null }>();
+  return row ?? null;
+}
+
+export async function getTaskUpdateMediaByJobId(db: D1Database, jobId: string): Promise<{ id: string } | null> {
+  const row = await db.prepare(`SELECT id FROM task_update_media WHERE stt_job_id = ?`).bind(jobId).first<{ id: string }>();
+  return row ?? null;
+}
+
+export async function setTaskUpdateMediaSubmitted(db: D1Database, id: string, jobId: string): Promise<void> {
+  await db.prepare(`UPDATE task_update_media SET stt_job_id = ?, stt_status = 'pending' WHERE id = ?`).bind(jobId, id).run();
+}
+
+export async function setTaskUpdateMediaTranscript(
+  db: D1Database,
+  id: string,
+  result: { transcript: string | null; status: "done" | "failed" }
+): Promise<void> {
+  await db
+    .prepare(`UPDATE task_update_media SET transcript = COALESCE(?, transcript), stt_status = ? WHERE id = ?`)
+    .bind(result.transcript, result.status, id)
+    .run();
+}
+
+async function attachTaskUpdateMedia(db: D1Database, rows: Omit<TaskUpdate, "media">[]): Promise<TaskUpdate[]> {
+  const ids = rows.map((r) => r.id);
+  const media = ids.length
+    ? await queryAllByIdChunks<TaskUpdateMedia>(db, ids, (ph) =>
+        `SELECT id, update_id, media_type, content_type, stt_status, transcript, created_at
+         FROM task_update_media WHERE update_id IN (${ph}) ORDER BY created_at ASC`
+      )
+    : [];
+  const byUpdate = new Map<string, TaskUpdateMedia[]>();
+  for (const m of media) {
+    const list = byUpdate.get(m.update_id) ?? [];
+    list.push(m);
+    byUpdate.set(m.update_id, list);
+  }
+  return rows.map((r) => ({ ...r, media: byUpdate.get(r.id) ?? [] }));
+}
+
+const TASK_UPDATE_SELECT = `SELECT task_updates.id, task_updates.item_kind, task_updates.item_id, task_updates.site_id,
+         task_updates.section, task_updates.body, task_updates.author_user_id, users.name AS author_name,
+         users.role AS author_role, task_updates.followup_kind, task_updates.followup_id, task_updates.created_at
+  FROM task_updates LEFT JOIN users ON users.id = task_updates.author_user_id`;
+
+/**
+ * Every post on one item, newest first — plus the pending note on the task
+ * this one was spawned from (followup_kind/id point here), so a follow-up
+ * opens with what was left over.
+ */
+export async function listTaskUpdates(db: D1Database, kind: WorkItemKind, id: string): Promise<TaskUpdate[]> {
+  const { results } = await db
+    .prepare(
+      `${TASK_UPDATE_SELECT}
+       WHERE (task_updates.item_kind = ?1 AND task_updates.item_id = ?2)
+          OR (task_updates.followup_kind = ?1 AND task_updates.followup_id = ?2)
+       ORDER BY task_updates.created_at DESC, task_updates.rowid DESC`
+    )
+    .bind(kind, id)
+    .all<Omit<TaskUpdate, "media">>();
+  return attachTaskUpdateMedia(db, results ?? []);
+}
+
+function taskUpdateSeenStmt(db: D1Database, kind: WorkItemKind, id: string, userId: string): D1PreparedStatement {
+  return db
+    .prepare(
+      `INSERT INTO task_update_seen (item_kind, item_id, user_id, seen_at) VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(item_kind, item_id, user_id) DO UPDATE SET seen_at = excluded.seen_at`
+    )
+    .bind(kind, id, userId);
+}
+
+/** Opening an item's updates clears its green bubble for this viewer. */
+export async function markTaskUpdatesSeen(db: D1Database, kind: WorkItemKind, id: string, userId: string): Promise<void> {
+  await taskUpdateSeenStmt(db, kind, id, userId).run();
+}
+
+export interface TaskUpdateInboxItem {
+  item_kind: WorkItemKind;
+  item_id: string;
+  title: string | null;
+  status: string | null;
+  site_id: string | null;
+  site_name: string | null;
+  call_id: string | null;
+  unseen_count: number;
+  last_at: string;
+  last_author_name: string | null;
+  last_section: TaskUpdateSection;
+  last_body: string | null;
+}
+
+/** How far back the bubble looks — older unseen posts have stopped being news. */
+const TASK_UPDATE_INBOX_DAYS = 60;
+
+/**
+ * Items with posts from the other side (staff ↔ admin/superadmin) the viewer
+ * hasn't opened since — the green-bubble list at the top of the admin Open
+ * tasks page and the staff Assigned work page, newest first. Staff only see
+ * items they hold or have posted on; open or done alike, so a reply on a
+ * finished task still reaches them.
+ */
+export async function listTaskUpdateInbox(db: D1Database, viewerId: string, viewerRole: UserRole): Promise<TaskUpdateInboxItem[]> {
+  const isStaff = viewerRole === "staff";
+  const otherSide = isStaff ? `authors.role IN ('admin', 'superadmin')` : `authors.role = 'staff'`;
+  const staffClause = isStaff
+    ? `AND (${taskAssignedToSql("u")}
+            OR EXISTS (SELECT 1 FROM task_updates mine WHERE mine.item_kind = u.item_kind AND mine.item_id = u.item_id AND mine.author_user_id = ?))`
+    : "";
+  const binds: unknown[] = [viewerId, `-${TASK_UPDATE_INBOX_DAYS} days`];
+  if (isStaff) binds.push(viewerId, viewerId, viewerId, viewerId);
+  const { results: groups } = await db
+    .prepare(
+      `SELECT u.item_kind AS item_kind, u.item_id AS item_id, COUNT(*) AS unseen_count, MAX(u.created_at) AS last_at, u.id AS last_id
+       FROM task_updates u
+       JOIN users authors ON authors.id = u.author_user_id
+       LEFT JOIN task_update_seen seen ON seen.item_kind = u.item_kind AND seen.item_id = u.item_id AND seen.user_id = ?
+       WHERE u.created_at >= datetime('now', ?)
+         AND ${otherSide}
+         AND (seen.seen_at IS NULL OR u.created_at > seen.seen_at)
+         ${staffClause}
+       GROUP BY u.item_kind, u.item_id
+       ORDER BY last_at DESC
+       LIMIT 100`
+    )
+    .bind(...binds)
+    .all<{ item_kind: WorkItemKind; item_id: string; unseen_count: number; last_at: string; last_id: string }>();
+  if (!groups?.length) return [];
+
+  const heads = await queryAllByIdChunks<{
+    id: string;
+    title: string | null;
+    status: string | null;
+    site_id: string | null;
+    site_name: string | null;
+    call_id: string | null;
+    author_name: string | null;
+    section: TaskUpdateSection;
+    body: string | null;
+  }>(db, groups.map((g) => g.last_id), (ph) =>
+    `SELECT u.id AS id, ${taskTitleSql("u")} AS title, ${taskStatusSql("u")} AS status,
+            u.site_id AS site_id, sites.name AS site_name,
+            CASE WHEN u.item_kind = 'todo' THEN (SELECT todos.call_id FROM todos WHERE todos.id = u.item_id) END AS call_id,
+            users.name AS author_name, u.section AS section, u.body AS body
+     FROM task_updates u
+     LEFT JOIN users ON users.id = u.author_user_id
+     LEFT JOIN sites ON sites.id = u.site_id
+     WHERE u.id IN (${ph})`
+  );
+  const headById = new Map(heads.map((h) => [h.id, h]));
+  return groups.map((g) => {
+    const h = headById.get(g.last_id);
+    return {
+      item_kind: g.item_kind,
+      item_id: g.item_id,
+      title: h?.title ?? null,
+      status: h?.status ?? null,
+      site_id: h?.site_id ?? null,
+      site_name: h?.site_name ?? null,
+      call_id: h?.call_id ?? null,
+      unseen_count: g.unseen_count,
+      last_at: g.last_at,
+      last_author_name: h?.author_name ?? null,
+      last_section: h?.section ?? "update",
+      last_body: h?.body ?? null,
+    };
+  });
+}
+
+/** The work item's title, whatever its kind. */
+export async function getWorkItemTitle(db: D1Database, kind: WorkItemKind, id: string): Promise<string | null> {
+  const row = await db
+    .prepare(`SELECT ${taskTitleSql("it")} AS title FROM (SELECT ? AS item_kind, ? AS item_id) AS it`)
+    .bind(kind, id)
+    .first<{ title: string | null }>();
+  return row?.title ?? null;
+}
+
+/**
+ * The follow-up spawned when staff mark something done with a "what is
+ * pending" note — assigned back to them. A call todo's follow-up is a todo
+ * on the same call (same site / client / office-factory). A site stage is
+ * one-per-site and a todo needs a call, so a stage's (or complaint's)
+ * follow-up is filed as a staff complaint on the site, which an admin closes.
+ */
+export async function createFollowupTask(
+  db: D1Database,
+  input: { kind: WorkItemKind; itemId: string; title: string | null; pendingBody: string | null; staffUserId: string; actorUserId: string }
+): Promise<{ kind: WorkItemKind; id: string } | null> {
+  const title = input.title?.trim() || "task";
+  const body = input.pendingBody?.trim();
+  if (input.kind === "todo") {
+    const staff = await getUserById(db, input.staffUserId);
+    const id = crypto.randomUUID();
+    const text = body ? `Pending: ${body}` : `Pending: ${title}`;
+    const context = `Follow-up of “${title}”`;
+    const res = await db.batch([
+      db
+        .prepare(
+          `INSERT INTO todos (id, call_id, owner, text, due_date, origin, site_id, context, client_caller_id, work_location, routed_at)
+           SELECT ?, call_id, ?, ?, NULL, 'manual', site_id, ?, client_caller_id, work_location, datetime('now')
+           FROM todos WHERE id = ?`
+        )
+        .bind(id, staff?.name ?? "Site team", text, context, input.itemId),
+      db
+        .prepare(
+          `INSERT INTO todo_assignees (todo_id, user_id, assigned_by_user_id, assigned_at)
+           SELECT ?, ?, ?, datetime('now') WHERE EXISTS (SELECT 1 FROM todos WHERE id = ?)`
+        )
+        .bind(id, input.staffUserId, input.actorUserId, id),
+    ]);
+    if (!res[0].meta.changes) return null;
+    const siteRow = await db.prepare(`SELECT site_id FROM todos WHERE id = ?`).bind(id).first<{ site_id: string | null }>();
+    await logWorkEvents(db, [
+      { kind: "todo", itemId: id, siteId: siteRow?.site_id ?? null, actorUserId: input.actorUserId, subjectUserId: input.staffUserId, event: "created" },
+      {
+        kind: "todo",
+        itemId: id,
+        siteId: siteRow?.site_id ?? null,
+        actorUserId: input.actorUserId,
+        subjectUserId: input.staffUserId,
+        event: "assigned",
+        toValue: input.staffUserId,
+      },
+    ]);
+    return { kind: "todo", id };
+  }
+  const ref = await getWorkItemRef(db, input.kind, input.itemId);
+  if (!ref) return null;
+  const complaint = await createEscalation(db, {
+    text: body ? `Pending after ${title}: ${body}` : `Pending after ${title}`,
+    siteId: ref.site_id,
+    createdByUserId: input.staffUserId,
+    source: "staff_field",
+    assignedToUserId: input.staffUserId,
+    scheduledFor: null,
+  });
+  return { kind: "complaint", id: complaint.id };
+}
+
+/** A site's task posts for its timeline; staff see only those on items they can access. */
+export async function listSiteTaskUpdates(db: D1Database, siteId: string, viewer: { userId: string; isAdmin: boolean } | null) {
+  const { results } = await db
+    .prepare(
+      `${TASK_UPDATE_SELECT.replace("SELECT task_updates.id,", `SELECT ${taskTitleSql("task_updates")} AS task_title, task_updates.id,`)}
+       WHERE task_updates.site_id = ?
+       ORDER BY task_updates.created_at DESC`
+    )
+    .bind(siteId)
+    .all<Omit<TaskUpdate, "media"> & { task_title: string | null }>();
+  let rows = results ?? [];
+  if (viewer && !viewer.isAdmin) {
+    const keys = [...new Set(rows.map((r) => `${r.item_kind}:${r.item_id}`))];
+    const allowed = new Set<string>();
+    for (const key of keys) {
+      const [kind, id] = key.split(":") as [WorkItemKind, string];
+      if (await canUserAccessTaskUpdates(db, kind, id, viewer.userId)) allowed.add(key);
+    }
+    rows = rows.filter((r) => allowed.has(`${r.item_kind}:${r.item_id}`));
+  }
+  const withMedia = await attachTaskUpdateMedia(db, rows);
+  return withMedia.map((u, i) => ({ ...u, task_title: rows[i].task_title }));
 }
