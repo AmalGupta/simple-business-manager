@@ -5554,6 +5554,7 @@ export interface AssignedTodoRow {
   call_kind?: "call" | "desk" | "site_memo";
   /** Admin Open tasks Completed tab — when it was marked done. */
   completed_at?: string | null;
+  completed_by_name?: string | null;
   caller_name?: string | null;
   caller_phone?: string | null;
 }
@@ -5854,6 +5855,11 @@ export async function listOpenTodosByAssigneeBucket(
               todos.work_location AS work_location,
               todos.status AS status,
               todos.completed_at AS completed_at,
+              (SELECT completer.name FROM work_events AS done_ev
+                 JOIN users AS completer ON completer.id = done_ev.actor_user_id
+                WHERE done_ev.item_kind = 'todo' AND done_ev.item_id = todos.id
+                  AND done_ev.event = 'completed'
+                ORDER BY done_ev.rowid DESC LIMIT 1) AS completed_by_name,
               ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
               calls.recorded_at AS recorded_at,
               todos.created_at AS created_at,
@@ -7336,15 +7342,21 @@ const TASK_AUDIT_SELECT = `
  * each is the mirror of a 'handed_off' row, which already names the
  * receiver. Paged by rowid like listWorkEventsForUser.
  */
+export type TaskAuditScope = "tasks" | "complaints" | "completed" | "all";
+
 export async function listTaskAudit(
   db: D1Database,
-  opts: { limit?: number; beforeSeq?: number | null; q?: string | null; scope?: "tasks" | "complaints" | "all" } = {}
+  opts: { limit?: number; beforeSeq?: number | null; q?: string | null; scope?: TaskAuditScope } = {}
 ): Promise<{ items: TaskAuditRow[]; today_count: number }> {
   const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500);
   const where: string[] = [`work_events.event <> 'received'`];
-  /* SBM-71: complaints have their own "Complaint audit" tab. */
+  /* SBM-71: complaints have their own "Complaint audit" tab. SBM-100: so do
+     task completions ("Completed tasks"). */
   if (opts.scope === "complaints") where.push(`work_events.item_kind = 'complaint'`);
   else if (opts.scope === "tasks") where.push(`work_events.item_kind <> 'complaint'`);
+  else if (opts.scope === "completed") {
+    where.push(`work_events.item_kind <> 'complaint'`, `work_events.event = 'completed'`);
+  }
   const binds: unknown[] = [];
   if (opts.beforeSeq != null) {
     where.push(`work_events.rowid < ?`);

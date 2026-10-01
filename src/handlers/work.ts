@@ -226,7 +226,7 @@ export async function handleGetTaskAudit(request: Request, env: Env): Promise<Re
       limit: Number.isFinite(limit) ? limit : 100,
       beforeSeq: params.get("before_seq") ? Number(params.get("before_seq")) : null,
       q: params.get("q"),
-      scope: params.get("scope") === "complaints" ? "complaints" : params.get("scope") === "all" ? "all" : "tasks",
+      scope: (["complaints", "completed", "all"] as const).find((s) => s === params.get("scope")) ?? "tasks",
     })
   );
 }
