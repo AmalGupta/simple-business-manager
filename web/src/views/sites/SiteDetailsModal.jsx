@@ -61,12 +61,15 @@ function FieldRow({ label, children }) {
    still save when the operator only wanted to confirm and left every
    field alone.
 
-   `onAddContact` — opens AssociateContactsModal (same as review sites). */
+   `onSaveContacts(callerIds)` — links contacts and resolves to the site's
+   full contact list. "Add contact" opens AssociateContactsModal in place of
+   this form (not on top of it — Escape closes every open Modal) and comes
+   back to it with unsaved edits intact (SBM-99). */
 export function SiteDetailsModal({
   site,
   onClose,
   onSave,
-  onAddContact,
+  onSaveContacts,
   title = "Site details",
   intro = "",
   saveLabel = "Save details",
@@ -82,19 +85,18 @@ export function SiteDetailsModal({
     Object.fromEntries(CONTACT_FIELDS.map((f) => [f.key, siteContactValue(site, f.key)]))
   );
   const [pickingField, setPickingField] = useState(null);
+  const [associating, setAssociating] = useState(false);
+  const [linkedContacts, setLinkedContacts] = useState(() => site?.contacts ?? []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  const linkedContacts = site?.contacts ?? [];
   /* Confirming from review needs a mapped contact with a number first —
      the server refuses the confirm otherwise (handlePatchSite 409). */
   const confirming = extraPatch?.is_confirmed === "Y" && site?.is_confirmed !== "Y";
   const needsContact = confirming && !linkedContacts.some((c) => c.phone);
   const set = (key, value) => setValues((current) => ({ ...current, [key]: value }));
 
-  const openAssociate = () => {
-    onAddContact?.();
-  };
+  const onAddContact = onSaveContacts ? () => setAssociating(true) : null;
 
   const submit = async () => {
     /* Only changed fields go in the patch. Every detail write appends to
@@ -154,6 +156,21 @@ export function SiteDetailsModal({
       setSaving(false);
     }
   };
+
+  if (associating) {
+    return (
+      <AssociateContactsModal
+        site={site}
+        existingContactIds={linkedContacts.map((c) => c.caller_id)}
+        onSave={async (callerIds) => {
+          const next = await onSaveContacts(callerIds);
+          if (Array.isArray(next)) setLinkedContacts(next);
+          return next;
+        }}
+        onClose={() => setAssociating(false)}
+      />
+    );
+  }
 
   if (pickingField) {
     const field = CONTACT_FIELDS.find((f) => f.key === pickingField);
@@ -221,7 +238,7 @@ export function SiteDetailsModal({
                   : `Contacts (${linkedContacts.length})`}
             </span>
             {onAddContact ? (
-              <button type="button" onClick={openAssociate} style={SMALL_SECONDARY_BUTTON_STYLE}>
+              <button type="button" onClick={onAddContact} style={SMALL_SECONDARY_BUTTON_STYLE}>
                 Add contact
               </button>
             ) : null}
