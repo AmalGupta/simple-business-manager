@@ -9,6 +9,7 @@ import { CallActionCard } from "./CallActionCard.jsx";
 import { PRIMARY_BUTTON_STYLE } from "../../styles.js";
 import {
   CNA_LOOKBACK_DAYS,
+  CNA_PAGE_LIMIT,
   CNA_WINDOW_DAYS,
   callsNeedingActionLookback,
   defaultCallsNeedingActionWindow,
@@ -276,12 +277,27 @@ export function CallsNeedingActionView({
       setFetching(true);
       setError("");
       try {
-        const { items: fetched, voiceNotesByTodoId: notes } = await loadCallsNeedingAction({
-          dateFrom,
-          dateTo,
-        });
-        merge(fetched, notes);
-        return fetched.length;
+        /* The server returns at most CNA_PAGE_LIMIT calls, oldest first — a
+           busy 5-day window (UAT: ~290) used to stop partway and leave the
+           newest days marked loaded with no cards. A full page means more
+           remain: carry on from the last day returned (it may be partial;
+           merge is by id, so re-reading it is harmless). Stops if a single
+           day alone fills a page, rather than looping on it. */
+        const ids = new Set();
+        let from = dateFrom;
+        for (;;) {
+          const { items: fetched, voiceNotesByTodoId: notes } = await loadCallsNeedingAction({
+            dateFrom: from,
+            dateTo,
+          });
+          merge(fetched, notes);
+          for (const call of fetched) ids.add(call.id);
+          if (fetched.length < CNA_PAGE_LIMIT) break;
+          const lastDay = callDateIso(fetched[fetched.length - 1]);
+          if (!lastDay || lastDay <= from) break;
+          from = lastDay;
+        }
+        return ids.size;
       } catch (err) {
         console.error("[sbm] failed to load calls needing action", err);
         for (const d of missing) loadedDates.current.delete(d);
