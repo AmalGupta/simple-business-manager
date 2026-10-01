@@ -19,6 +19,7 @@ import {
   incrementFailedLogin,
   listStaffAndSelf,
   listStaffRoster,
+  listAdminHandoffTargets,
   listUserSettings,
   resetFailedLogin,
   resolveCustomization,
@@ -430,6 +431,13 @@ export async function handleListStaffRoster(request: Request, env: Env): Promise
   const session = await requireSession(request, env);
   if (!session) return json({ error: "not logged in" }, 401);
   return json(await listStaffRoster(env.DB));
+}
+
+/** GET /api/staff/admins — SBM-98: who staff can pass work back to (id/name/role only). */
+export async function handleListAdminHandoffTargets(request: Request, env: Env): Promise<Response> {
+  const session = await requireSession(request, env);
+  if (!session) return json({ error: "not logged in" }, 401);
+  return json(await listAdminHandoffTargets(env.DB));
 }
 
 /** POST /api/staff — admin adds a new staff member; PIN is generated server-side and returned once (also stored for later viewing via GET /api/staff). */

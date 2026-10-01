@@ -163,6 +163,8 @@ const STRINGS = {
   done: { en: "Done", hi: "हो गया", pa: "ਹੋ ਗਿਆ" },
   passOn: { en: "Pass on", hi: "आगे दें", pa: "ਅੱਗੇ ਦਿਓ" },
   passOnTo: { en: "Pass on to…", hi: "किसे दें…", pa: "ਕਿਸਨੂੰ ਦੇਣਾ…" },
+  passOnBackToAdmin: { en: "Back to admin", hi: "एडमिन को वापस", pa: "ਐਡਮਿਨ ਨੂੰ ਵਾਪਸ" },
+  passOnStaff: { en: "Staff", hi: "स्टाफ़", pa: "ਸਟਾਫ਼" },
   planFor: { en: "Plan for", hi: "किस दिन करेंगे", pa: "ਕਿਸ ਦਿਨ ਕਰੋਗੇ" },
   planForDate: { en: "Plan for date", hi: "तारीख चुनें", pa: "ਤਾਰੀਖ਼ ਚੁਣੋ" },
   due: { en: "due {date}", hi: "{date} तक", pa: "{date} ਤੱਕ" },

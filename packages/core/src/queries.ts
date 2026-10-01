@@ -4413,6 +4413,21 @@ export interface StaffRosterRow {
  * `aliases` are aggregated from caller_aliases → callers where
  * staff_user_id matches, so Assign suggestions can exact-match nicknames.
  */
+/** SBM-98: active admins/superadmins — top of the Pass on picker, so staff
+    can hand work back up. Superadmins first. */
+export async function listAdminHandoffTargets(
+  db: D1Database
+): Promise<{ id: string; name: string; role: "admin" | "superadmin" }[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, name, role FROM users
+       WHERE role IN ('admin', 'superadmin') AND disabled_at IS NULL
+       ORDER BY CASE role WHEN 'superadmin' THEN 0 ELSE 1 END, name ASC`
+    )
+    .all<{ id: string; name: string; role: "admin" | "superadmin" }>();
+  return results ?? [];
+}
+
 export async function listStaffRoster(db: D1Database): Promise<StaffRosterRow[]> {
   const [{ results }, aliasRows] = await Promise.all([
     /* SBM-64: former staff (disabled_at) never appear in an assign/pass-on picker. */
