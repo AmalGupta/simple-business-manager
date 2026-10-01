@@ -83,6 +83,7 @@ const BUCKETS = [
   { id: "blocked", label: "Blocked" },
   { id: "desk", label: "Desk conversations" },
   { id: "voice_notes", label: "Voice notes" },
+  { id: "completed", label: "Completed tasks" },
 ];
 
 /* Non-client recordings have their own tabs, so they stay put when reassigned. */
@@ -95,6 +96,7 @@ const EMPTY_COPY = {
   blocked: "No open tasks with unresolved items right now.",
   desk: "No open tasks from desk conversations right now.",
   voice_notes: "No open tasks from site voice notes right now.",
+  completed: "No tasks were completed in this date range.",
 };
 
 /** Default Open tasks window: last 7 calendar days (inclusive), by identification date. */
@@ -135,6 +137,7 @@ export function OpenTodosView({
     blocked: 0,
     desk: 0,
     voice_notes: 0,
+    completed: 0,
     total: 0,
   });
   const [loading, setLoading] = useState(true);
@@ -151,6 +154,7 @@ export function OpenTodosView({
           blocked: data?.blocked ?? 0,
           desk: data?.desk ?? 0,
           voice_notes: data?.voice_notes ?? 0,
+          completed: data?.completed ?? 0,
           total: data?.total ?? 0,
         });
       })
@@ -243,8 +247,8 @@ export function OpenTodosView({
 
   const handleToggle = (todo) => {
     onToggle?.(todo);
-    /* Completing moves it out of open lists. */
-    if (todo.status !== "done") removeLocalTodo(todo.id);
+    /* Completing moves it out of the open tabs; reopening moves it out of Completed. */
+    removeLocalTodo(todo.id);
   };
 
   const handleSiteAssigned = (result) => {
@@ -269,6 +273,7 @@ export function OpenTodosView({
       ? `${dateFrom || "…"} → ${dateTo || "…"}`
       : "All dates";
   const callGroups = groupOpenTodosByCall(items);
+  const completedTab = bucket === "completed";
 
   return (
     <div>
@@ -278,7 +283,10 @@ export function OpenTodosView({
         Open tasks
       </h1>
       <p className="sbm-open-todos-date-filter__hint">
-        Filtered by task identification date (Extracted). Default last 7 days · {rangeLabel}
+        {completedTab
+          ? "Completed tasks are filtered by the day they were completed, newest first."
+          : "Filtered by task identification date (Extracted)."}{" "}
+        Default last 7 days · {rangeLabel}
       </p>
 
       <div className="sbm-open-todos-date-filter">
@@ -356,8 +364,10 @@ export function OpenTodosView({
               busyIds={busyIds}
               staffRoster={staffRoster}
               currentUser={currentUser}
-              onAssign={onAssign ? handleAssign : undefined}
-              onRequestSiteAssign={onAssign ? setSiteTodo : undefined}
+              onAssign={onAssign && !completedTab ? handleAssign : undefined}
+              onRequestSiteAssign={onAssign && !completedTab ? setSiteTodo : undefined}
+              showCompleteButton={!completedTab}
+              completedView={completedTab}
             />
           ))}
           <OpenTodoLoadMore
