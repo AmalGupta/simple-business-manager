@@ -6,7 +6,7 @@ import "ag-grid-community/styles/ag-theme-quartz.css";
 import { Headphones, Mic, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { fmtShort } from "../../lib/dates.js";
-import { postSiteContacts, postSiteVoiceNote } from "../../lib/api.js";
+import { deleteSiteContact, postSiteContacts, postSiteVoiceNote } from "../../lib/api.js";
 import { Card } from "../../components/Card.jsx";
 import { VoiceNoteModal } from "./VoiceNoteModal.jsx";
 import { AssociateContactsModal } from "./AssociateContactsModal.jsx";
@@ -508,6 +508,14 @@ export function SitesReviewGrid({
     return contacts;
   };
 
+  const removeContact = async (siteId, callerId) => {
+    const contacts = await deleteSiteContact(siteId, callerId);
+    setContactsBySite((current) => ({ ...current, [siteId]: contacts }));
+    setDetailsSite((current) => (current?.id === siteId ? { ...current, contacts } : current));
+    await onContactsChanged?.();
+    return contacts;
+  };
+
   /* Same route the site page uses: the memo becomes a call on the site,
      is transcribed, and fans a task out to whoever is assigned. None of
      that is visible from this screen, so say how many people got it
@@ -782,6 +790,7 @@ export function SitesReviewGrid({
           onClose={() => setDetailsSite(null)}
           onSave={(patch) => onDetailsSaved(detailsSite, patch)}
           onSaveContacts={(callerIds) => saveContacts(detailsSite.id, callerIds)}
+          onRemoveContact={(callerId) => removeContact(detailsSite.id, callerId)}
         />
       )}
     </>
