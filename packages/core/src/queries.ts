@@ -5552,6 +5552,8 @@ export interface AssignedTodoRow {
   site_contacts?: SiteContactRow[];
   /** Admin Open tasks — what the recording is, and the phone caller behind a client call. */
   call_kind?: "call" | "desk" | "site_memo";
+  /** Admin Open tasks Completed tab — when it was marked done. */
+  completed_at?: string | null;
   caller_name?: string | null;
   caller_phone?: string | null;
 }
@@ -5564,9 +5566,10 @@ export interface SiteOpenTodoRow extends AssignedTodoRow {
 /**
  * Admin Open tasks bookmarks. The assignee partitions + cross-cut Blocked
  * (unresolved) cover client calls only; non-client recordings get their own
- * tabs — desk conversations and site voice notes.
+ * tabs — desk conversations and site voice notes. Completed lists done todos
+ * of every kind, most recently completed first.
  */
-export const OPEN_TODO_BUCKETS = ["mine", "unassigned", "staff", "blocked", "desk", "voice_notes"] as const;
+export const OPEN_TODO_BUCKETS = ["mine", "unassigned", "staff", "blocked", "desk", "voice_notes", "completed"] as const;
 export type OpenTodoAssigneeBucket = (typeof OPEN_TODO_BUCKETS)[number];
 
 export interface ListOpenTodosByBucketOptions {
@@ -5595,6 +5598,8 @@ export interface OpenTodoBucketCounts {
   blocked: number;
   desk: number;
   voice_notes: number;
+  /** Done todos, any kind; the date window applies to the completion day. */
+  completed: number;
   /** mine + unassigned + staff + desk + voice_notes (all open on non-deleted calls). */
   total: number;
 }
@@ -5720,7 +5725,14 @@ const OPEN_TODO_IDENTIFIED_DAY_SQL = `substr(COALESCE(todos.created_at, calls.re
 
 const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-function openTodoDateRangeClause(dateFrom?: string | null, dateTo?: string | null): {
+/** Completed tab — the day the todo was marked done (fallback: identification day). */
+const OPEN_TODO_COMPLETED_DAY_SQL = `substr(COALESCE(todos.completed_at, todos.created_at, calls.recorded_at), 1, 10)`;
+
+function openTodoDateRangeClause(
+  dateFrom?: string | null,
+  dateTo?: string | null,
+  daySql: string = OPEN_TODO_IDENTIFIED_DAY_SQL
+): {
   sql: string;
   binds: unknown[];
 } {
@@ -5729,17 +5741,24 @@ function openTodoDateRangeClause(dateFrom?: string | null, dateTo?: string | nul
   const from = dateFrom && ISO_DAY_RE.test(dateFrom) ? dateFrom : null;
   const to = dateTo && ISO_DAY_RE.test(dateTo) ? dateTo : null;
   if (from) {
-    parts.push(`${OPEN_TODO_IDENTIFIED_DAY_SQL} >= ?`);
+    parts.push(`${daySql} >= ?`);
     binds.push(from);
   }
   if (to) {
-    parts.push(`${OPEN_TODO_IDENTIFIED_DAY_SQL} <= ?`);
+    parts.push(`${daySql} <= ?`);
     binds.push(to);
   }
   return { sql: parts.length ? ` AND ${parts.join(" AND ")}` : "", binds };
 }
 
+function openTodoBucketDaySql(bucket: OpenTodoAssigneeBucket): string {
+  return bucket === "completed" ? OPEN_TODO_COMPLETED_DAY_SQL : OPEN_TODO_IDENTIFIED_DAY_SQL;
+}
+
 function openTodoBucketWhere(bucket: OpenTodoAssigneeBucket, viewerUserId: string): { sql: string; binds: unknown[] } {
+  if (bucket === "completed") {
+    return { sql: `todos.status = 'done' AND calls.deleted_at IS NULL`, binds: [] };
+  }
   const open = `todos.status = 'open' AND calls.deleted_at IS NULL`;
   if (bucket === "desk") {
     return { sql: `${open} AND calls.uploaded_by_user_id IS NOT NULL AND calls.recorded_for_site_id IS NULL`, binds: [] };
@@ -5795,9 +5814,17 @@ export async function listOpenTodosByAssigneeBucket(
   const limit = Math.min(Math.max(1, opts.limit ?? 20), 100);
   const offset = Math.max(0, opts.offset ?? 0);
   const { sql: bucketSql, binds: bucketBinds } = openTodoBucketWhere(opts.bucket, opts.viewerUserId);
-  const { sql: dateSql, binds: dateBinds } = openTodoDateRangeClause(opts.dateFrom, opts.dateTo);
+  const { sql: dateSql, binds: dateBinds } = openTodoDateRangeClause(
+    opts.dateFrom,
+    opts.dateTo,
+    openTodoBucketDaySql(opts.bucket)
+  );
   const whereSql = `${bucketSql}${dateSql}`;
   const whereBinds = [...bucketBinds, ...dateBinds];
+  const orderSql =
+    opts.bucket === "completed"
+      ? `COALESCE(todos.completed_at, todos.created_at, calls.recorded_at) DESC, todos.id DESC`
+      : `COALESCE(todos.created_at, calls.recorded_at) DESC, todos.id DESC`;
 
   const countRow = await db
     .prepare(
@@ -5826,6 +5853,7 @@ export async function listOpenTodosByAssigneeBucket(
               todos.routed_at AS routed_at,
               todos.work_location AS work_location,
               todos.status AS status,
+              todos.completed_at AS completed_at,
               ${OPEN_TODO_CLIENT_NAME_SQL} AS client_name,
               calls.recorded_at AS recorded_at,
               todos.created_at AS created_at,
@@ -5847,7 +5875,7 @@ export async function listOpenTodosByAssigneeBucket(
        LEFT JOIN sites AS recorded_sites ON recorded_sites.id = calls.recorded_for_site_id
        LEFT JOIN sites AS todo_sites ON todo_sites.id = todos.site_id
        WHERE ${whereSql}
-       ORDER BY COALESCE(todos.created_at, calls.recorded_at) DESC, todos.id DESC
+       ORDER BY ${orderSql}
        LIMIT ? OFFSET ?`
     )
     .bind(...whereBinds, limit, offset)
@@ -5900,10 +5928,14 @@ export async function countOpenTodosByAssigneeBucket(
   viewerUserId: string,
   opts: { dateFrom?: string | null; dateTo?: string | null } = {}
 ): Promise<OpenTodoBucketCounts> {
-  const { sql: dateSql, binds: dateBinds } = openTodoDateRangeClause(opts.dateFrom, opts.dateTo);
-  const [mine, unassigned, staff, blocked, desk, voice_notes] = await Promise.all(
+  const [mine, unassigned, staff, blocked, desk, voice_notes, completed] = await Promise.all(
     OPEN_TODO_BUCKETS.map(async (bucket) => {
       const { sql, binds } = openTodoBucketWhere(bucket, viewerUserId);
+      const { sql: dateSql, binds: dateBinds } = openTodoDateRangeClause(
+        opts.dateFrom,
+        opts.dateTo,
+        openTodoBucketDaySql(bucket)
+      );
       const row = await db
         .prepare(
           `SELECT COUNT(*) AS n
@@ -5916,7 +5948,16 @@ export async function countOpenTodosByAssigneeBucket(
       return Number(row?.n) || 0;
     })
   );
-  return { mine, unassigned, staff, blocked, desk, voice_notes, total: mine + unassigned + staff + desk + voice_notes };
+  return {
+    mine,
+    unassigned,
+    staff,
+    blocked,
+    desk,
+    voice_notes,
+    completed,
+    total: mine + unassigned + staff + desk + voice_notes,
+  };
 }
 
 /** Open call todos linked to a site via call_sites, newest call first. */
