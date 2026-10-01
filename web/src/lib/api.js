@@ -807,56 +807,92 @@ export function defaultCallsNeedingActionWindow() {
   return callsNeedingActionDay(todayIso());
 }
 
-/** The span the date strip's dots cover: today and the CNA_LOOKBACK_DAYS before it. */
+/** The span the date strip's first block of dots covers: today and the
+ *  CNA_LOOKBACK_DAYS before it. */
 export function callsNeedingActionLookback() {
+  return cnaCalendarWindow(0);
+}
+
+const isoToUtcDay = (iso) => {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return Date.UTC(y, m - 1, d) / 86400000;
+};
+
+/* Dot windows, counted back from today: 0 = today−30 … today, 1 = today−60 …
+   today−31, 2 = today−90 … today−61, and so on. */
+function cnaCalendarWindow(index) {
   const to = todayIso();
-  return { dateFrom: addDaysIso(to, -CNA_LOOKBACK_DAYS), dateTo: to };
+  if (index === 0) return { dateFrom: addDaysIso(to, -CNA_LOOKBACK_DAYS), dateTo: to };
+  return {
+    dateFrom: addDaysIso(to, -CNA_LOOKBACK_DAYS * (index + 1)),
+    dateTo: addDaysIso(to, -CNA_LOOKBACK_DAYS * index - 1),
+  };
 }
 
-/* Which days have calls needing action — loaded once per page (and again
-   only when the date rolls over) and held in memory, so reopening the
-   carousel doesn't ask again. `days` is { iso: count }, days with none
-   absent. Resolving a call adjusts it in place rather than refetching. */
-let cnaCalendar = null; // { key, promise, data }
-
-function cnaCalendarKey() {
-  const { dateFrom, dateTo } = callsNeedingActionLookback();
-  return `${dateFrom}..${dateTo}`;
+/** Which dot window a past date falls in (null for future dates). */
+export function callsNeedingActionWindowIndex(date) {
+  const back = isoToUtcDay(todayIso()) - isoToUtcDay(date);
+  if (back < 0) return null;
+  return back <= CNA_LOOKBACK_DAYS ? 0 : Math.floor((back - 1) / CNA_LOOKBACK_DAYS);
 }
 
-/** Resolves to { days, min_year }. */
-export function loadCallsNeedingActionCalendar() {
-  const key = cnaCalendarKey();
-  if (cnaCalendar?.key === key) return cnaCalendar.promise;
-  const entry = { key, data: null, promise: null };
-  entry.promise = fetchCallsNeedingActionCalendar(callsNeedingActionLookback())
-    .then((data) => {
-      entry.data = { days: data.days ?? {}, min_year: data.min_year ?? null };
-      return entry.data;
-    })
-    .catch((err) => {
-      if (cnaCalendar === entry) cnaCalendar = null;
-      throw err;
-    });
-  cnaCalendar = entry;
-  return entry.promise;
+/* Which days have calls needing action, held in memory per window: window 0
+   loads once per page; an older window loads only the first time a date
+   inside it is clicked. Never re-asked within a day (the whole set resets
+   when the date rolls over). Resolving a call adjusts its day in place. */
+let cnaCalendar = { today: null, windows: new Map() }; // index → { promise, days }
+
+function cnaCalendarWindows() {
+  const now = todayIso();
+  if (cnaCalendar.today !== now) cnaCalendar = { today: now, windows: new Map() };
+  return cnaCalendar.windows;
 }
 
-/** The in-memory calendar if it's loaded and still for today, else null. */
+/** Loads (once) the dots for window `index`; resolves to the merged { days } of every loaded window. */
+export function loadCallsNeedingActionCalendar(index = 0) {
+  const windows = cnaCalendarWindows();
+  let entry = windows.get(index);
+  if (!entry) {
+    entry = { days: null, promise: null };
+    const created = entry;
+    created.promise = fetchCallsNeedingActionCalendar(cnaCalendarWindow(index))
+      .then((data) => {
+        created.days = data.days ?? {};
+      })
+      .catch((err) => {
+        if (windows.get(index) === created) windows.delete(index);
+        throw err;
+      });
+    windows.set(index, created);
+  }
+  return entry.promise.then(() => getCachedCallsNeedingActionCalendar());
+}
+
+/** Whether window `index`'s dots are loaded or loading. */
+export function hasCallsNeedingActionCalendarWindow(index) {
+  return cnaCalendarWindows().has(index);
+}
+
+/** Merged { days } across the loaded windows, or null if none has loaded. */
 export function getCachedCallsNeedingActionCalendar() {
-  return cnaCalendar?.key === cnaCalendarKey() ? cnaCalendar.data : null;
+  let days = null;
+  for (const entry of cnaCalendarWindows().values()) {
+    if (entry.days) days = { ...(days ?? {}), ...entry.days };
+  }
+  return days ? { days } : null;
 }
 
-/** Shift one day's count (e.g. −1 on resolve); returns the updated data. */
+/** Shift one day's count (e.g. −1 on resolve); returns the updated merged data. */
 export function adjustCallsNeedingActionCalendar(date, delta) {
-  const data = cnaCalendar?.data;
-  if (!data) return null;
-  const days = { ...data.days };
+  const index = callsNeedingActionWindowIndex(date);
+  const entry = index === null ? null : cnaCalendarWindows().get(index);
+  if (!entry?.days) return getCachedCallsNeedingActionCalendar();
+  const days = { ...entry.days };
   const n = (days[date] ?? 0) + delta;
   if (n > 0) days[date] = n;
   else delete days[date];
-  cnaCalendar.data = { ...data, days };
-  return cnaCalendar.data;
+  entry.days = days;
+  return getCachedCallsNeedingActionCalendar();
 }
 
 /** Returns { items, voiceNotesByTodoId } — the latter a Map<todoId, TodoVoiceNote>. */
@@ -900,7 +936,7 @@ export function loadCallsNeedingAction(window) {
 }
 
 /** Per-day qualifying-call counts over a date range, for the carousel's date
- *  strip — { days, min_year }. */
+ *  strip — { days }. */
 export async function fetchCallsNeedingActionCalendar({ dateFrom, dateTo }) {
   return fetchJSON(`/api/calls/needing-action/calendar?date_from=${dateFrom}&date_to=${dateTo}`);
 }
