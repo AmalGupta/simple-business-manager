@@ -202,29 +202,6 @@
   opacity: 0.5;
 }
 
-.sbm-todo-row__check {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  margin: -2px 0 0;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--color-slate);
-  cursor: pointer;
-}
-
-.sbm-todo-row__check:disabled {
-  cursor: default;
-}
-
-.sbm-todo-row.is-done .sbm-todo-row__check {
-  color: var(--color-accent);
-}
-
 .sbm-todo-row__text {
   flex: 1 1 auto;
   min-width: 0;
