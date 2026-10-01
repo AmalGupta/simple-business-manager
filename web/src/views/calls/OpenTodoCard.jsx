@@ -11,6 +11,7 @@ import { TodoAssigneeMeta, TodoCallExtractionMeta } from "./TodoFacts.jsx";
 import { TodoContext } from "../../components/TodoContext.jsx";
 import { AudioPlayer } from "../../components/AudioPlayer.jsx";
 import { TaskContacts, taskContacts } from "../work/TaskContacts.jsx";
+import { fmtDateTime } from "../work/workDates.js";
 import "./OpenTodoCard.css";
 
 export const OPEN_TODO_PAGE_SIZE = 20;
@@ -231,7 +232,7 @@ export function OpenTodoCard({
           {completedView ? (
             <div className="sbm-open-todo-card__summary-stat">
               <dt>Completed</dt>
-              <dd>{latestCompletedAt(todos) ? fmtShort(String(latestCompletedAt(todos)).slice(0, 10)) : "—"}</dd>
+              <dd>{fmtDateTime(latestCompletedAt(todos)) || "—"}</dd>
             </div>
           ) : (
             <div className="sbm-open-todo-card__summary-stat">
@@ -304,6 +305,13 @@ export function OpenTodoCard({
                   )}
 
                   <div className="sbm-open-todo-card__below-text">
+                    {completedView && td.completed_at ? (
+                      <div className="sbm-open-todo-card__completed">
+                        <CheckCircle2 size={13} />
+                        Completed {fmtDateTime(td.completed_at)}
+                        {td.completed_by_name ? ` by ${td.completed_by_name}` : ""}
+                      </div>
+                    ) : null}
                     <TaskContacts
                       contacts={taskContacts({
                         client_id: td.client_contact_id,
