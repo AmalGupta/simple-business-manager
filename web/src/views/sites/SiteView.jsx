@@ -180,6 +180,15 @@ export function SiteView({
     setContacts(await deleteSiteContact(siteRecord.id, callerId));
   };
 
+  /* The details dialog needs the remaining list back, and the site row
+     refetched — removal rewrites poc_* and the display name. */
+  const removeContactFromDetails = async (callerId) => {
+    const next = await deleteSiteContact(siteRecord.id, callerId);
+    setContacts(next);
+    await onSiteUpdated?.();
+    return next;
+  };
+
   const handleAssignTodo = async (todoId, staffId) => {
     if (!onAssignTodo) return;
     const userIds = Array.isArray(staffId) ? staffId : staffId ? [staffId] : [];
@@ -449,6 +458,7 @@ export function SiteView({
           onClose={() => setEditingDetails(false)}
           onSave={saveDetails}
           onSaveContacts={saveAssociatedContacts}
+          onRemoveContact={removeContactFromDetails}
         />
       )}
       {showAssignModal && (
