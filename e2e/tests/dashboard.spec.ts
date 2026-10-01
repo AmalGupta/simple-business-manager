@@ -11,8 +11,9 @@ test.describe("Dashboard shell", () => {
   });
 
   test("renders the header, stat tiles, and empty state", async ({ page }) => {
-    await expect(page.getByText("open today")).toBeVisible();
-    await expect(page.getByText("closed today")).toBeVisible();
+    // The open/closed-today stat tiles were replaced by the admin home tile grid.
+    await expect(page.getByRole("button", { name: /^Open tasks — \d+/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Calls logged — \d+/ })).toBeVisible();
     await expect(page.getByRole("button", { name: new RegExp(TEST_ADMIN.name) })).toBeVisible();
   });
 

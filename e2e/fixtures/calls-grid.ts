@@ -92,7 +92,8 @@ export async function openCallsWithMockedRows(
   }
   await page.getByRole("button", { name: /Calls logged/i }).click();
   await expect(page.getByRole("heading", { name: "Calls", exact: true })).toBeVisible();
-  await expect(page.getByText("Call / Voice Note Logs")).toBeVisible({ timeout: 15_000 });
+  // SBM-43 split the page into Calls / Voice notes tabs; the Calls tab heads its grid "Call logs".
+  await expect(page.getByRole("heading", { name: "Call logs" })).toBeVisible({ timeout: 15_000 });
   await expect(page.locator(".ag-grid-viewport")).toBeVisible();
   return page.locator(".ag-grid-viewport");
 }

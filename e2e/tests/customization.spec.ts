@@ -68,8 +68,8 @@ test.describe("Customization smoke", () => {
     await page.reload();
     await expect(page.getByText("Simple Business Manager")).toBeVisible();
 
-    // Anchored on the count so it can't match "Show unconfirmed sites".
-    const rollup = page.getByRole("button", { name: /^\d+ confirmed sites?/ });
+    // "Sites needing attention" tile link; anchored so it can't match "Unconfirmed Sites".
+    const rollup = page.getByRole("button", { name: /^Confirmed Sites/ });
     await expect(rollup).toBeVisible();
     await rollup.click();
     await expect(page.getByRole("heading", { name: "Sites", exact: true })).toBeVisible();
