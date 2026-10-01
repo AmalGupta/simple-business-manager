@@ -617,15 +617,9 @@ export async function handlePatchTodo(request: Request, env: Env, id: string): P
     }
   }
 
+  /* SBM-100 — admins may complete a todo still waiting for routing; the
+     SBM-82 routed-first rule applies to staff (above). */
   const existing = await getTodoById(env.DB, id);
-  if (
-    existing &&
-    record.status === "done" &&
-    existing.status !== "done" &&
-    (await isTodoAwaitingRouting(env.DB, existing))
-  ) {
-    return json({ error: "route this todo before marking it done" }, 409);
-  }
   const updated = await updateTodo(env.DB, id, patch);
   if (!updated) return json({ error: "not found" }, 404);
   if (existing) {

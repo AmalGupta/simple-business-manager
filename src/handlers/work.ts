@@ -144,7 +144,7 @@ export async function handlePatchWork(request: Request, env: Env, kindRaw: strin
   if (record.status === "done") {
     if (kind === "todo") {
       const todo = await getTodoById(env.DB, id);
-      if (todo && (await isTodoAwaitingRouting(env.DB, todo))) {
+      if (todo && !isAdmin && (await isTodoAwaitingRouting(env.DB, todo))) {
         return json({ error: "route this todo before marking it done" }, 409);
       }
       await updateTodo(env.DB, id, { status: "done", completed_at: new Date().toISOString() });
@@ -226,7 +226,7 @@ export async function handleGetTaskAudit(request: Request, env: Env): Promise<Re
       limit: Number.isFinite(limit) ? limit : 100,
       beforeSeq: params.get("before_seq") ? Number(params.get("before_seq")) : null,
       q: params.get("q"),
-      scope: params.get("scope") === "complaints" ? "complaints" : params.get("scope") === "all" ? "all" : "tasks",
+      scope: (["complaints", "completed", "all"] as const).find((s) => s === params.get("scope")) ?? "tasks",
     })
   );
 }
