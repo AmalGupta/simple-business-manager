@@ -110,10 +110,6 @@ export async function fetchCallCallers(includeLowSignal = true) {
   return fetchJSON(`/api/calls/callers${qs}`);
 }
 
-export async function fetchCallsCalendar(year, month) {
-  return fetchJSON(`/api/calls/calendar?year=${year}&month=${month}`);
-}
-
 export async function fetchCallsDay(date) {
   return fetchJSON(`/api/calls/day?date=${encodeURIComponent(date)}`);
 }
@@ -793,28 +789,112 @@ export async function postDeskVoiceNote(blob, fileName) {
    notes (a plain multipart POST/`<audio>` GET can't reliably carry the
    custom header). */
 
-/** How many days of cards the carousel opens on, and how far each widening
- *  step reaches. */
-export const CNA_WINDOW_DAYS = 5;
+/** How far back the date strip marks days with calls (SBM-102: today − 30). */
+export const CNA_LOOKBACK_DAYS = 30;
 
-/** How far back the carousel goes at all. The date strip's dots and the header
- *  total both describe this whole span, and scrolling can widen the loaded
- *  cards across it but not past it — "needing action" stops meaning anything
- *  actionable somewhere behind two months of history. */
-export const CNA_LOOKBACK_DAYS = 60;
-
-/** The window the carousel opens on: the last CNA_WINDOW_DAYS days through
- *  today. Shared with the home-page cache warm-up so the two can't pick
- *  different windows and miss each other's cache entry. */
-export function defaultCallsNeedingActionWindow() {
-  const to = todayIso();
-  return { dateFrom: addDaysIso(to, -CNA_WINDOW_DAYS), dateTo: to };
+/** One day's cards — the carousel only ever shows the selected day (SBM-102). */
+export function callsNeedingActionDay(date) {
+  return { dateFrom: date, dateTo: date };
 }
 
-/** The full span the carousel can reach: the last CNA_LOOKBACK_DAYS days. */
+/** The day the carousel opens on: today. Shared with the home-page cache
+ *  warm-up so the two can't pick different keys and miss each other. */
+export function defaultCallsNeedingActionWindow() {
+  return callsNeedingActionDay(todayIso());
+}
+
+/** The span the date strip's first block of dots covers: today and the
+ *  CNA_LOOKBACK_DAYS before it. */
 export function callsNeedingActionLookback() {
+  return cnaCalendarWindow(0);
+}
+
+const isoToUtcDay = (iso) => {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return Date.UTC(y, m - 1, d) / 86400000;
+};
+
+/* Dot windows, counted back from today: 0 = today−30 … today, 1 = today−60 …
+   today−31, 2 = today−90 … today−61, and so on. */
+function cnaCalendarWindow(index) {
   const to = todayIso();
-  return { dateFrom: addDaysIso(to, -CNA_LOOKBACK_DAYS), dateTo: to };
+  if (index === 0) return { dateFrom: addDaysIso(to, -CNA_LOOKBACK_DAYS), dateTo: to };
+  return {
+    dateFrom: addDaysIso(to, -CNA_LOOKBACK_DAYS * (index + 1)),
+    dateTo: addDaysIso(to, -CNA_LOOKBACK_DAYS * index - 1),
+  };
+}
+
+/** Which dot window a past date falls in (null for future dates). */
+export function callsNeedingActionWindowIndex(date) {
+  const back = isoToUtcDay(todayIso()) - isoToUtcDay(date);
+  if (back < 0) return null;
+  return back <= CNA_LOOKBACK_DAYS ? 0 : Math.floor((back - 1) / CNA_LOOKBACK_DAYS);
+}
+
+/* Which days have calls needing action, held in memory per window: window 0
+   loads once per page; an older window loads only the first time a date
+   inside it is clicked. Never re-asked within a day (the whole set resets
+   when the date rolls over). Resolving a call adjusts its day in place. */
+let cnaCalendar = { today: null, windows: new Map() }; // index → { promise, days }
+
+function cnaCalendarWindows() {
+  const now = todayIso();
+  if (cnaCalendar.today !== now) cnaCalendar = { today: now, windows: new Map() };
+  return cnaCalendar.windows;
+}
+
+/** Loads (once) the dots for window `index`; resolves to the merged { days } of every loaded window. */
+export function loadCallsNeedingActionCalendar(index = 0) {
+  const windows = cnaCalendarWindows();
+  let entry = windows.get(index);
+  if (!entry) {
+    entry = { days: null, promise: null };
+    const created = entry;
+    created.promise = fetchCallsNeedingActionCalendar(cnaCalendarWindow(index))
+      .then((data) => {
+        created.days = data.days ?? {};
+      })
+      .catch((err) => {
+        if (windows.get(index) === created) windows.delete(index);
+        throw err;
+      });
+    windows.set(index, created);
+  }
+  return entry.promise.then(() => getCachedCallsNeedingActionCalendar());
+}
+
+/** Drops every loaded window — after a change (e.g. a call deleted) that can
+ *  move counts outside the day on screen. */
+export function invalidateCallsNeedingActionCalendar() {
+  cnaCalendar = { today: null, windows: new Map() };
+}
+
+/** Whether window `index`'s dots are loaded or loading. */
+export function hasCallsNeedingActionCalendarWindow(index) {
+  return cnaCalendarWindows().has(index);
+}
+
+/** Merged { days } across the loaded windows, or null if none has loaded. */
+export function getCachedCallsNeedingActionCalendar() {
+  let days = null;
+  for (const entry of cnaCalendarWindows().values()) {
+    if (entry.days) days = { ...(days ?? {}), ...entry.days };
+  }
+  return days ? { days } : null;
+}
+
+/** Shift one day's count (e.g. −1 on resolve); returns the updated merged data. */
+export function adjustCallsNeedingActionCalendar(date, delta) {
+  const index = callsNeedingActionWindowIndex(date);
+  const entry = index === null ? null : cnaCalendarWindows().get(index);
+  if (!entry?.days) return getCachedCallsNeedingActionCalendar();
+  const days = { ...entry.days };
+  const n = (days[date] ?? 0) + delta;
+  if (n > 0) days[date] = n;
+  else delete days[date];
+  entry.days = days;
+  return getCachedCallsNeedingActionCalendar();
 }
 
 /** Returns { items, voiceNotesByTodoId } — the latter a Map<todoId, TodoVoiceNote>. */
@@ -858,7 +938,7 @@ export function loadCallsNeedingAction(window) {
 }
 
 /** Per-day qualifying-call counts over a date range, for the carousel's date
- *  strip — { days, min_year }. */
+ *  strip — { days }. */
 export async function fetchCallsNeedingActionCalendar({ dateFrom, dateTo }) {
   return fetchJSON(`/api/calls/needing-action/calendar?date_from=${dateFrom}&date_to=${dateTo}`);
 }
