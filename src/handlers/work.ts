@@ -182,7 +182,10 @@ export async function handlePostWorkHandoff(request: Request, env: Env, kindRaw:
   if (ref.status !== openStatus) return json({ error: "work is no longer open" }, 409);
 
   const target = await getUserById(env.DB, toUserId);
-  if (!target || target.role !== "staff" || target.disabled_at) return json({ error: "invalid to_user_id" }, 400);
+  /* SBM-98: staff can also hand work back up to an admin/superadmin. */
+  if (!target || !["staff", "admin", "superadmin"].includes(target.role) || target.disabled_at) {
+    return json({ error: "invalid to_user_id" }, 400);
+  }
 
   await handOffWork(env.DB, ref, subject, toUserId, session.user_id);
   return json({ ok: true });

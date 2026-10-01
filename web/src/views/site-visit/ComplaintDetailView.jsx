@@ -226,6 +226,7 @@ export function ComplaintDetailView({ id, me, staffRoster = [], onAssignComplain
             busy={busy}
             placeholder={isAdmin ? "Route to…" : tr("passOnTo")}
             actionLabel={isAdmin ? "Route" : tr("passOn")}
+            includeAdmins={!isAdmin}
             onCancel={() => setPassing(false)}
             onPick={async (to) => {
               setBusy(true);
