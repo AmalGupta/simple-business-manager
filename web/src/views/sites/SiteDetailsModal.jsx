@@ -33,7 +33,7 @@ const FIELDS = [
 
 /* SBM-83 — directory contacts, not free text (see SiteContactField). */
 const CONTACT_FIELDS = [
-  { key: "assigned_by", label: "Assigned by", placeholder: "Who assigned this site" },
+  { key: "assigned_by", label: "Assigned To", placeholder: "Who this site is assigned to" },
   { key: "referred_by", label: "Referred by", placeholder: "Who referred it" },
 ];
 
