@@ -803,6 +803,10 @@ export const CNA_WINDOW_DAYS = 5;
  *  actionable somewhere behind two months of history. */
 export const CNA_LOOKBACK_DAYS = 60;
 
+/** Server cap per request (CALLS_NEEDING_ACTION_MAX_LIMIT). Oldest-first, so a
+ *  full page means the later days of the window were cut off. */
+export const CNA_PAGE_LIMIT = 200;
+
 /** The window the carousel opens on: the last CNA_WINDOW_DAYS days through
  *  today. Shared with the home-page cache warm-up so the two can't pick
  *  different windows and miss each other's cache entry. */
