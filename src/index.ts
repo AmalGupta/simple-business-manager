@@ -14,7 +14,6 @@ import {
   handleGetCalls,
   handleGetCallCallers,
   handleGetCallsByTodoStatus,
-  handleGetCallsCalendar,
   handleGetCallsDay,
   handleGetComplaints,
   handleGetComplaintsCount,
@@ -251,9 +250,12 @@ export default {
       return handleGetCallCallers(request, env);
     }
 
+    // Deprecated (SBM-102): the home calendar reads /api/calls/needing-action/calendar.
     if (url.pathname === "/api/calls/calendar" && request.method === "GET") {
-      if (!isAuthorized(request, env)) return new Response("Unauthorized", { status: 401 });
-      return handleGetCallsCalendar(request, env);
+      return new Response(
+        JSON.stringify({ error: "Deprecated — use /api/calls/needing-action/calendar" }),
+        { status: 410, headers: { "Content-Type": "application/json" } }
+      );
     }
 
     if (url.pathname === "/api/calls/day" && request.method === "GET") {

@@ -59,7 +59,6 @@ import { ResolvedCallsView } from "./views/calls/ResolvedCallsView.jsx";
 import { RequestForm } from "./views/requests/RequestForm.jsx";
 import {
   fetchCall,
-  fetchCallsCalendar,
   fetchDashboardSummary,
   fetchMyOpenTodos,
   fetchSites,
@@ -75,6 +74,9 @@ import {
   fetchOpenSiteTasks,
   refreshCallsNeedingAction,
   defaultCallsNeedingActionWindow,
+  loadCallsNeedingActionCalendar,
+  getCachedCallsNeedingActionCalendar,
+  invalidateCallsNeedingActionCalendar,
   postSiteInstallation,
 } from "./lib/api.js";
 
@@ -92,7 +94,6 @@ function newSiteVisitLabel(category) {
 }
 export default function SimpleBusinessManager() {
   const [calendarDays, setCalendarDays] = useState({});
-  const [calendarMinYear, setCalendarMinYear] = useState(() => today().getFullYear());
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
   const [allSites, setAllSites] = useState([]);
   const [staffRoster, setStaffRoster] = useState([]);
@@ -186,7 +187,6 @@ export default function SimpleBusinessManager() {
     // Clear prior session slices so a re-login does not flash stale tiles
     // while the new requests are in flight.
     setCalendarDays({});
-    setCalendarMinYear(today().getFullYear());
     setTodoRefreshKey(0);
     setAllSites([]);
     setStaffRoster([]);
@@ -255,6 +255,11 @@ export default function SimpleBusinessManager() {
     refreshCallsNeedingAction(defaultCallsNeedingActionWindow()).catch((err) =>
       console.error("[sbm] failed to prefetch calls needing action", err)
     );
+    loadCallsNeedingActionCalendar()
+      .then((data) => {
+        if (!cancelled) setCalendarDays(data?.days ?? {});
+      })
+      .catch((err) => console.error("[sbm] failed to load calls needing action calendar", err));
 
     return () => {
       cancelled = true;
@@ -312,7 +317,7 @@ export default function SimpleBusinessManager() {
   );
 
   /* Tiles 1 & 2 — open/closed counts come from dashboard summary (and are
-     adjusted locally on todo toggles). Calendar still uses the calls list. */
+     adjusted locally on todo toggles). */
 
   /* Calendar month currently browsed — defaults to this month. Full month,
      not a rolling window: a fixed 28-day window didn't show a complete
@@ -338,26 +343,28 @@ export default function SimpleBusinessManager() {
 
   const yearOptions = useMemo(() => {
     const current = today().getFullYear();
-    const earliest = Math.min(calendarMinYear, current - 1);
-    const out = [];
-    for (let y = earliest; y <= current + 1; y++) out.push(y);
-    return out;
-  }, [calendarMinYear]);
+    return [current - 1, current, current + 1];
+  }, []);
 
-  const refreshCalendar = useCallback(async (year, month) => {
+  /* Home calendar dots are the Calls Needing Action dots (SBM-102): the same
+     in-memory 30-day windows the carousel uses, so a dot here always opens a
+     day with cards. Older windows load when a date in them is opened in the
+     carousel; coming back home picks up whatever it loaded or resolved. */
+  const refreshCalendar = useCallback(async () => {
+    invalidateCallsNeedingActionCalendar();
     try {
-      const data = await fetchCallsCalendar(year, month + 1);
-      setCalendarDays(data.days ?? {});
-      if (data.min_year) setCalendarMinYear(data.min_year);
+      const data = await loadCallsNeedingActionCalendar();
+      setCalendarDays(data?.days ?? {});
     } catch (err) {
-      console.error("[sbm] failed to load calls calendar", err);
+      console.error("[sbm] failed to load calls needing action calendar", err);
     }
   }, []);
 
   useEffect(() => {
-    if (me?.role === "staff") return;
-    refreshCalendar(calMonth.year, calMonth.month);
-  }, [me?.role, calMonth.year, calMonth.month, refreshCalendar, todoRefreshKey]);
+    if (me?.role === "staff" || view.name !== "home") return;
+    const cached = getCachedCallsNeedingActionCalendar();
+    if (cached) setCalendarDays(cached.days);
+  }, [me?.role, view.name]);
 
   const goToMonth = useCallback((year, month) => {
     if (month < 0) {
@@ -914,7 +921,7 @@ export default function SimpleBusinessManager() {
         onBack={() => setView(homeView)}
         onToggle={onToggle}
         busyIds={busyIds}
-        onCallsChanged={() => refreshCalendar(calMonth.year, calMonth.month)}
+        onCallsChanged={refreshCalendar}
         onOpenSite={(siteName) => setView({ name: "site", site: siteName, from: { name: "calls" } })}
         innerScrolls={innerScrolls}
         horizontalScrolls={horizontalScrolls}
