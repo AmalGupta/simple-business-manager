@@ -24,6 +24,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+      - run: pnpm test:unit
       - run: pnpm build
 
   # 1. testcases — e2e suite against `wrangler dev --local` (Miniflare D1/R2,
@@ -44,7 +45,10 @@ jobs:
       - run: pnpm test:e2e
 
   # 2. eval runs — scores extraction against packages/core/prompts/evals/golden/*.json.
-  # Needs ANTHROPIC_API_KEY as a repo secret; run.ts exits 1 if it's missing.
+  # Needs ANTHROPIC_API_KEY as a repo secret. run.ts reports scores but only
+  # fails on a missing key or an API error, so with no secret configured the
+  # job used to fail on every push and block both deploys. Without the secret
+  # it now skips with a visible warning; add the secret to make it run.
   eval:
     name: Eval runs
     needs: typecheck-and-build
@@ -57,9 +61,15 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm eval
+      - name: Run pnpm eval
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::warning title=Eval skipped::ANTHROPIC_API_KEY repo secret is not set, so extraction evals did not run. Add it under Settings → Secrets and variables → Actions."
+            exit 0
+          fi
+          pnpm eval
 
   # 3. smoke tests — pre-deploy, against a LOCAL `wrangler dev --local` boot
   # of this exact commit (Miniflare D1/R2, self-generated .dev.vars — same
