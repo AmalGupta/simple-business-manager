@@ -1,10 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { CheckCircle2, ChevronDown, ChevronRight } from "lucide-react";
-import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
+import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { fmtShort, isUrgent } from "../../lib/dates.js";
-import { useT } from "../../lib/i18n.jsx";
-import { useTodoPermissions } from "../../lib/todoPermissions.jsx";
-import { TodoRow } from "../../components/TodoRow.jsx";
+import { TodoDoneAction, TodoRow } from "../../components/TodoRow.jsx";
 import { TodoReceiptArea } from "../../components/TodoReceipt.jsx";
 import { TodoAssignControl } from "./TodoAssignControl.jsx";
 import { TodoAssigneeMeta, TodoCallExtractionMeta } from "./TodoFacts.jsx";
@@ -73,58 +71,6 @@ function latestCompletedAt(todos) {
   return best;
 }
 
-const CONFIRM_TIMEOUT_MS = 8000;
-const actionBtn = { minHeight: 32, padding: "0 12px", fontSize: 12 };
-
-/* Same rules as the TodoRow check: a second "Yes, done" tap (SBM-82), and
-   staff need the todo routed first. */
-function MarkCompletedButton({ todo, onToggle, busy }) {
-  const tr = useT();
-  const { canComplete } = useTodoPermissions(todo);
-  const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
-    if (!confirming) return undefined;
-    const timer = setTimeout(() => setConfirming(false), CONFIRM_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [confirming]);
-
-  if (confirming) {
-    return (
-      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-        <span style={{ fontSize: 12, color: "var(--color-slate)" }}>{tr("confirmMarkDone")}</span>
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => {
-            setConfirming(false);
-            onToggle(todo);
-          }}
-          style={{ ...PRIMARY_BUTTON_STYLE, ...actionBtn }}
-        >
-          {tr("yesDone")}
-        </button>
-        <button type="button" onClick={() => setConfirming(false)} style={{ ...SMALL_SECONDARY_BUTTON_STYLE, ...actionBtn }}>
-          {tr("cancel")}
-        </button>
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      className="sbm-open-todo-card__btn sbm-open-todo-card__btn--secondary"
-      disabled={busy || !canComplete}
-      title={canComplete ? undefined : "This task needs routing before it can be marked completed"}
-      onClick={() => setConfirming(true)}
-      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-    >
-      <CheckCircle2 size={14} />
-      Mark completed
-    </button>
-  );
-}
-
 function resolveUnresolved(todos, unresolvedProp) {
   if (Array.isArray(unresolvedProp) && unresolvedProp.length > 0) return unresolvedProp;
   for (const td of todos) {
@@ -158,9 +104,8 @@ export function OpenTodoCard({
   standalone = false,
   /** List views start collapsed; call detail / popups can expand by default. */
   defaultExpanded = false,
-  /** Admin Open tasks: a "Mark completed" button under each open todo. */
-  showCompleteButton = false,
-  /** Completed tab: header shows when it was completed instead of the due date. */
+  /** Completed tab: header shows when it was completed instead of the due date,
+      and there is no Mark completed / Reopen button. */
   completedView = false,
 }) {
   const todos = Array.isArray(todosProp) && todosProp.length > 0 ? todosProp : singleTodo ? [singleTodo] : [];
@@ -274,8 +219,13 @@ export function OpenTodoCard({
                   ? extraActions
                   : null;
               const completeButton =
-                showCompleteButton && onToggle && td.status !== "done" ? (
-                  <MarkCompletedButton todo={td} onToggle={onToggle} busy={isBusy(td)} />
+                onToggle && !readOnly && !completedView ? (
+                  <TodoDoneAction
+                    todo={td}
+                    onToggle={onToggle}
+                    busy={isBusy(td)}
+                    className="sbm-open-todo-card__btn sbm-open-todo-card__btn--secondary"
+                  />
                 ) : null;
               const trailing =
                 siteButton || perTodoExtra || completeButton ? (

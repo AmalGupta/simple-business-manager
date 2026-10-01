@@ -366,7 +366,6 @@ export function OpenTodosView({
               currentUser={currentUser}
               onAssign={onAssign && !completedTab ? handleAssign : undefined}
               onRequestSiteAssign={onAssign && !completedTab ? setSiteTodo : undefined}
-              showCompleteButton={!completedTab}
               completedView={completedTab}
             />
           ))}
