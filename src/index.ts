@@ -67,6 +67,7 @@ import {
   handleCreateStaff,
   handleListStaff,
   handleListStaffRoster,
+  handleListAdminHandoffTargets,
   handleLogin,
   handleLogout,
   handleLogoutRedirect,
@@ -580,6 +581,9 @@ export default {
     }
     if (url.pathname === "/api/staff/roster" && request.method === "GET") {
       return handleListStaffRoster(request, env);
+    }
+    if (url.pathname === "/api/staff/admins" && request.method === "GET") {
+      return handleListAdminHandoffTargets(request, env);
     }
 
     const staffMatch = url.pathname.match(/^\/api\/staff\/([^/]+)$/);

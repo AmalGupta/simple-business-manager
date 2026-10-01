@@ -446,6 +446,14 @@ export async function fetchStaffRoster() {
   return res.json();
 }
 
+/* SBM-98: active admins/superadmins ({id, name, role}) — the top of the Pass
+   on picker, so staff can hand work back up. */
+export async function fetchAdminHandoffTargets() {
+  const res = await fetch("/api/staff/admins");
+  if (!res.ok) throw new Error(`GET /api/staff/admins → ${res.status}`);
+  return res.json();
+}
+
 export async function postCreateStaff(name, phone, joinedOn) {
   const res = await fetch("/api/staff", {
     method: "POST",
