@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { t } from "../../theme.js";
 import { addDaysIso, todayIso } from "../../lib/dates.js";
-import { fetchOpenTodos, fetchOpenTodosCounts } from "../../lib/api.js";
+import { fetchOpenTodos, fetchOpenTodosCounts, fetchTaskUpdateInbox } from "../../lib/api.js";
+import { TaskUpdatesInbox } from "../../components/work/TaskUpdatesInbox.jsx";
+import { TaskUpdatesModal } from "../../components/work/TaskUpdatesModal.jsx";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
 import { TEXT_INPUT_STYLE, SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
@@ -115,6 +117,7 @@ export function OpenTodosView({
   currentUser = null,
   onBack,
   onOpen,
+  onOpenSite,
   onAssign,
   onToggle,
   onTodoSiteAssigned,
@@ -143,6 +146,20 @@ export function OpenTodosView({
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [siteTodo, setSiteTodo] = useState(null);
+  /* SBM-103 — staff updates / done notes not yet opened, pinned above the tabs. */
+  const [inbox, setInbox] = useState([]);
+  const [updatesFor, setUpdatesFor] = useState(null);
+
+  const loadInbox = useCallback(
+    () =>
+      fetchTaskUpdateInbox()
+        .then(setInbox)
+        .catch((err) => console.error("[sbm] failed to load task updates inbox", err)),
+    []
+  );
+  useEffect(() => {
+    loadInbox();
+  }, [loadInbox, refreshKey]);
 
   const loadCounts = useCallback(() => {
     return fetchOpenTodosCounts({ dateFrom, dateTo })
@@ -289,6 +306,8 @@ export function OpenTodosView({
         Default last 7 days · {rangeLabel}
       </p>
 
+      <TaskUpdatesInbox items={inbox} onOpen={(it) => setUpdatesFor({ kind: it.item_kind, id: it.item_id })} />
+
       <div className="sbm-open-todos-date-filter">
         <label>
           <span style={{ fontSize: 11, color: t.edge2, fontWeight: 600 }}>From</span>
@@ -366,6 +385,7 @@ export function OpenTodosView({
               currentUser={currentUser}
               onAssign={onAssign && !completedTab ? handleAssign : undefined}
               onRequestSiteAssign={onAssign && !completedTab ? setSiteTodo : undefined}
+              onOpenUpdates={(todo) => setUpdatesFor({ kind: "todo", id: todo.id })}
               completedView={completedTab}
             />
           ))}
@@ -390,6 +410,16 @@ export function OpenTodosView({
 
       {siteTodo ? (
         <AssignTodoSiteModal todo={siteTodo} onClose={() => setSiteTodo(null)} onAssigned={handleSiteAssigned} />
+      ) : null}
+      {updatesFor ? (
+        <TaskUpdatesModal
+          kind={updatesFor.kind}
+          id={updatesFor.id}
+          onClose={() => setUpdatesFor(null)}
+          onChanged={loadInbox}
+          onOpenCall={onOpen}
+          onOpenSite={onOpenSite}
+        />
       ) : null}
     </div>
   );

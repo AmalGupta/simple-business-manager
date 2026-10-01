@@ -2,7 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MapPin, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { todayIso } from "../../lib/dates.js";
-import { fetchAssignedWork, fetchStaffRoster, patchWork, postTodosSeen, postWorkHandoff } from "../../lib/api.js";
+import { fetchAssignedWork, fetchStaffRoster, fetchTaskUpdateInbox, patchWork, postTodosSeen, postWorkHandoff } from "../../lib/api.js";
+import { TaskUpdatesModal } from "../../components/work/TaskUpdatesModal.jsx";
+import { CompleteTaskModal } from "../../components/work/CompleteTaskModal.jsx";
+import { TaskUpdatesInbox } from "../../components/work/TaskUpdatesInbox.jsx";
 import { SMALL_SECONDARY_BUTTON_STYLE } from "../../styles.js";
 import { Card } from "../../components/Card.jsx";
 import { BackLink } from "../../components/BackLink.jsx";
@@ -18,11 +21,14 @@ const GENERAL_KEY = "general";
 const siteKeyOf = (item) => item.site_id ?? GENERAL_KEY;
 const FILTERS = ["all", "office", "factory"];
 
-/* Within a site: urgent first, then plans that slipped into the past, then
-   by planned day, then unplanned by due date. */
+/* Within a site: tasks with an admin's unseen update first (SBM-103), then
+   urgent, then plans that slipped into the past, then by planned day, then
+   unplanned by due date. */
 function cardOrder(today) {
   const rank = (i) => (i.urgent_at ? 0 : i.scheduled_for && i.scheduled_for < today ? 1 : i.scheduled_for ? 2 : 3);
   return (a, b) => {
+    const u = (b.updatesCount ? 1 : 0) - (a.updatesCount ? 1 : 0);
+    if (u) return u;
     const r = rank(a) - rank(b);
     if (r) return r;
     if (a.urgent_at && b.urgent_at) return String(a.urgent_at).localeCompare(String(b.urgent_at));
@@ -45,6 +51,9 @@ function groupBySite(items, today) {
   const groups = [...bySite.values()];
   for (const g of groups) g.items.sort(cardOrder(today));
   return groups.sort((a, b) => {
+    const na = a.items.some((i) => i.updatesCount);
+    const nb = b.items.some((i) => i.updatesCount);
+    if (na !== nb) return na ? -1 : 1;
     if ((a.key === GENERAL_KEY) !== (b.key === GENERAL_KEY)) return a.key === GENERAL_KEY ? 1 : -1;
     const ua = a.items.some((i) => i.urgent_at);
     const ub = b.items.some((i) => i.urgent_at);
@@ -78,11 +87,23 @@ export function AssignedWorkView({
   const [error, setError] = useState(null);
   const [roster, setRoster] = useState([]);
   const [busyKeys, setBusyKeys] = useState(() => new Set());
+  const [inbox, setInbox] = useState([]);
+  const [updatesFor, setUpdatesFor] = useState(null); // { kind, id }
+  const [completing, setCompleting] = useState(null); // work item
   const today = todayIso();
   const subjectId = forUserId ?? selfId;
   const filter = FILTERS.includes(location) ? location : "all";
 
+  const loadInbox = useCallback(
+    () =>
+      fetchTaskUpdateInbox({ forUserId })
+        .then(setInbox)
+        .catch((err) => console.error("[sbm] failed to load task updates inbox", err)),
+    [forUserId]
+  );
+
   const load = useCallback(() => {
+    loadInbox();
     return fetchAssignedWork({ forUserId })
       .then((rows) => {
         setItems(rows);
@@ -92,7 +113,7 @@ export function AssignedWorkView({
         console.error("[sbm] failed to load assigned work", err);
         setError(tr("couldntLoadWork"));
       });
-  }, [forUserId, tr]);
+  }, [forUserId, tr, loadInbox]);
 
   useEffect(() => {
     load();
@@ -143,6 +164,8 @@ export function AssignedWorkView({
         await patchWork(item.kind, item.id, { status: "done" }, { forUserId });
         removeItem(item);
       }),
+    onRequestComplete: (item) => setCompleting(item),
+    onOpenUpdates: (item) => setUpdatesFor({ kind: item.kind, id: item.id }),
     onHandOff: (item, toUserId) =>
       withBusy(item, async () => {
         await postWorkHandoff(item.kind, item.id, toUserId, { forUserId });
@@ -158,9 +181,13 @@ export function AssignedWorkView({
     }
     return c;
   }, [items]);
+  const unseenByKey = useMemo(() => new Map(inbox.map((it) => [`${it.item_kind}-${it.item_id}`, it.unseen_count])), [inbox]);
   const visible = useMemo(
-    () => (items ?? []).filter((i) => filter === "all" || (i.kind !== "complaint" && (i.work_location ?? "office") === filter)),
-    [items, filter]
+    () =>
+      (items ?? [])
+        .filter((i) => filter === "all" || (i.kind !== "complaint" && (i.work_location ?? "office") === filter))
+        .map((i) => ({ ...i, updatesCount: unseenByKey.get(itemKey(i)) ?? 0 })),
+    [items, filter, unseenByKey]
   );
   const groups = useMemo(() => groupBySite(visible, today), [visible, today]);
 
@@ -205,6 +232,8 @@ export function AssignedWorkView({
 
       {error && <p style={{ fontSize: 14, color: t.edge2 }}>{error}</p>}
       {!items && !error && <p style={{ fontSize: 14, color: t.edge2 }}>{tr("loading")}</p>}
+
+      <TaskUpdatesInbox items={inbox} onOpen={(it) => setUpdatesFor({ kind: it.item_kind, id: it.item_id })} />
 
       {items && items.length > 0 && (
         <div role="tablist" aria-label={tr("assignedWork")} style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: "1.25rem" }}>
@@ -267,11 +296,46 @@ export function AssignedWorkView({
           {g.key === GENERAL_KEY && <p style={{ fontSize: 12, color: t.edge2, margin: "-4px 0 8px" }}>{tr("notLinkedToSite")}</p>}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 12 }}>
             {g.items.map((item) => (
-              <WorkCard key={itemKey(item)} item={item} busy={busyKeys.has(itemKey(item))} showSite={false} {...cardProps} />
+              <WorkCard
+                key={itemKey(item)}
+                item={item}
+                busy={busyKeys.has(itemKey(item))}
+                showSite={false}
+                updatesCount={item.updatesCount}
+                {...cardProps}
+              />
             ))}
           </div>
         </section>
       ))}
+
+      {updatesFor && (
+        <TaskUpdatesModal
+          kind={updatesFor.kind}
+          id={updatesFor.id}
+          onClose={() => setUpdatesFor(null)}
+          onChanged={() => {
+            loadInbox();
+            onChanged?.();
+          }}
+          onOpenCall={onOpenCall}
+          onOpenSite={onOpenSite}
+        />
+      )}
+      {completing && (
+        <CompleteTaskModal
+          kind={completing.kind}
+          id={completing.id}
+          title={completing.title}
+          forUserId={forUserId}
+          onClose={() => setCompleting(null)}
+          onCompleted={() => {
+            setCompleting(null);
+            load();
+            onChanged?.();
+          }}
+        />
+      )}
     </div>
   );
 }

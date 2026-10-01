@@ -107,6 +107,8 @@ export function OpenTodoCard({
   /** Completed tab: header shows when it was completed instead of the due date,
       and there is no Mark completed / Reopen button. */
   completedView = false,
+  /** SBM-103 — opens the task's updates popup (staff updates, done notes, replies). */
+  onOpenUpdates = null,
 }) {
   const todos = Array.isArray(todosProp) && todosProp.length > 0 ? todosProp : singleTodo ? [singleTodo] : [];
   const [expanded, setExpanded] = useState(Boolean(defaultExpanded));
@@ -227,11 +229,21 @@ export function OpenTodoCard({
                     className="sbm-open-todo-card__btn sbm-open-todo-card__btn--secondary"
                   />
                 ) : null;
+              const updatesButton = onOpenUpdates ? (
+                <button
+                  type="button"
+                  className="sbm-open-todo-card__btn sbm-open-todo-card__btn--secondary"
+                  onClick={() => onOpenUpdates(td)}
+                >
+                  Updates
+                </button>
+              ) : null;
               const trailing =
-                siteButton || perTodoExtra || completeButton ? (
+                siteButton || perTodoExtra || completeButton || updatesButton ? (
                   <>
                     {siteButton}
                     {perTodoExtra}
+                    {updatesButton}
                     {completeButton}
                   </>
                 ) : null;

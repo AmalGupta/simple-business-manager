@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { AlertTriangle, ArrowRightLeft, Check, MapPin, MessageSquareWarning, Phone } from "lucide-react";
+import { AlertTriangle, ArrowRightLeft, Check, MapPin, MessageSquarePlus, MessageSquareWarning, Phone } from "lucide-react";
 import { t } from "../../theme.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "../../lib/constants.js";
 import { PRIMARY_BUTTON_STYLE, SMALL_SECONDARY_BUTTON_STYLE, TEXT_INPUT_STYLE } from "../../styles.js";
 import { Card } from "../Card.jsx";
 import { TodoContext } from "../TodoContext.jsx";
 import { PassOnPicker } from "./PassOnPicker.jsx";
+import { UpdatesBubble } from "./UpdatesBubble.jsx";
 import { CarriedForwardLabel } from "../../views/work/CarriedForwardLabel.jsx";
 import { urgentDeadline } from "../../views/work/workDates.js";
 import { categoryLabel, fmtShortLang, fmtTimeLeftLang, stageLabel, useLang, useT } from "../../lib/i18n.jsx";
@@ -44,6 +45,11 @@ export function WorkCard({
   onOpenSite,
   onOpenCall,
   onOpenComplaint,
+  /** SBM-103 — unseen posts from an admin (green bubble). */
+  updatesCount = 0,
+  onOpenUpdates,
+  /** SBM-103 — opens the completed / pending notes form instead of the plain confirm. */
+  onRequestComplete,
 }) {
   const tr = useT();
   const lang = useLang();
@@ -75,7 +81,8 @@ export function WorkCard({
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-        <span style={{ display: "inline-flex", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ display: "inline-flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+          <UpdatesBubble count={updatesCount} label={tr("nNew", { n: updatesCount })} />
           {isComplaint && (
             <span style={{ ...tagStyle, color: t.putty }}>
               <MessageSquareWarning size={12} /> {tr("complaint")}
@@ -154,7 +161,7 @@ export function WorkCard({
             <button
               type="button"
               disabled={busy}
-              onClick={() => setConfirmingDone(true)}
+              onClick={() => (onRequestComplete && !isComplaint ? onRequestComplete(item) : setConfirmingDone(true))}
               style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 4 }}
             >
               <Check size={14} /> {isComplaint ? tr("resolve") : tr("done")}
@@ -171,6 +178,15 @@ export function WorkCard({
           </button>
           )}
         </div>
+        {onOpenUpdates && (
+          <button
+            type="button"
+            onClick={() => onOpenUpdates(item)}
+            style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 44, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+          >
+            <MessageSquarePlus size={14} /> {canAct ? tr("shareUpdate") : tr("updates")}
+          </button>
+        )}
         {confirmingDone && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontSize: 13, color: t.edge, flex: "1 1 auto" }}>{tr("confirmMarkDone")}</span>

@@ -97,6 +97,9 @@ export async function handlePatchSiteTask(request: Request, env: Env, id: string
     if (session.user_role === "staff" && task.assigned_to_user_id !== session.user_id) {
       return json({ error: "forbidden" }, 403);
     }
+    if (session.user_role === "staff") {
+      return json({ error: "add what was completed — use POST /api/work/site_task/:id/complete" }, 400);
+    }
     const done = await completeSiteTask(env.DB, id, session.user_id);
     if (task.status !== "done") {
       await logWorkEvents(env.DB, [
