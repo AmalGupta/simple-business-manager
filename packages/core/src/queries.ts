@@ -790,7 +790,7 @@ export async function getTodoRouterUserId(db: D1Database): Promise<string | null
   return value && value.trim() ? value.trim() : null;
 }
 
-/** SBM-82 — while a router is set, a todo can't be marked done until it's routed. */
+/** SBM-82 — while a router is set, staff can't mark a todo done until it's routed (admins can, SBM-100). */
 export async function isTodoAwaitingRouting(db: D1Database, todo: { routed_at?: string | null }): Promise<boolean> {
   if (todo.routed_at) return false;
   return (await getTodoRouterUserId(db)) != null;

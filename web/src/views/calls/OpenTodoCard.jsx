@@ -75,8 +75,8 @@ function latestCompletedAt(todos) {
 const CONFIRM_TIMEOUT_MS = 8000;
 const actionBtn = { minHeight: 32, padding: "0 12px", fontSize: 12 };
 
-/* Same SBM-82 rules as the TodoRow check: a second "Yes, done" tap, and
-   disabled until the todo is routed. */
+/* Same rules as the TodoRow check: a second "Yes, done" tap (SBM-82), and
+   staff need the todo routed first. */
 function MarkCompletedButton({ todo, onToggle, busy }) {
   const tr = useT();
   const { canComplete } = useTodoPermissions(todo);
@@ -114,7 +114,7 @@ function MarkCompletedButton({ todo, onToggle, busy }) {
       type="button"
       className="sbm-open-todo-card__btn sbm-open-todo-card__btn--secondary"
       disabled={busy || !canComplete}
-      title={canComplete ? undefined : "Assign this task before marking it completed"}
+      title={canComplete ? undefined : "This task needs routing before it can be marked completed"}
       onClick={() => setConfirming(true)}
       style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
     >
