@@ -1,9 +1,9 @@
 import { createContext, useContext } from "react";
 
 /* SBM-82 — who may tick a todo done / undo it.
-   - While a router is set (/api/me todo_routing_active), a todo can't be
-     marked done until it's been routed (todos.routed_at) — the done control
-     is hidden on freshly extracted todos so routing a call can't close them.
+   - While a router is set (/api/me todo_routing_active), staff can't mark a
+     todo done until it's been routed (todos.routed_at). Admins can complete
+     it either way (SBM-100).
    - Only an admin can reopen a done todo.
    The server enforces both; this only keeps the UI from offering them. */
 
@@ -25,9 +25,9 @@ export function useShowTodoReceipt(todo) {
 }
 
 export function useTodoPermissions(todo) {
-  const { routingActive, canReopen } = useContext(TodoPermissionsContext);
+  const { routingActive, canReopen, isAdmin } = useContext(TodoPermissionsContext);
   return {
-    canComplete: !routingActive || Boolean(todo?.routed_at),
+    canComplete: isAdmin || !routingActive || Boolean(todo?.routed_at),
     canReopen,
   };
 }

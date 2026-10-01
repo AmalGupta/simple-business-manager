@@ -144,7 +144,7 @@ export async function handlePatchWork(request: Request, env: Env, kindRaw: strin
   if (record.status === "done") {
     if (kind === "todo") {
       const todo = await getTodoById(env.DB, id);
-      if (todo && (await isTodoAwaitingRouting(env.DB, todo))) {
+      if (todo && !isAdmin && (await isTodoAwaitingRouting(env.DB, todo))) {
         return json({ error: "route this todo before marking it done" }, 409);
       }
       await updateTodo(env.DB, id, { status: "done", completed_at: new Date().toISOString() });
