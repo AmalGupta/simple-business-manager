@@ -12,8 +12,10 @@ import {
   adjustCallsNeedingActionCalendar,
   callsNeedingActionDay,
   callsNeedingActionLookback,
+  callsNeedingActionWindowIndex,
   getCachedCallsNeedingAction,
   getCachedCallsNeedingActionCalendar,
+  hasCallsNeedingActionCalendarWindow,
   loadCallsNeedingAction,
   loadCallsNeedingActionCalendar,
   refreshCallsNeedingAction,
@@ -64,13 +66,13 @@ function iconButtonStyle(disabled) {
 /* Admin carousel of calls with an AI-generated todo list not yet resolved —
    opened from the home tile CallsNeedingActionTile.
 
-   One day at a time (SBM-102). The date strip's dots come from a single
-   per-day count over today − CNA_LOOKBACK_DAYS … today, loaded once and held
-   in memory (lib/api.js loadCallsNeedingActionCalendar). Opening fetches
-   today's cards first — alongside the dots, not after them — and only if
-   today is empty moves to the latest marked day. Picking a day fetches that
-   day's cards (cached per day, so going back to one is instant) and the
-   carousel shows just those.
+   One day at a time (SBM-102). The date strip's dots come from per-day counts
+   held in memory in 30-day windows (lib/api.js loadCallsNeedingActionCalendar):
+   today − 30 … today loads once per page; an older window (today − 60 …
+   today − 31, and so on) loads only the first time a date inside it is
+   clicked. Opening fetches today's cards alongside the dots and only if today
+   is empty moves to the latest marked day. Picking a day makes one request
+   for that day's cards (cached per day) and the carousel shows just those.
 
    Replaces the multi-day window + scroll-widening carousel: a busy window ran
    into the server's 200-call cap and the newest days never loaded. */
@@ -111,8 +113,24 @@ export function CallsNeedingActionView({
   // from must not overwrite the one now on screen.
   const requestedDay = useRef(openDate);
 
+  const loadDots = useCallback(
+    (index) =>
+      loadCallsNeedingActionCalendar(index)
+        .then((data) => {
+          setCalendar(data);
+          return data;
+        })
+        .catch((err) => {
+          console.error("[sbm] failed to load calls-needing-action calendar", err);
+          return null;
+        }),
+    []
+  );
+
   const showDay = useCallback(async (date) => {
     requestedDay.current = date;
+    const windowIndex = callsNeedingActionWindowIndex(date);
+    if (windowIndex !== null && !hasCallsNeedingActionCalendarWindow(windowIndex)) loadDots(windowIndex);
     setSelectedDate(date);
     setCalMonth((prev) => {
       const year = Number(date.slice(0, 4));
@@ -141,28 +159,20 @@ export function CallsNeedingActionView({
     } finally {
       if (requestedDay.current === date) setLoading(false);
     }
-  }, []);
+  }, [loadDots]);
 
   // Opening: today's (or the requested day's) cards and the dots go out
   // together. Only when the day opened on is today and it's empty does the
   // view move to the latest day that has calls.
   useEffect(() => {
     const cards = showDay(openDate);
-    const dots = loadCallsNeedingActionCalendar()
-      .then((data) => {
-        setCalendar(data);
-        return data;
-      })
-      .catch((err) => {
-        console.error("[sbm] failed to load calls-needing-action calendar", err);
-        return null;
-      });
+    const dots = loadDots(0);
     Promise.all([cards, dots]).then(([count, data]) => {
       if (count !== 0 || !data || openDate !== todayIso() || requestedDay.current !== openDate) return;
       const latest = latestDayWithCalls(data.days, todayIso());
       if (latest && latest !== openDate) showDay(latest);
     });
-  }, [openDate, showDay]);
+  }, [openDate, showDay, loadDots]);
 
   useEffect(() => {
     const onResize = () => setVisibleCount(computeVisibleCount());
@@ -218,11 +228,8 @@ export function CallsNeedingActionView({
 
   const yearOptions = useMemo(() => {
     const current = today().getFullYear();
-    const first = Math.min(calendar?.min_year ?? current, current);
-    const out = [];
-    for (let y = first; y <= current + 1; y++) out.push(y);
-    return out;
-  }, [calendar]);
+    return [current - 1, current, current + 1];
+  }, []);
 
   const goToMonth = (year, month) => {
     let y = year;

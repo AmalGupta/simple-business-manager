@@ -2443,40 +2443,28 @@ export async function countCallsNeedingAction(
  * has nothing on. This groups on the same effective-date expression the list
  * orders by, over the same qualifying set.
  *
- * A range rather than a month because the strip needs dots for days it hasn't
- * loaded cards for: the carousel opens on 5 days but asks for the whole 60-day
- * lookback in one request, so every day worth clicking reads as clickable
- * straight away, and the backward prefetch can skip empty stretches instead of
- * probing them 5 days at a time.
+ * Only ever over the window asked for (the client asks in 30-day blocks), so
+ * it stays an index range scan — no unbounded aggregate like an earliest-year
+ * lookup, which walks every open call.
  */
 export async function getCallsNeedingActionCalendar(
   db: D1Database,
   opts: CallsNeedingActionWindow = {}
-): Promise<CallsCalendarResult> {
+): Promise<{ days: Record<string, number> }> {
   const where = callsNeedingActionWhere(opts);
-  const [{ results: dayRows }, minRow] = await Promise.all([
-    db
-      .prepare(
-        `SELECT ${CALL_EFFECTIVE_DATE} AS day, COUNT(*) AS n
-         FROM calls
-         WHERE ${where.sql}
-         GROUP BY day`
-      )
-      .bind(...where.binds)
-      .all<{ day: string; n: number }>(),
-    db
-      .prepare(
-        `SELECT MIN(CAST(substr(${CALL_EFFECTIVE_DATE}, 1, 4) AS INTEGER)) AS min_year
-         FROM calls
-         WHERE ${CALLS_NEEDING_ACTION_WHERE}`
-      )
-      .first<{ min_year: number | null }>(),
-  ]);
+  const { results: dayRows } = await db
+    .prepare(
+      `SELECT ${CALL_EFFECTIVE_DATE} AS day, COUNT(*) AS n
+       FROM calls
+       WHERE ${where.sql}
+       GROUP BY day`
+    )
+    .bind(...where.binds)
+    .all<{ day: string; n: number }>();
 
   const days: Record<string, number> = {};
   for (const row of dayRows ?? []) if (row.day) days[row.day] = row.n;
-
-  return { days, min_year: minRow?.min_year ?? new Date().getFullYear() };
+  return { days };
 }
 
 /** Manual admin ack — unconditional, no gate on remaining open todos. */
