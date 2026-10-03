@@ -732,6 +732,7 @@ export default function SimpleBusinessManager() {
     >
       <style>{`
         *{box-sizing:border-box}
+        body{margin:0}
         button:focus-visible,a:focus-visible{outline:2px solid ${t.edge};outline-offset:2px}
 
         /* Cards read top-to-bottom in urgency order; the stagger says so. */
