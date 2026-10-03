@@ -1586,3 +1586,22 @@ export async function returnToolMovement(id) {
   }
   return res.json();
 }
+
+/* SBM-106 — an admin's own "My pages" list (admin nav). */
+export async function fetchMyPages() {
+  const res = await fetch("/api/me/pages", { credentials: "same-origin" });
+  if (!res.ok) throw new Error(`GET /api/me/pages → ${res.status}`);
+  return (await res.json()).pages;
+}
+
+export async function saveMyPages(pages) {
+  const res = await fetch("/api/me/pages", {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ pages }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `PUT /api/me/pages → ${res.status}`);
+  return body.pages;
+}

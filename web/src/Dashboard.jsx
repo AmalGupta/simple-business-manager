@@ -35,6 +35,9 @@ import { ScopesProvider } from "./lib/scopes.jsx";
 import { SitesDirectoryView } from "./views/sites/SitesDirectoryView.jsx";
 import { AddSiteScreen } from "./views/sites/AddSiteScreen.jsx";
 import { StaffLanguagePicker } from "./views/staff/StaffLanguagePicker.jsx";
+import { AdminNav } from "./components/nav/AdminNav.jsx";
+import { MyPageView } from "./views/mypages/MyPageView.jsx";
+import { MyPageBuilderView } from "./views/mypages/MyPageBuilderView.jsx";
 import { LanguageProvider } from "./lib/i18n.jsx";
 import { TodoPermissionsProvider } from "./lib/todoPermissions.jsx";
 import { StaffHubView } from "./views/staff/StaffHubView.jsx";
@@ -84,6 +87,8 @@ import {
   getCachedCallsNeedingActionCalendar,
   invalidateCallsNeedingActionCalendar,
   postSiteInstallation,
+  fetchMyPages,
+  saveMyPages,
 } from "./lib/api.js";
 
 /** Fresh checklist title when skipping the instance list (field staff). */
@@ -147,6 +152,15 @@ export default function SimpleBusinessManager() {
      src/lib/auth.ts / LoginScreen above — additive session-cookie auth,
      the whole dashboard is now gated behind it. */
   const [me, setMe] = useState(undefined);
+  // SBM-106 — the admin's own "My pages" list, shown in the admin nav.
+  const [myPages, setMyPages] = useState([]);
+  const isAdminRole = me?.role === "admin" || me?.role === "superadmin";
+  useEffect(() => {
+    if (!isAdminRole) return;
+    fetchMyPages()
+      .then(setMyPages)
+      .catch((err) => console.error("[sbm] failed to load my pages", err));
+  }, [isAdminRole]);
   const [loginError, setLoginError] = useState(() => {
     const params = new URLSearchParams(window.location.search);
     return params.get("login_error") ? "Invalid name or PIN." : "";
@@ -665,6 +679,26 @@ export default function SimpleBusinessManager() {
      synchronously so child effects' fetches already carry X-SBM-View-As. */
   const viewAsUserId = view.forUserId || (view.name === "home" && homeTab !== "admin" ? homeTab : null);
   setViewAsUserId(me?.role === "staff" ? null : viewAsUserId);
+
+  // SBM-106 — admin home and My pages sit beside the left nav; everything else is unchanged.
+  const withAdminNav = (node) =>
+    !isAdminRole ? (
+      node
+    ) : (
+      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
+        <AdminNav
+          pages={myPages}
+          activeView={view}
+          onHome={() => setView({ name: "home" })}
+          onOpenView={(target) => setView({ ...target, from: view })}
+          onNewPage={() => setView({ name: "my-page-edit", from: view })}
+          onOpenPage={(page) => setView({ name: "my-page", pageId: page.id, from: { name: "home" } })}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>{node}</div>
+      </div>
+    );
+
+  const persistMyPages = async (next) => setMyPages(await saveMyPages(next));
 
   const shell = (children, { wide = false, fillViewport = false } = {}) => (
     <LanguageProvider lang={displayLang}>
@@ -1426,7 +1460,48 @@ export default function SimpleBusinessManager() {
 
   if (view.name === "app-request") return shell(<RequestForm onBack={() => setView(view.from ?? homeView)} />);
 
+  if (view.name === "my-page") {
+    const page = myPages.find((p) => p.id === view.pageId);
+    return shell(
+      withAdminNav(
+        page ? (
+          <MyPageView
+            page={page}
+            onBack={() => setView(view.from ?? homeView)}
+            onEdit={() => setView({ name: "my-page-edit", pageId: page.id, from: view })}
+            onOpenView={(target) => setView({ ...target, from: view })}
+          />
+        ) : (
+          <BackLink onClick={() => setView(homeView)}>Back</BackLink>
+        )
+      )
+    );
+  }
+
+  if (view.name === "my-page-edit") {
+    const page = myPages.find((p) => p.id === view.pageId);
+    return shell(
+      withAdminNav(
+        <MyPageBuilderView
+          page={page}
+          onBack={() => setView(view.from ?? homeView)}
+          onSave={async (saved) => {
+            const next = page ? myPages.map((p) => (p.id === saved.id ? saved : p)) : [...myPages, saved];
+            await persistMyPages(next);
+            setView({ name: "my-page", pageId: saved.id, from: homeView });
+          }}
+          onDelete={async () => {
+            if (!window.confirm(`Delete “${page.name}”? Its views stay in their sections.`)) return;
+            await persistMyPages(myPages.filter((p) => p.id !== page.id));
+            setView(homeView);
+          }}
+        />
+      )
+    );
+  }
+
   return shell(
+    withAdminNav(
     <>
       {adminHomeHeader}
 
@@ -1560,6 +1635,7 @@ export default function SimpleBusinessManager() {
       </div>
       )}
     </>
+    )
   );
 }
 
