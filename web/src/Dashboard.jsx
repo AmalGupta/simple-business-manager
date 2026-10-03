@@ -693,7 +693,7 @@ export default function SimpleBusinessManager() {
     }
     return (
       <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-        {header ? cloneElement(header, { flush: true }) : null}
+        {header ? cloneElement(header, { adminConsole: true }) : null}
         <div style={{ display: "flex", alignItems: "stretch", flex: 1, minHeight: 0 }}>
           <AdminNav
             pages={myPages}

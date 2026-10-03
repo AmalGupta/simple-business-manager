@@ -22,27 +22,46 @@ export function AppHeader({
   right,
   children,
   hideAccount = false,
-  /** Rendered outside shell's padded <main> (SBM-106 full-page admin layout). */
-  flush = false,
+  /** SBM-106 admin console: slim ink bar spanning the window, outside shell's
+      padded <main>. The band content (calendar) is not shown — the calendar
+      lives on Calls Needing Action, reached from the admin nav. */
+  adminConsole = false,
 }) {
+  const band = adminConsole ? null : children;
   return (
     <div
       style={{
-        background: t.accent,
-        margin: flush ? 0 : "-2rem -1.25rem 1.5rem",
-        padding: flush ? "1.25rem 1.75rem 1.5rem" : "1.25rem 1.25rem 1.5rem",
+        background: adminConsole ? t.edge : t.accent,
+        margin: adminConsole ? 0 : "-2rem -1.25rem 1.5rem",
+        padding: adminConsole ? "14px 1.75rem" : "1.25rem 1.25rem 1.5rem",
       }}
     >
       <header
         style={{
           display: "flex",
           justifyContent: "space-between",
-          alignItems: "baseline",
-          ...(children ? { marginBottom: "1.25rem" } : {}),
+          alignItems: adminConsole ? "center" : "baseline",
+          ...(band ? { marginBottom: "1.25rem" } : {}),
         }}
       >
-        <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
-          Simple Business Manager
+        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 12 }}>
+          <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
+            Simple Business Manager
+          </span>
+          {adminConsole ? (
+            <span
+              style={{
+                fontFamily: t.label,
+                fontSize: 10,
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "rgba(255,255,255,0.5)",
+              }}
+            >
+              Admin console
+            </span>
+          ) : null}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {right}
@@ -61,7 +80,7 @@ export function AppHeader({
           )}
         </div>
       </header>
-      {children}
+      {band}
     </div>
   );
 }
