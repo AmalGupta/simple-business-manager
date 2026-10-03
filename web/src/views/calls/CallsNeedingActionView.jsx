@@ -82,6 +82,9 @@ export function CallsNeedingActionView({
   /** ISO day from the home StreakWall — open on that date instead of today. */
   initialFocusDate = null,
   onAssignTodo,
+  /** Dashboard onToggle — PATCH done/open; the server logs the Task audit event. */
+  onToggleTodo,
+  busyIds = null,
   onResolved,
   onBack,
 }) {
@@ -274,6 +277,32 @@ export function CallsNeedingActionView({
     resyncSelectedDay();
   };
 
+  const handleToggleTodo = async (callId, todo) => {
+    const patch =
+      todo.status === "done"
+        ? { status: "open", completed_at: null }
+        : { status: "done", completed_at: new Date().toISOString() };
+    patchCall(callId, (call) => ({
+      ...call,
+      todos: call.todos.map((td) => (td.id === todo.id ? { ...td, ...patch } : td)),
+    }));
+    await onToggleTodo(todo);
+    /* onToggleTodo swallows a rejected PATCH, so take the todo's status back
+       from the server rather than trusting the optimistic patch. */
+    const day = selectedDate;
+    const data = await refreshCallsNeedingAction(callsNeedingActionDay(day)).catch(() => null);
+    const fresh = data?.items
+      ?.find((call) => call.id === callId)
+      ?.todos?.find((td) => td.id === todo.id);
+    if (!fresh || requestedDay.current !== day) return;
+    patchCall(callId, (call) => ({
+      ...call,
+      todos: call.todos.map((td) =>
+        td.id === todo.id ? { ...td, status: fresh.status, completed_at: fresh.completed_at ?? null } : td
+      ),
+    }));
+  };
+
   const handleAssignTodoSite = (callId, result) => {
     const updated = result?.todo;
     const siteName = result?.site_name;
@@ -434,6 +463,8 @@ export function CallsNeedingActionView({
                 currentUser={currentUser}
                 onAssignTodo={handleAssignTodo}
                 onAssignTodoSite={handleAssignTodoSite}
+                onToggleTodo={onToggleTodo ? handleToggleTodo : undefined}
+                busyIds={busyIds}
                 onResolve={handleResolve}
                 onAddVoiceNote={handleAddVoiceNote}
                 voiceNotesByTodoId={voiceNotesByTodoId}
