@@ -1,4 +1,5 @@
 import { cloneElement, useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { t } from "./theme.js";
 import { today, isoDate, fmtDate } from "./lib/dates.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./lib/constants.js";
@@ -103,6 +104,8 @@ function newSiteVisitLabel(category) {
   });
   return `${kind} · ${stamp}`;
 }
+const NAV_COLLAPSED_KEY = "sbm.adminNav.collapsed";
+
 export default function SimpleBusinessManager() {
   const [calendarDays, setCalendarDays] = useState({});
   const [todoRefreshKey, setTodoRefreshKey] = useState(0);
@@ -155,6 +158,12 @@ export default function SimpleBusinessManager() {
   // SBM-106 — the admin's own "My pages" list, shown in the admin nav.
   const [myPages, setMyPages] = useState([]);
   const isAdminRole = me?.role === "admin" || me?.role === "superadmin";
+  const [navCollapsed, setNavCollapsed] = useState(() => localStorage.getItem(NAV_COLLAPSED_KEY) === "1");
+  const toggleNav = () =>
+    setNavCollapsed((c) => {
+      localStorage.setItem(NAV_COLLAPSED_KEY, c ? "0" : "1");
+      return !c;
+    });
   useEffect(() => {
     if (!isAdminRole) return;
     fetchMyPages()
@@ -680,21 +689,48 @@ export default function SimpleBusinessManager() {
   const viewAsUserId = view.forUserId || (view.name === "home" && homeTab !== "admin" ? homeTab : null);
   setViewAsUserId(me?.role === "staff" ? null : viewAsUserId);
 
-  // SBM-106 — admin home and My pages: the dark header spans the full width,
-  // and the left nav runs the full height beneath it, with the content to its right.
-  const withAdminNav = (node, header = null) => {
-    if (!isAdminRole) {
-      return (
-        <>
-          {header}
-          {node}
-        </>
-      );
-    }
-    return (
-      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-        {header ? cloneElement(header, { adminConsole: true }) : null}
-        <div style={{ display: "flex", alignItems: "stretch", flex: 1, minHeight: 0 }}>
+  /* SBM-106 — admin console frame around every admin screen: the ink header
+     is frozen at the top, the (collapsible) nav is frozen down the left, and
+     the screen itself opens in the remaining area. Grid screens that fill the
+     viewport scroll inside that area; everything else scrolls the window. */
+  const adminFrame = (page, fillViewport) => (
+    <div
+      className="sbm-admin-frame"
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        ...(fillViewport ? { height: "100%" } : { minHeight: "100vh" }),
+      }}
+    >
+      <div style={{ position: "sticky", top: 0, zIndex: 40, flexShrink: 0 }}>
+        {cloneElement(adminHomeHeader, {
+          adminConsole: true,
+          leading: (
+            <button
+              type="button"
+              className="sbm-adminnav-toggle"
+              onClick={toggleNav}
+              aria-label={navCollapsed ? "Show navigation" : "Hide navigation"}
+              aria-expanded={!navCollapsed}
+              style={{
+                all: "unset",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: 32,
+                height: 32,
+                borderRadius: t.radiusButton,
+                color: "rgba(255,255,255,0.75)",
+                cursor: "pointer",
+              }}
+            >
+              {navCollapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+            </button>
+          ),
+        })}
+      </div>
+      <div style={{ display: "flex", alignItems: "stretch", flex: 1, minHeight: 0 }}>
+        {navCollapsed ? null : (
           <AdminNav
             pages={myPages}
             activeView={view}
@@ -703,16 +739,24 @@ export default function SimpleBusinessManager() {
             onNewPage={() => setView({ name: "my-page-edit", from: view })}
             onOpenPage={(page) => setView({ name: "my-page", pageId: page.id, from: { name: "home" } })}
           />
-          <div style={{ flex: 1, minWidth: 0, padding: "1.5rem 1.75rem 4rem" }}>{node}</div>
+        )}
+        <div
+          style={{
+            flex: 1,
+            minWidth: 0,
+            ...(fillViewport ? { display: "flex", flexDirection: "column", overflow: "hidden" } : {}),
+          }}
+        >
+          {page}
         </div>
       </div>
-    );
-  };
+    </div>
+  );
 
   const persistMyPages = async (next) => setMyPages(await saveMyPages(next));
 
-  /* fullBleed: no width cap or padding on <main> — the SBM-106 admin layout
-     (withAdminNav) spans the whole window and pads its own content area. */
+  /* fullBleed: no width cap on <main> — the admin home / My pages fill the
+     area beside the nav. Admins get every screen inside adminFrame. */
   const shell = (children, { wide = false, fillViewport = false, fullBleed = false } = {}) => (
     <LanguageProvider lang={displayLang}>
     <ScopesProvider me={me} viewAsUserId={viewAsUserId}>
@@ -802,25 +846,31 @@ export default function SimpleBusinessManager() {
             height:auto;min-height:0;
             display:flex;flex-direction:column;
           }
-          .sbm-fill-viewport>main{
-            flex:1 1 auto;width:100%;overscroll-behavior:none;
+          .sbm-fill-viewport>main,.sbm-fill-viewport>.sbm-admin-frame{
+            flex:1 1 auto;width:100%;min-height:0;overscroll-behavior:none;
           }
         }
+        @media (max-width:899px){.sbm-adminnav-toggle{display:none !important}}
       `}</style>
-      <main
-        style={{
-          maxWidth: fullBleed ? "none" : wide ? 1100 : 720,
-          margin: "0 auto",
-          padding: fullBleed ? 0 : fillViewport ? "1rem 1.25rem 1rem" : "2rem 1.25rem 4rem",
-          height: fillViewport ? "100%" : undefined,
-          minHeight: fillViewport ? 0 : undefined,
-          overflow: fillViewport ? "hidden" : undefined,
-          display: fillViewport ? "flex" : undefined,
-          flexDirection: fillViewport ? "column" : undefined,
-        }}
-      >
-        {children}
-      </main>
+      {(() => {
+        const page = (
+          <main
+            style={{
+              maxWidth: fullBleed ? "none" : wide ? 1100 : 720,
+              margin: "0 auto",
+              padding: fillViewport ? "1rem 1.25rem 1rem" : "2rem 1.25rem 4rem",
+              height: fillViewport ? "100%" : undefined,
+              minHeight: fillViewport ? 0 : undefined,
+              overflow: fillViewport ? "hidden" : undefined,
+              display: fillViewport ? "flex" : undefined,
+              flexDirection: fillViewport ? "column" : undefined,
+            }}
+          >
+            {children}
+          </main>
+        );
+        return isAdminRole ? adminFrame(page, fillViewport) : page;
+      })()}
     </div>
     </TodoPermissionsProvider>
     </ScopesProvider>
@@ -883,7 +933,6 @@ export default function SimpleBusinessManager() {
     if (!scopeId || me.role === "staff") return shell(content, opts);
     return shell(
       <>
-        {adminHomeHeader}
         <HomeDashboardTabs homeTab={scopeId} staffTabs={staffWithOpenTodos} onSelect={goHomeTab} />
         {content}
       </>,
@@ -1477,18 +1526,15 @@ export default function SimpleBusinessManager() {
   if (view.name === "my-page") {
     const page = myPages.find((p) => p.id === view.pageId);
     return shell(
-      withAdminNav(
-        page ? (
-          <MyPageView
-            page={page}
-            onBack={() => setView(view.from ?? homeView)}
-            onEdit={() => setView({ name: "my-page-edit", pageId: page.id, from: view })}
-            onOpenView={(target) => setView({ ...target, from: view })}
-          />
-        ) : (
-          <BackLink onClick={() => setView(homeView)}>Back</BackLink>
-        ),
-        adminHomeHeader
+      page ? (
+        <MyPageView
+          page={page}
+          onBack={() => setView(view.from ?? homeView)}
+          onEdit={() => setView({ name: "my-page-edit", pageId: page.id, from: view })}
+          onOpenView={(target) => setView({ ...target, from: view })}
+        />
+      ) : (
+        <BackLink onClick={() => setView(homeView)}>Back</BackLink>
       ),
       { fullBleed: isAdminRole }
     );
@@ -1497,30 +1543,27 @@ export default function SimpleBusinessManager() {
   if (view.name === "my-page-edit") {
     const page = myPages.find((p) => p.id === view.pageId);
     return shell(
-      withAdminNav(
-        <MyPageBuilderView
-          page={page}
-          onBack={() => setView(view.from ?? homeView)}
-          onSave={async (saved) => {
-            const next = page ? myPages.map((p) => (p.id === saved.id ? saved : p)) : [...myPages, saved];
-            await persistMyPages(next);
-            setView({ name: "my-page", pageId: saved.id, from: homeView });
-          }}
-          onDelete={async () => {
-            if (!window.confirm(`Delete “${page.name}”? Its views stay in their sections.`)) return;
-            await persistMyPages(myPages.filter((p) => p.id !== page.id));
-            setView(homeView);
-          }}
-        />,
-        adminHomeHeader
-      ),
+      <MyPageBuilderView
+        page={page}
+        onBack={() => setView(view.from ?? homeView)}
+        onSave={async (saved) => {
+          const next = page ? myPages.map((p) => (p.id === saved.id ? saved : p)) : [...myPages, saved];
+          await persistMyPages(next);
+          setView({ name: "my-page", pageId: saved.id, from: homeView });
+        }}
+        onDelete={async () => {
+          if (!window.confirm(`Delete “${page.name}”? Its views stay in their sections.`)) return;
+          await persistMyPages(myPages.filter((p) => p.id !== page.id));
+          setView(homeView);
+        }}
+      />,
       { fullBleed: isAdminRole }
     );
   }
 
   return shell(
-    withAdminNav(
     <>
+      {isAdminRole ? null : adminHomeHeader}
       <HomeDashboardTabs homeTab={homeTab} staffTabs={staffWithOpenTodos} onSelect={goHomeTab} />
 
       {homeTab !== "admin" ? (
@@ -1651,8 +1694,6 @@ export default function SimpleBusinessManager() {
       </div>
       )}
     </>,
-    adminHomeHeader
-    ),
     { fullBleed: isAdminRole }
   );
 }

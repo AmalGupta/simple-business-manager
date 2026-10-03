@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Home, Pin, Plus } from "lucide-react";
 import { t } from "../../theme.js";
 import { MY_PAGE_SECTIONS, MY_PAGE_VIEW_LABELS, MY_PAGE_VIEW_TARGETS } from "../../lib/my-page-views.js";
+import { ADMIN_CONSOLE_HEADER_HEIGHT } from "../AppHeader.jsx";
 
 const labelStyle = {
   fontFamily: t.label,
@@ -38,7 +39,7 @@ const subRowStyle = (active) => ({
   color: active ? t.white : t.edge,
 });
 
-/* SBM-106 — admin-only left nav for the home area. Pinned "My pages" first,
+/* SBM-106 — admin-only left nav beside every admin screen. Pinned "My pages" first,
    then the top-level sections, each collapsible to its screens. Hidden on
    phones; the home tiles remain the mobile navigation. */
 export function AdminNav({ pages, activeView, onHome, onOpenView, onNewPage, onOpenPage }) {
@@ -47,7 +48,27 @@ export function AdminNav({ pages, activeView, onHome, onOpenView, onNewPage, onO
   const isActive = (target) => activeView?.name === target?.name && activeView?.pageId == null;
 
   return (
-    <nav aria-label="Admin navigation" className="sbm-adminnav" style={{ width: 252, flex: "0 0 252px", alignSelf: "stretch", boxSizing: "border-box", background: t.white, borderRight: `1px solid ${t.frost}`, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+    <nav
+      aria-label="Admin navigation"
+      className="sbm-adminnav"
+      style={{
+        width: 252,
+        flex: "0 0 252px",
+        /* Frozen below the admin console header; scrolls on its own when long. */
+        position: "sticky",
+        top: ADMIN_CONSOLE_HEADER_HEIGHT,
+        alignSelf: "flex-start",
+        height: `calc(100vh - ${ADMIN_CONSOLE_HEADER_HEIGHT}px)`,
+        overflowY: "auto",
+        boxSizing: "border-box",
+        background: t.white,
+        borderRight: `1px solid ${t.frost}`,
+        padding: "18px 12px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
       <style>{`@media (max-width: 899px){.sbm-adminnav{display:none !important}}`}</style>
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 10px 6px" }}>
