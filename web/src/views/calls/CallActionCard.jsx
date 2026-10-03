@@ -9,15 +9,16 @@ import { TodoAssignControl } from "./TodoAssignControl.jsx";
 import { AssignTodoSiteModal } from "./AssignTodoSiteModal.jsx";
 import { TodoContext } from "../../components/TodoContext.jsx";
 import { TodoReceiptArea } from "../../components/TodoReceipt.jsx";
+import { TodoDoneAction } from "../../components/TodoRow.jsx";
 import "./CallActionCard.css";
 
 /* One card in the Calls Needing Action carousel — see
    CallsNeedingActionView.jsx for the carousel shell. Modeled on
    CallDetailModal.jsx's content (header/audio/summary/transcript/todos)
    but built to sit as one of N cards in a scrolling row, with a
-   collapsible transcript and per-todo assign + voice-note controls instead
-   of a toggle/park control (this card isn't where an individual todo gets
-   marked done). Carousel stretch keeps sibling cards the same height with
+   collapsible transcript and per-todo assign + voice-note controls and a
+   Mark completed button (SBM-104 — same confirm + permissions as Open
+   tasks). Carousel stretch keeps sibling cards the same height with
    no inner card scrollbars; Resolve lives in the header (top-right). */
 export function CallActionCard({
   call,
@@ -25,6 +26,8 @@ export function CallActionCard({
   currentUser = null,
   onAssignTodo,
   onAssignTodoSite,
+  onToggleTodo,
+  busyIds = null,
   onResolve,
   onAddVoiceNote,
   voiceNotesByTodoId,
@@ -93,46 +96,60 @@ export function CallActionCard({
         {todos.length === 0 ? (
           <p className="cna-card__empty">No todos on this call.</p>
         ) : (
-          todos.map((todo) => (
-            <TodoReceiptArea key={todo.id} todo={todo} className="cna-card__todo-row">
-              <p className="cna-card__todo-text">
-                {todo.text}
-                <TodoContext text={todo.context} />
-              </p>
-              {todo.site_name ? <span className="cna-card__todo-site">{todo.site_name}</span> : null}
-              <div className="cna-card__todo-controls">
-                <TodoAssignControl
-                  todo={todo}
-                  staffRoster={staffRoster}
-                  currentUser={currentUser}
-                  onAssign={onAssignTodo}
-                  compact
-                  extraActions={
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => setSiteTodo(todo)}
-                        style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 32, padding: "0 10px" }}
-                      >
-                        {todo.site_id ? "Change site" : "Assign to Site"}
-                      </button>
-                      <TodoVoiceNoteButton
-                        compact
-                        todoId={todo.id}
-                        existingNote={voiceNotesByTodoId?.get(todo.id)}
-                        onUpload={onAddVoiceNote}
+          todos.map((todo) => {
+            const done = todo.status === "done";
+            return (
+              <TodoReceiptArea key={todo.id} todo={todo} className="cna-card__todo-row">
+                <p className={`cna-card__todo-text${done ? " is-done" : ""}`}>
+                  {todo.text}
+                  <TodoContext text={todo.context} />
+                </p>
+                {todo.site_name ? <span className="cna-card__todo-site">{todo.site_name}</span> : null}
+                <div className="cna-card__todo-controls">
+                  {done ? null : (
+                    <TodoAssignControl
+                      todo={todo}
+                      staffRoster={staffRoster}
+                      currentUser={currentUser}
+                      onAssign={onAssignTodo}
+                      compact
+                      extraActions={
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setSiteTodo(todo)}
+                            style={{ ...SMALL_SECONDARY_BUTTON_STYLE, minHeight: 32, padding: "0 10px" }}
+                          >
+                            {todo.site_id ? "Change site" : "Assign to Site"}
+                          </button>
+                          <TodoVoiceNoteButton
+                            compact
+                            todoId={todo.id}
+                            existingNote={voiceNotesByTodoId?.get(todo.id)}
+                            onUpload={onAddVoiceNote}
+                          />
+                        </>
+                      }
+                    />
+                  )}
+                  {voiceNotesByTodoId?.get(todo.id) ? (
+                    <div className="cna-card__todo-voice-player">
+                      <AudioPlayer src={`/api/todo-voice-notes/${voiceNotesByTodoId.get(todo.id).id}`} />
+                    </div>
+                  ) : null}
+                  {onToggleTodo ? (
+                    <div className="cna-card__todo-done">
+                      <TodoDoneAction
+                        todo={todo}
+                        onToggle={(td) => onToggleTodo(call.id, td)}
+                        busy={Boolean(busyIds?.has?.(todo.id))}
                       />
-                    </>
-                  }
-                />
-                {voiceNotesByTodoId?.get(todo.id) ? (
-                  <div className="cna-card__todo-voice-player">
-                    <AudioPlayer src={`/api/todo-voice-notes/${voiceNotesByTodoId.get(todo.id).id}`} />
-                  </div>
-                ) : null}
-              </div>
-            </TodoReceiptArea>
-          ))
+                    </div>
+                  ) : null}
+                </div>
+              </TodoReceiptArea>
+            );
+          })
         )}
       </div>
 

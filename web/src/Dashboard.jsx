@@ -1101,6 +1101,8 @@ export default function SimpleBusinessManager() {
         currentUser={me}
         initialFocusDate={view.focusDate ?? null}
         onAssignTodo={onAssignTodo}
+        onToggleTodo={onToggle}
+        busyIds={busyIds}
         onResolved={() => {
           setCallsNeedingActionCount((n) => Math.max(0, n - 1));
           setResolvedCallsCount((n) => n + 1);
