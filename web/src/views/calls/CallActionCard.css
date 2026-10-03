@@ -162,6 +162,17 @@
   word-break: break-word;
 }
 
+.cna-card__todo-text.is-done {
+  color: var(--color-slate);
+  text-decoration: line-through;
+}
+
+.cna-card__todo-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .cna-card__todo-site {
   display: inline-block;
   margin: 0 0 8px;
