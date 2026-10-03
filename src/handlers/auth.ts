@@ -28,6 +28,7 @@ import {
   CUSTOMIZATION_PREFS,
   revokeAllSessionsForUser,
   revokeSession,
+  getUserSetting,
   setUserSetting,
   updateUserPhone,
   updateUserPin,
@@ -50,6 +51,9 @@ import {
   linkStaffUserContact,
   normalizeCallerPhone,
   getEffectiveScopes,
+  MY_PAGES_KEY,
+  parseMyPages,
+  validateMyPages,
 } from "@sbm/core";
 import {
   clearSessionCookieHeader,
@@ -637,4 +641,28 @@ export async function handleDeleteStaff(request: Request, env: Env, id: string):
   }
 
   return json({ ok: true, deleted_id: id, created: createdUser });
+}
+
+/** GET /api/me/pages — SBM-106, the signed-in admin's own page list. */
+export async function handleGetMyPages(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  const raw = await getUserSetting(env.DB, gate.user_id, MY_PAGES_KEY);
+  return json({ pages: parseMyPages(raw) });
+}
+
+/** PUT /api/me/pages { pages: [{ id, name, views[] }] } — replaces the whole list. */
+export async function handlePutMyPages(request: Request, env: Env): Promise<Response> {
+  const gate = await requireAdmin(request, env);
+  if (gate instanceof Response) return gate;
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid JSON body" }, 400);
+  }
+  const checked = validateMyPages(body);
+  if (!checked.ok) return json({ error: checked.error }, 400);
+  await setUserSetting(env.DB, gate.user_id, MY_PAGES_KEY, JSON.stringify(checked.pages));
+  return json({ pages: checked.pages });
 }

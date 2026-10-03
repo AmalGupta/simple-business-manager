@@ -100,6 +100,8 @@ import {
   handleDeleteStaff,
   handleGetStaffLanguage,
   handlePatchStaffLanguage,
+  handleGetMyPages,
+  handlePutMyPages,
 } from "./handlers/auth";
 import {
   handleCancelOffboarding,
@@ -753,6 +755,9 @@ export default {
       if (action === "handover-site") return handleOffboardingHandoverSite(request, env, staffId);
       return handleOffboardingFinishNow(request, env, staffId);
     }
+    // SBM-106 — an admin's own "My pages" list.
+    if (url.pathname === "/api/me/pages" && request.method === "GET") return handleGetMyPages(request, env);
+    if (url.pathname === "/api/me/pages" && request.method === "PUT") return handlePutMyPages(request, env);
     // SBM-72 — a staff member's display language (hi | en | pa), set by an admin.
     const staffLanguageMatch = url.pathname.match(/^\/api\/staff\/([^/]+)\/language$/);
     if (staffLanguageMatch && request.method === "GET") return handleGetStaffLanguage(request, env, staffLanguageMatch[1]);
