@@ -1,8 +1,8 @@
-/* One card in the Calls Needing Action carousel. Flat white surface,
-   hairline border, one radius — no shadows/tints, per
-   docs/DESIGN_LANGUAGE.md "Surface".
+/* One card in the Calls Needing Action tile grid. Flat white surface,
+   blue-tinted border with an accent top edge, one radius — no
+   shadows/tints, per docs/DESIGN_LANGUAGE.md "Surface".
 
-   No inner scrollbars: cards grow with content. The carousel uses
+   No inner scrollbars: cards grow with content. The grid uses
    align-items: stretch so siblings in a row share the tallest card's
    height. Resolve sits top-right in the header (not pushed to the bottom
    by stretch + margin-top: auto). */
@@ -10,10 +10,11 @@
 .cna-card {
   display: flex;
   flex-direction: column;
-  /* Cross-size set by .cna-carousel align-items: stretch. */
+  /* Row height set by .cna-tiles align-items: stretch. */
   overflow: visible;
   background: var(--color-surface);
-  border: 1px solid var(--color-line);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--color-line));
+  border-top: 4px solid var(--color-accent);
   border-radius: var(--radius-card);
   padding: 16px;
   font-family: var(--font-body);
