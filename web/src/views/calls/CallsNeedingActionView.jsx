@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { t } from "../../theme.js";
 import { today, isoDate, todayIso, fmtShort } from "../../lib/dates.js";
 import { BackLink } from "../../components/BackLink.jsx";
@@ -38,32 +37,7 @@ function latestDayWithCalls(days, ceilIso) {
   return best;
 }
 
-/** Cards visible at once — max 3 so CNA action toolbars stay usable. Keep
- *  in sync with `.cna-carousel` breakpoints below. */
-function computeVisibleCount() {
-  if (typeof window === "undefined" || !window.matchMedia) return 1;
-  if (window.matchMedia("(min-width: 768px)").matches) return 3;
-  return 1;
-}
-
-function iconButtonStyle(disabled) {
-  return {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    width: 36,
-    height: 36,
-    flexShrink: 0,
-    border: `1px solid ${t.frost}`,
-    borderRadius: t.radiusButton,
-    background: t.white,
-    color: disabled ? t.frost : t.edge,
-    cursor: disabled ? "default" : "pointer",
-    padding: 0,
-  };
-}
-
-/* Admin carousel of calls with an AI-generated todo list not yet resolved —
+/* Admin tile grid of calls with an AI-generated todo list not yet resolved —
    opened from the home tile CallsNeedingActionTile.
 
    One day at a time (SBM-102). The calendar's dots come from per-day counts
@@ -72,7 +46,7 @@ function iconButtonStyle(disabled) {
    today − 31, and so on) loads only the first time a date inside it is
    clicked. Opening fetches today's cards alongside the dots and only if today
    is empty moves to the latest marked day. Picking a day makes one request
-   for that day's cards (cached per day) and the carousel shows just those.
+   for that day's cards (cached per day) and the grid shows just those.
 
    Replaces the multi-day window + scroll-widening carousel: a busy window ran
    into the server's 200-call cap and the newest days never loaded. */
@@ -108,9 +82,6 @@ export function CallsNeedingActionView({
     year: Number(openDate.slice(0, 4)),
     month: Number(openDate.slice(5, 7)) - 1,
   }));
-  const [visibleCount, setVisibleCount] = useState(computeVisibleCount);
-  const [scrollIndex, setScrollIndex] = useState(0);
-  const carouselRef = useRef(null);
   // Latest day asked for — a slow response for a day already clicked away
   // from must not overwrite the one now on screen.
   const requestedDay = useRef(openDate);
@@ -173,37 +144,7 @@ export function CallsNeedingActionView({
     });
   }, [openDate, showDay, loadDots]);
 
-  useEffect(() => {
-    const onResize = () => setVisibleCount(computeVisibleCount());
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  // A new day starts at its first card.
-  useEffect(() => {
-    carouselRef.current?.scrollTo({ left: 0, behavior: "instant" });
-    setScrollIndex(0);
-  }, [selectedDate]);
-
   const count = items?.length ?? 0;
-
-  useEffect(() => {
-    const container = carouselRef.current;
-    if (!container) return;
-    let raf = null;
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = null;
-        const child = container.children[0];
-        const step = child ? child.offsetWidth + CARD_GAP : 1;
-        setScrollIndex(Math.max(0, Math.round(container.scrollLeft / step)));
-      });
-    };
-    container.addEventListener("scroll", onScroll, { passive: true });
-    return () => container.removeEventListener("scroll", onScroll);
-    // The carousel only renders once there's a card, so re-attach then.
-  }, [count > 0]);
 
   const days = calendar?.days ?? {};
   const lookbackTotal = useMemo(() => {
@@ -241,14 +182,6 @@ export function CallsNeedingActionView({
       y += 1;
     }
     setCalMonth({ year: y, month: m });
-  };
-
-  const scrollByPage = (direction) => {
-    const container = carouselRef.current;
-    if (!container) return;
-    const child = container.children[0];
-    const step = child ? child.offsetWidth + CARD_GAP : container.clientWidth;
-    container.scrollBy({ left: direction * visibleCount * step, behavior: "smooth" });
   };
 
   /* Mutations patch the day on screen locally, then refresh that day's cache
@@ -345,41 +278,18 @@ export function CallsNeedingActionView({
     resyncSelectedDay();
   };
 
-  const atStart = scrollIndex <= 0;
-  const atEnd = scrollIndex >= count - visibleCount;
   const dayLabel = `${fmtShort(selectedDate)}${selectedDate === todayIso() ? " (today)" : ""}`;
   return (
     <div>
       <style>{`
-        .cna-carousel-shell {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-        }
-        .cna-carousel-nav {
-          display: flex;
-          align-items: center;
-          justify-content: flex-end;
-          gap: 8px;
-        }
-        .cna-carousel {
-          display: flex;
+        .cna-tiles {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
           align-items: stretch;
           gap: ${CARD_GAP}px;
-          overflow-x: auto;
-          overflow-y: visible;
-          scroll-snap-type: x mandatory;
-          scroll-behavior: smooth;
-          padding-bottom: 8px;
-          -webkit-overflow-scrolling: touch;
         }
-        .cna-carousel > * {
-          scroll-snap-align: start;
-          flex: 0 0 100%;
-          /* stretch (default with align-items: stretch) equalizes row height */
-        }
-        @media (min-width: 768px) {
-          .cna-carousel > * { flex: 0 0 calc((100% - ${CARD_GAP * 2}px) / 3); }
+        @media (max-width: 400px) {
+          .cna-tiles { grid-template-columns: 1fr; }
         }
         @media (min-width: 900px) {
           .cna-back { display: none; }
@@ -417,33 +327,22 @@ export function CallsNeedingActionView({
       )}
 
       {count > 0 && (
-        <div className="cna-carousel-shell">
-          <div className="cna-carousel-nav">
-            <button aria-label="Previous" onClick={() => scrollByPage(-1)} disabled={atStart} style={iconButtonStyle(atStart)}>
-              <ChevronLeft size={16} />
-            </button>
-            <button aria-label="Next" onClick={() => scrollByPage(1)} disabled={atEnd} style={iconButtonStyle(atEnd)}>
-              <ChevronRight size={16} />
-            </button>
-          </div>
-
-          <div ref={carouselRef} className="cna-carousel">
-            {items.map((call) => (
-              <CallActionCard
-                key={call.id}
-                call={call}
-                staffRoster={staffRoster}
-                currentUser={currentUser}
-                onAssignTodo={handleAssignTodo}
-                onAssignTodoSite={handleAssignTodoSite}
-                onToggleTodo={onToggleTodo ? handleToggleTodo : undefined}
-                busyIds={busyIds}
-                onResolve={handleResolve}
-                onAddVoiceNote={handleAddVoiceNote}
-                voiceNotesByTodoId={voiceNotesByTodoId}
-              />
-            ))}
-          </div>
+        <div className="cna-tiles">
+          {items.map((call) => (
+            <CallActionCard
+              key={call.id}
+              call={call}
+              staffRoster={staffRoster}
+              currentUser={currentUser}
+              onAssignTodo={handleAssignTodo}
+              onAssignTodoSite={handleAssignTodoSite}
+              onToggleTodo={onToggleTodo ? handleToggleTodo : undefined}
+              busyIds={busyIds}
+              onResolve={handleResolve}
+              onAddVoiceNote={handleAddVoiceNote}
+              voiceNotesByTodoId={voiceNotesByTodoId}
+            />
+          ))}
         </div>
       )}
 

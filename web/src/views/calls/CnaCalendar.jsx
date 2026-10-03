@@ -46,7 +46,6 @@ export function CnaCalendar({ days, selected, year, month, yearOptions, todayIso
     <div
       style={{
         width: "100%",
-        maxWidth: 360,
         border: `1px solid ${t.accent}`,
         borderRadius: t.radiusCard,
         background: t.white,

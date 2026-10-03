@@ -1212,7 +1212,7 @@ export default function SimpleBusinessManager() {
         }}
         onBack={() => setView(view.from ?? homeView)}
       />,
-      { wide: true }
+      { wide: true, fullBleed: isAdminRole }
     );
 
   if (view.name === "resolved-calls")
