@@ -680,23 +680,34 @@ export default function SimpleBusinessManager() {
   const viewAsUserId = view.forUserId || (view.name === "home" && homeTab !== "admin" ? homeTab : null);
   setViewAsUserId(me?.role === "staff" ? null : viewAsUserId);
 
-  // SBM-106 — admin home and My pages sit beside the left nav; everything else is unchanged.
-  const withAdminNav = (node) =>
-    !isAdminRole ? (
-      node
-    ) : (
-      <div style={{ display: "flex", gap: 24, alignItems: "flex-start" }}>
-        <AdminNav
-          pages={myPages}
-          activeView={view}
-          onHome={() => setView({ name: "home" })}
-          onOpenView={(target) => setView({ ...target, from: view })}
-          onNewPage={() => setView({ name: "my-page-edit", from: view })}
-          onOpenPage={(page) => setView({ name: "my-page", pageId: page.id, from: { name: "home" } })}
-        />
-        <div style={{ flex: 1, minWidth: 0 }}>{node}</div>
+  // SBM-106 — admin home and My pages: the dark header spans the full width,
+  // and the left nav runs the full height beneath it, with the content to its right.
+  const withAdminNav = (node, header = null) => {
+    if (!isAdminRole) {
+      return (
+        <>
+          {header}
+          {node}
+        </>
+      );
+    }
+    return (
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        {header}
+        <div style={{ display: "flex", alignItems: "stretch", flex: 1, minHeight: 0 }}>
+          <AdminNav
+            pages={myPages}
+            activeView={view}
+            onHome={() => setView({ name: "home" })}
+            onOpenView={(target) => setView({ ...target, from: view })}
+            onNewPage={() => setView({ name: "my-page-edit", from: view })}
+            onOpenPage={(page) => setView({ name: "my-page", pageId: page.id, from: { name: "home" } })}
+          />
+          <div style={{ flex: 1, minWidth: 0, padding: "0 4px" }}>{node}</div>
+        </div>
       </div>
     );
+  };
 
   const persistMyPages = async (next) => setMyPages(await saveMyPages(next));
 
@@ -1473,7 +1484,8 @@ export default function SimpleBusinessManager() {
           />
         ) : (
           <BackLink onClick={() => setView(homeView)}>Back</BackLink>
-        )
+        ),
+        adminHomeHeader
       )
     );
   }
@@ -1495,7 +1507,8 @@ export default function SimpleBusinessManager() {
             await persistMyPages(myPages.filter((p) => p.id !== page.id));
             setView(homeView);
           }}
-        />
+        />,
+        adminHomeHeader
       )
     );
   }
@@ -1503,8 +1516,6 @@ export default function SimpleBusinessManager() {
   return shell(
     withAdminNav(
     <>
-      {adminHomeHeader}
-
       <HomeDashboardTabs homeTab={homeTab} staffTabs={staffWithOpenTodos} onSelect={goHomeTab} />
 
       {homeTab !== "admin" ? (
@@ -1634,7 +1645,8 @@ export default function SimpleBusinessManager() {
         />
       </div>
       )}
-    </>
+    </>,
+    adminHomeHeader
     )
   );
 }

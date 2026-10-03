@@ -47,7 +47,7 @@ export function AdminNav({ pages, activeView, onHome, onOpenView, onNewPage, onO
   const isActive = (target) => activeView?.name === target?.name && activeView?.pageId == null;
 
   return (
-    <nav aria-label="Admin navigation" className="sbm-adminnav" style={{ width: 240, flex: "0 0 240px", display: "flex", flexDirection: "column", gap: 4 }}>
+    <nav aria-label="Admin navigation" className="sbm-adminnav" style={{ width: 252, flex: "0 0 252px", alignSelf: "stretch", boxSizing: "border-box", background: t.white, borderRight: `1px solid ${t.frost}`, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
       <style>{`@media (max-width: 899px){.sbm-adminnav{display:none}}`}</style>
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 10px 6px" }}>
