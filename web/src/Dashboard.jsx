@@ -703,7 +703,7 @@ export default function SimpleBusinessManager() {
             onNewPage={() => setView({ name: "my-page-edit", from: view })}
             onOpenPage={(page) => setView({ name: "my-page", pageId: page.id, from: { name: "home" } })}
           />
-          <div style={{ flex: 1, minWidth: 0, padding: "0 4px" }}>{node}</div>
+          <div style={{ flex: 1, minWidth: 0, padding: "24px 32px 56px" }}>{node}</div>
         </div>
       </div>
     );
@@ -711,7 +711,7 @@ export default function SimpleBusinessManager() {
 
   const persistMyPages = async (next) => setMyPages(await saveMyPages(next));
 
-  const shell = (children, { wide = false, fillViewport = false } = {}) => (
+  const shell = (children, { wide = false, fillViewport = false, fullWidth = false } = {}) => (
     <LanguageProvider lang={displayLang}>
     <ScopesProvider me={me} viewAsUserId={viewAsUserId}>
     <TodoPermissionsProvider me={me}>
@@ -722,6 +722,7 @@ export default function SimpleBusinessManager() {
       style={{
         background: t.pane,
         minHeight: "100vh",
+        margin: fullWidth ? "-8px" : undefined,
         height: fillViewport ? "100vh" : undefined,
         overflow: fillViewport ? "hidden" : undefined,
         fontFamily: t.body,
@@ -806,9 +807,9 @@ export default function SimpleBusinessManager() {
       `}</style>
       <main
         style={{
-          maxWidth: wide ? 1100 : 720,
+          maxWidth: fullWidth ? "none" : wide ? 1100 : 720,
           margin: "0 auto",
-          padding: fillViewport ? "1rem 1.25rem 1rem" : "2rem 1.25rem 4rem",
+          padding: fullWidth ? 0 : fillViewport ? "1rem 1.25rem 1rem" : "2rem 1.25rem 4rem",
           height: fillViewport ? "100%" : undefined,
           minHeight: fillViewport ? 0 : undefined,
           overflow: fillViewport ? "hidden" : undefined,
@@ -838,6 +839,7 @@ export default function SimpleBusinessManager() {
      pages reuse this so only the body under the tabs changes. */
   const adminHomeHeader = (
     <AppHeader
+      flush
       me={me}
       onLogout={onLogout}
       onResetPin={onResetPin}
@@ -1486,7 +1488,8 @@ export default function SimpleBusinessManager() {
           <BackLink onClick={() => setView(homeView)}>Back</BackLink>
         ),
         adminHomeHeader
-      )
+      ),
+      { fullWidth: true }
     );
   }
 
@@ -1509,7 +1512,8 @@ export default function SimpleBusinessManager() {
           }}
         />,
         adminHomeHeader
-      )
+      ),
+      { fullWidth: true }
     );
   }
 
@@ -1647,7 +1651,8 @@ export default function SimpleBusinessManager() {
       )}
     </>,
     adminHomeHeader
-    )
+    ),
+    { fullWidth: isAdminRole }
   );
 }
 

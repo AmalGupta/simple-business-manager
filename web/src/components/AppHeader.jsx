@@ -22,9 +22,16 @@ export function AppHeader({
   right,
   children,
   hideAccount = false,
+  flush = false,
 }) {
   return (
-    <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
+    <div
+      style={
+        flush
+          ? { background: t.edge, padding: "1.1rem 2rem 1.25rem" }
+          : { background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }
+      }
+    >
       <header
         style={{
           display: "flex",
