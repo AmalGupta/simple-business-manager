@@ -48,7 +48,7 @@ export function AdminNav({ pages, activeView, onHome, onOpenView, onNewPage, onO
 
   return (
     <nav aria-label="Admin navigation" className="sbm-adminnav" style={{ width: 252, flex: "0 0 252px", alignSelf: "stretch", boxSizing: "border-box", background: t.white, borderRight: `1px solid ${t.frost}`, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-      <style>{`@media (max-width: 899px){.sbm-adminnav{display:none}}`}</style>
+      <style>{`@media (max-width: 899px){.sbm-adminnav{display:none !important}}`}</style>
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 10px 6px" }}>
         <Pin size={12} />

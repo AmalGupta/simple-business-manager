@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { cloneElement, useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { t } from "./theme.js";
 import { today, isoDate, fmtDate } from "./lib/dates.js";
 import { STAFF_HIDDEN_WORKFLOW_CATEGORIES } from "./lib/constants.js";
@@ -693,7 +693,7 @@ export default function SimpleBusinessManager() {
     }
     return (
       <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-        {header}
+        {header ? cloneElement(header, { flush: true }) : null}
         <div style={{ display: "flex", alignItems: "stretch", flex: 1, minHeight: 0 }}>
           <AdminNav
             pages={myPages}
@@ -703,7 +703,7 @@ export default function SimpleBusinessManager() {
             onNewPage={() => setView({ name: "my-page-edit", from: view })}
             onOpenPage={(page) => setView({ name: "my-page", pageId: page.id, from: { name: "home" } })}
           />
-          <div style={{ flex: 1, minWidth: 0, padding: "0 4px" }}>{node}</div>
+          <div style={{ flex: 1, minWidth: 0, padding: "1.5rem 1.75rem 4rem" }}>{node}</div>
         </div>
       </div>
     );
@@ -711,7 +711,9 @@ export default function SimpleBusinessManager() {
 
   const persistMyPages = async (next) => setMyPages(await saveMyPages(next));
 
-  const shell = (children, { wide = false, fillViewport = false } = {}) => (
+  /* fullBleed: no width cap or padding on <main> — the SBM-106 admin layout
+     (withAdminNav) spans the whole window and pads its own content area. */
+  const shell = (children, { wide = false, fillViewport = false, fullBleed = false } = {}) => (
     <LanguageProvider lang={displayLang}>
     <ScopesProvider me={me} viewAsUserId={viewAsUserId}>
     <TodoPermissionsProvider me={me}>
@@ -806,9 +808,9 @@ export default function SimpleBusinessManager() {
       `}</style>
       <main
         style={{
-          maxWidth: wide ? 1100 : 720,
+          maxWidth: fullBleed ? "none" : wide ? 1100 : 720,
           margin: "0 auto",
-          padding: fillViewport ? "1rem 1.25rem 1rem" : "2rem 1.25rem 4rem",
+          padding: fullBleed ? 0 : fillViewport ? "1rem 1.25rem 1rem" : "2rem 1.25rem 4rem",
           height: fillViewport ? "100%" : undefined,
           minHeight: fillViewport ? 0 : undefined,
           overflow: fillViewport ? "hidden" : undefined,
@@ -1486,7 +1488,8 @@ export default function SimpleBusinessManager() {
           <BackLink onClick={() => setView(homeView)}>Back</BackLink>
         ),
         adminHomeHeader
-      )
+      ),
+      { fullBleed: isAdminRole }
     );
   }
 
@@ -1509,7 +1512,8 @@ export default function SimpleBusinessManager() {
           }}
         />,
         adminHomeHeader
-      )
+      ),
+      { fullBleed: isAdminRole }
     );
   }
 
@@ -1647,7 +1651,8 @@ export default function SimpleBusinessManager() {
       )}
     </>,
     adminHomeHeader
-    )
+    ),
+    { fullBleed: isAdminRole }
   );
 }
 

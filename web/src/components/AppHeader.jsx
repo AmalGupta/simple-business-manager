@@ -22,9 +22,17 @@ export function AppHeader({
   right,
   children,
   hideAccount = false,
+  /** Rendered outside shell's padded <main> (SBM-106 full-page admin layout). */
+  flush = false,
 }) {
   return (
-    <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
+    <div
+      style={{
+        background: t.accent,
+        margin: flush ? 0 : "-2rem -1.25rem 1.5rem",
+        padding: flush ? "1.25rem 1.75rem 1.5rem" : "1.25rem 1.25rem 1.5rem",
+      }}
+    >
       <header
         style={{
           display: "flex",
