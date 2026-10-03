@@ -4,7 +4,7 @@ import { t } from "../../theme.js";
 import { today, isoDate, todayIso, fmtShort } from "../../lib/dates.js";
 import { BackLink } from "../../components/BackLink.jsx";
 import { Modal } from "../../components/Modal.jsx";
-import { StreakWall } from "./StreakWall.jsx";
+import { CnaCalendar } from "./CnaCalendar.jsx";
 import { CallActionCard } from "./CallActionCard.jsx";
 import { PRIMARY_BUTTON_STYLE } from "../../styles.js";
 import {
@@ -66,7 +66,7 @@ function iconButtonStyle(disabled) {
 /* Admin carousel of calls with an AI-generated todo list not yet resolved —
    opened from the home tile CallsNeedingActionTile.
 
-   One day at a time (SBM-102). The date strip's dots come from per-day counts
+   One day at a time (SBM-102). The calendar's dots come from per-day counts
    held in memory in 30-day windows (lib/api.js loadCallsNeedingActionCalendar):
    today − 30 … today loads once per page; an older window (today − 60 …
    today − 31, and so on) loads only the first time a date inside it is
@@ -102,7 +102,6 @@ export function CallsNeedingActionView({
     () => getCachedCallsNeedingAction(callsNeedingActionDay(openDate))?.voiceNotesByTodoId ?? new Map()
   );
   const [calendar, setCalendar] = useState(getCachedCallsNeedingActionCalendar);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [resolveAckOpen, setResolveAckOpen] = useState(false);
   const [calMonth, setCalMonth] = useState(() => ({
@@ -147,7 +146,6 @@ export function CallsNeedingActionView({
     } else {
       setItems(null);
     }
-    setLoading(true);
     setError("");
     try {
       const data = await loadCallsNeedingAction(callsNeedingActionDay(date));
@@ -159,8 +157,6 @@ export function CallsNeedingActionView({
       console.error("[sbm] failed to load calls needing action", err);
       if (requestedDay.current === date) setError("Failed to load — try again.");
       return null;
-    } finally {
-      if (requestedDay.current === date) setLoading(false);
     }
   }, [loadDots]);
 
@@ -352,10 +348,6 @@ export function CallsNeedingActionView({
   const atStart = scrollIndex <= 0;
   const atEnd = scrollIndex >= count - visibleCount;
   const dayLabel = `${fmtShort(selectedDate)}${selectedDate === todayIso() ? " (today)" : ""}`;
-  const lookbackLabel = `Calls needing action in last ${CNA_LOOKBACK_DAYS} days${
-    lookbackTotal === null ? "" : ` · ${lookbackTotal}`
-  }`;
-
   return (
     <div>
       <style>{`
@@ -389,36 +381,17 @@ export function CallsNeedingActionView({
         @media (min-width: 768px) {
           .cna-carousel > * { flex: 0 0 calc((100% - ${CARD_GAP * 2}px) / 3); }
         }
+        @media (min-width: 900px) {
+          .cna-back { display: none; }
+        }
       `}</style>
 
-      <div style={{ background: t.accent, margin: "-2rem -1.25rem 1.5rem", padding: "1.25rem 1.25rem 1.5rem" }}>
-        <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.5rem" }}>
-          <BackLink onClick={onBack} style={{ color: "rgba(255,255,255,0.85)", marginBottom: 0 }}>
-            Back
-          </BackLink>
-          <span style={{ fontFamily: t.display, fontSize: 15, fontWeight: 600, color: t.white }}>
-            Calls Needing Action
-          </span>
-        </header>
+      <div className="cna-back">
+        <BackLink onClick={onBack}>Back</BackLink>
+      </div>
 
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "baseline",
-            gap: 12,
-            marginBottom: "1rem",
-            fontSize: 12,
-            color: "rgba(255,255,255,0.7)",
-          }}
-        >
-          <span>{loading && items === null ? "Loading…" : `${count} ${count === 1 ? "call" : "calls"} · ${dayLabel}`}</span>
-          <span style={{ fontWeight: 600, color: "rgba(255,255,255,0.85)", textAlign: "right" }}>
-            {lookbackLabel}
-          </span>
-        </div>
-
-        <StreakWall
+      <div style={{ marginBottom: "1.25rem" }}>
+        <CnaCalendar
           days={monthDays}
           onSelectDay={showDay}
           selected={selectedDate}
